@@ -5,16 +5,10 @@ CdC §6.1 — Statuts visuels de la liste de fichiers.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class FileStatus(str, Enum):
-    """Statut d'un fichier après analyse.
-
-    Les valeurs sont des chaînes pour sérialisation JSON facile.
-    L'ordre de gravité croît du haut vers le bas (sauf IGNORED et ERROR
-    qui sont orthogonaux).
-    """
+class FileStatus(StrEnum):
 
     READY = "ready"
     """Texte extractible, sous le plafond. Pastille verte."""
