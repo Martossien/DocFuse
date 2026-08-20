@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Script de recette DocFuse (CdC §21.4).
+"""Script de recette DocFuse (CdC S21.4).
 
-Lance une série de tests fonctionnels sur le jeu de fichiers de test anonymisé.
-Vérifie que les cas d'acceptation du CdC §19 fonctionnent correctement.
+Lance une serie de tests fonctionnels sur le jeu de fichiers de test anonymise.
+Verifie que les cas d'acceptation du CdC S19 fonctionnent correctement.
 
 Usage:
     python tests/recette/run_recette.py
@@ -14,27 +14,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # Configuration
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 RECETTE_DIR = Path(__file__).resolve().parent
 DOSSIER_MIXTE = RECETTE_DIR / "dossier_mixte"
 DOSSIER_BLOCAGE = RECETTE_DIR / "dossier_blocage"
 DOSSIER_IMAGES = RECETTE_DIR / "dossier_images"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Génération des fichiers de test (CI n'a pas les fixtures versionnées)
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# Generation des fichiers de test (CI n'a pas les fixtures versionnees)
+# ------------------------------------------------------------------------------
 
 
 def _generate_test_files() -> None:
-    """Génère les fichiers de test s'ils n'existent pas (CI)."""
+    """Genere les fichiers de test s'ils n'existent pas (CI)."""
     import json
     from email.message import EmailMessage
 
     if DOSSIER_MIXTE.exists() and any(DOSSIER_MIXTE.iterdir()):
-        return  # Déjà généré
+        return  # Deja genere
 
     DOSSIER_MIXTE.mkdir(parents=True, exist_ok=True)
     (DOSSIER_MIXTE / "note.txt").write_text(
@@ -169,13 +169,13 @@ def _generate_test_files() -> None:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # Utilitaires
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 
 class Result:
-    """Résultat d'un test de recette."""
+    """Resultat d'un test de recette."""
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -198,14 +198,14 @@ def run_cli(args: list[str]) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Tests de recette (CdC §19)
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# Tests de recette (CdC S19)
+# ------------------------------------------------------------------------------
 
 
 def test_dossier_mixte_md() -> Result:
-    """§19.2 — Dossier mixte → un MD unique, chaque source identifiable."""
-    r = Result("Dossier mixte → Markdown")
+    """S19.2 -- Dossier mixte -> un MD unique, chaque source identifiable."""
+    r = Result("Dossier mixte -> Markdown")
     output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus.md"
     if output.exists():
         output.unlink()
@@ -222,19 +222,19 @@ def test_dossier_mixte_md() -> Result:
         r.fail(f"Code {code}: {err}")
         return r
     if not output.exists():
-        r.fail("Corpus non généré")
+        r.fail("Corpus non genere")
         return r
     content = output.read_text(encoding="utf-8")
     if "SOURCE:" not in content:
-        r.fail("En-tête SOURCE manquant")
+        r.fail("En-tete SOURCE manquant")
         return r
-    r.ok("Corpus MD généré avec en-têtes SOURCE")
+    r.ok("Corpus MD genere avec en-tetes SOURCE")
     return r
 
 
 def test_dossier_mixte_pdf() -> Result:
-    """§19.2 — Même dossier → un PDF unique, texte sélectionnable."""
-    r = Result("Dossier mixte → PDF")
+    """S19.2 -- Meme dossier -> un PDF unique, texte selectionnable."""
+    r = Result("Dossier mixte -> PDF")
     output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus.pdf"
     if output.exists():
         output.unlink()
@@ -253,17 +253,17 @@ def test_dossier_mixte_pdf() -> Result:
         r.fail(f"Code {code}: {err}")
         return r
     if not output.exists():
-        r.fail("PDF non généré")
+        r.fail("PDF non genere")
         return r
     if output.stat().st_size < 100:
         r.fail("PDF trop petit (vide ?)")
         return r
-    r.ok("PDF généré")
+    r.ok("PDF genere")
     return r
 
 
 def test_blocage_context() -> Result:
-    """§19.2 — TXT dont le compteur +15% > plafond → pas de corpus, code 2."""
+    """S19.2 -- TXT dont le compteur +15% > plafond -> pas de corpus, code 2."""
     r = Result("Blocage par plafond")
     output = DOSSIER_BLOCAGE / "corpus.md"
     if output.exists():
@@ -283,15 +283,15 @@ def test_blocage_context() -> Result:
         r.fail(f"Code attendu: 2, obtenu: {code}")
         return r
     if output.exists():
-        r.fail("Corpus ne devrait pas être généré")
+        r.fail("Corpus ne devrait pas etre genere")
         return r
     r.ok("Blocage correct (code 2)")
     return r
 
 
 def test_fichier_exe_ignore() -> Result:
-    """§19.2 — Fichier .exe dans le dossier → ignoré, présent au rapport."""
-    r = Result("Fichier .exe ignoré")
+    """S19.2 -- Fichier .exe dans le dossier -> ignore, present au rapport."""
+    r = Result("Fichier .exe ignore")
     output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_test.md"
     code, out, err = run_cli(
         [
@@ -305,22 +305,22 @@ def test_fichier_exe_ignore() -> Result:
     )
     report = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_test_rapport.json"
     if not report.exists():
-        r.fail("Rapport non généré")
+        r.fail("Rapport non genere")
         return r
     import json
 
     data = json.loads(report.read_text(encoding="utf-8"))
     ignored_names = [i["path"].split("/")[-1].split("\\")[-1] for i in data.get("ignored", [])]
     if "app.exe" not in ignored_names:
-        r.fail(f"app.exe non listé dans ignorés: {ignored_names}")
+        r.fail(f"app.exe non liste dans ignores: {ignored_names}")
         return r
-    r.ok("app.exe ignoré et présent au rapport")
+    r.ok("app.exe ignore et present au rapport")
     return r
 
 
 def test_lock_file_ignore() -> Result:
-    """§19.2 — ~$w.docx → ignoré."""
-    r = Result("Fichier verrou ~$ ignoré")
+    """S19.2 -- ~$w.docx -> ignore."""
+    r = Result("Fichier verrou ~$ ignore")
     output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_lock.md"
     code, out, err = run_cli(
         [
@@ -334,21 +334,21 @@ def test_lock_file_ignore() -> Result:
     )
     report = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_lock_rapport.json"
     if not report.exists():
-        r.fail("Rapport non généré")
+        r.fail("Rapport non genere")
         return r
     import json
 
     data = json.loads(report.read_text(encoding="utf-8"))
     ignored_names = [i["path"].split("/")[-1].split("\\")[-1] for i in data.get("ignored", [])]
     if "~$locked.docx" not in ignored_names:
-        r.fail(f"~$locked.docx non listé: {ignored_names}")
+        r.fail(f"~$locked.docx non liste: {ignored_names}")
         return r
-    r.ok("~$locked.docx ignoré")
+    r.ok("~$locked.docx ignore")
     return r
 
 
 def test_dry_run() -> Result:
-    """§19.2 — CLI --dry-run → pas de corpus, rapport stats."""
+    """S19.2 -- CLI --dry-run -> pas de corpus, rapport stats."""
     r = Result("Dry-run avec rapport")
     output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_dry.md"
     code, out, err = run_cli(
@@ -365,14 +365,14 @@ def test_dry_run() -> Result:
         return r
     report_md = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_dry_rapport.md"
     if not report_md.exists():
-        r.fail("Rapport MD non généré en dry-run")
+        r.fail("Rapport MD non genere en dry-run")
         return r
-    r.ok("Dry-run: pas de corpus, rapport généré")
+    r.ok("Dry-run: pas de corpus, rapport genere")
     return r
 
 
 def test_list_formats() -> Result:
-    """§6.3 — --list-formats affiche les extensions."""
+    """S6.3 -- --list-formats affiche les extensions."""
     r = Result("--list-formats")
     code, out, err = run_cli(["--list-formats"])
     if code != 0:
@@ -381,19 +381,19 @@ def test_list_formats() -> Result:
     if ".pdf" not in out or ".docx" not in out:
         r.fail("Extensions manquantes")
         return r
-    r.ok(f"Formats listés ({out.count('.')}) extensions)")
+    r.ok(f"Formats listes ({out.count('.')}) extensions)")
     return r
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # Main
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 
 def main() -> int:
     _generate_test_files()
     print("=" * 60)
-    print("Script de recette DocFuse / CorpusOne (CdC §21.4)")
+    print("Script de recette DocFuse / CorpusOne (CdC S21.4)")
     print("=" * 60)
     print()
 
@@ -413,7 +413,7 @@ def main() -> int:
     for test_fn in tests:
         result = test_fn()
         status = "PASS" if result.passed else "FAIL"
-        print(f"  {status} — {result.name}")
+        print(f"  {status} -- {result.name}")
         if result.message:
             print(f"         {result.message}")
         if result.passed:
@@ -423,7 +423,7 @@ def main() -> int:
         print()
 
     print("=" * 60)
-    print(f"Résultat: {passed} réussis, {failed} échoués sur {len(tests)} tests")
+    print(f"Resultat: {passed} reussis, {failed} echoues sur {len(tests)} tests")
     print("=" * 60)
 
     return 0 if failed == 0 else 1
