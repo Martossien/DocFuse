@@ -284,6 +284,39 @@ class TestCLIExitCodes:
         assert proc.returncode == 0
         assert "docfuse" in proc.stdout.lower()
 
+    def test_cli_output_dir_without_extension(self, tmp_path: Path) -> None:
+        """CLI --output <dossier> sans extension .md/.pdf → corpus.md écrit dedans (non ValueError).
+
+        Régression : avant, --output foo (dossier) provoquait ValueError côté
+        orchestrateur parce que output_path.suffix était vide. Désormais la CLI
+        ajoute l'extension automatiquement et garantit que le dossier existe.
+        """
+        input_dir = tmp_path / "in"
+        input_dir.mkdir()
+        (input_dir / "a.txt").write_text("Bonjour monde", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "docfuse",
+                "-i",
+                str(input_dir),
+                "--format",
+                "md",
+                "--yes",
+                "-o",
+                str(out_dir),  # Pas d'extension : c'est un dossier
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, f"stderr={proc.stderr}"
+        assert (out_dir / "corpus.md").exists()
+        assert (out_dir / "corpus_rapport.md").exists()
+        assert (out_dir / "corpus_rapport.json").exists()
+
 
 class TestWindowsBehavior:
     """Tests du comportement Windows spécifique (vérification du code)."""

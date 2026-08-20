@@ -282,6 +282,13 @@ def main(argv: list[str] | None = None) -> int:
             output_format = "md"
         elif actual_ext == ".pdf":
             output_format = "pdf"
+        else:
+            # Pas d'extension : --output désigne un dossier (cas légitime :
+            # l'utilisateur veut juste choisir où mettre le corpus).
+            # On ajoute le suffixe attendu et on garantit que le dossier existe.
+            output_path.mkdir(parents=True, exist_ok=True)
+            ext = ".md" if output_format == "md" else ".pdf"
+            output_path = output_path / f"corpus{ext}"
     else:
         ext = ".md" if output_format == "md" else ".pdf"
         # I-13: Sortie par défaut dans CorpusOne_output/
