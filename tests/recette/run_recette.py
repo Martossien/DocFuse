@@ -23,11 +23,151 @@ DOSSIER_MIXTE = RECETTE_DIR / "dossier_mixte"
 DOSSIER_BLOCAGE = RECETTE_DIR / "dossier_blocage"
 DOSSIER_IMAGES = RECETTE_DIR / "dossier_images"
 
-DOSSIER_MIXTE, DOSSIER_BLOCAGE, DOSSIER_IMAGES = (
-    RECETTE_DIR / "dossier_mixte",
-    RECETTE_DIR / "dossier_blocage",
-    RECETTE_DIR / "dossier_images",
-)
+# ──────────────────────────────────────────────────────────────────────────────
+# Génération des fichiers de test (CI n'a pas les fixtures versionnées)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _generate_test_files() -> None:
+    """Génère les fichiers de test s'ils n'existent pas (CI)."""
+    import json
+    from email.message import EmailMessage
+
+    if DOSSIER_MIXTE.exists() and any(DOSSIER_MIXTE.iterdir()):
+        return  # Déjà généré
+
+    DOSSIER_MIXTE.mkdir(parents=True, exist_ok=True)
+    (DOSSIER_MIXTE / "note.txt").write_text(
+        "Ceci est une note interne avec suffisamment de texte pour depasser le seuil de 80 caracteres.\n",
+        encoding="utf-8",
+    )
+    (DOSSIER_MIXTE / "lisez-moi.md").write_text(
+        "# README\n\nCe document explique le fonctionnement avec assez de caracteres.\n",
+        encoding="utf-8",
+    )
+    (DOSSIER_MIXTE / "page.html").write_text(
+        "<html><body><h1>Page de Test</h1><p>Contenu de la page avec assez de caracteres pour eviter l alerte.</p></body></html>",
+        encoding="utf-8",
+    )
+    (DOSSIER_MIXTE / "config.json").write_text(
+        json.dumps({"projet": "Test", "version": "1.0"}), encoding="utf-8"
+    )
+    (DOSSIER_MIXTE / "donnees.csv").write_text(
+        "nom;valeur;description\nTest1;42;Premiere ligne\nTest2;99;Deuxieme ligne\n",
+        encoding="utf-8",
+    )
+    (DOSSIER_MIXTE / "app.exe").write_bytes(b"\x4d\x5a\x90\x00")
+    (DOSSIER_MIXTE / "~$locked.docx").write_bytes(b"\x00")
+    (DOSSIER_MIXTE / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+
+    # DOCX
+    try:
+        from docx import Document
+
+        doc = Document()
+        doc.add_heading("Document Test", 0)
+        doc.add_paragraph(
+            "Paragraphe de test avec assez de caracteres pour eviter l alerte de pauvrete."
+        )
+        doc.save(str(DOSSIER_MIXTE / "rapport.docx"))
+    except Exception:
+        pass
+
+    # PPTX
+    try:
+        from pptx import Presentation
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = "Diapo Test"
+        slide.placeholders[1].text = "Contenu avec assez de caracteres pour eviter l alerte."
+        prs.save(str(DOSSIER_MIXTE / "slides.pptx"))
+    except Exception:
+        pass
+
+    # XLSX
+    try:
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Nom"
+        ws["B1"] = "Valeur"
+        ws["A2"] = "Test avec du texte"
+        ws["B2"] = "42"
+        wb.save(str(DOSSIER_MIXTE / "donnees.xlsx"))
+    except Exception:
+        pass
+
+    # PDF
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+        doc = SimpleDocTemplate(str(DOSSIER_MIXTE / "document.pdf"), pagesize=A4)
+        styles = getSampleStyleSheet()
+        doc.build(
+            [
+                Paragraph(
+                    "Texte PDF de test avec assez de caracteres pour eviter l alerte.",
+                    styles["Normal"],
+                )
+            ]
+        )
+    except Exception:
+        pass
+
+    # EML
+    msg = EmailMessage()
+    msg["Subject"] = "Test EML"
+    msg["From"] = "test@example.com"
+    msg["To"] = "recipient@example.com"
+    msg.set_content("Corps de l email avec assez de caracteres pour eviter l alerte de pauvrete.")
+    (DOSSIER_MIXTE / "email.eml").write_bytes(bytes(msg))
+
+    # RTF
+    (DOSSIER_MIXTE / "document.rtf").write_text(
+        r"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}} \f0\fs24 Texte RTF de test avec assez de caracteres pour eviter l alerte.}",
+        encoding="latin-1",
+    )
+
+    # ODT
+    try:
+        import zipfile
+
+        content = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:body><office:text>"
+            "<text:p>Texte ODT de test avec assez de caracteres pour eviter l alerte.</text:p>"
+            "</office:text></office:body></office:document-content>"
+        )
+        with zipfile.ZipFile(str(DOSSIER_MIXTE / "open-doc.odt"), "w") as zf:
+            zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+            zf.writestr("content.xml", content)
+    except Exception:
+        pass
+
+    # Sous-dossier
+    (DOSSIER_MIXTE / "sous-dossier").mkdir(exist_ok=True)
+    (DOSSIER_MIXTE / "sous-dossier" / "note-profonde.md").write_text(
+        "# Note profonde\n\nTexte dans un sous-dossier avec assez de caracteres.\n",
+        encoding="utf-8",
+    )
+
+    # Dossier blocage
+    DOSSIER_BLOCAGE.mkdir(parents=True, exist_ok=True)
+    (DOSSIER_BLOCAGE / "gros.txt").write_text("A" * 10000, encoding="utf-8")
+
+    # Dossier images
+    DOSSIER_IMAGES.mkdir(parents=True, exist_ok=True)
+    (DOSSIER_IMAGES / "note.txt").write_text(
+        "Texte avec assez de caracteres pour eviter l alerte de pauvrete dans DocFuse.\n",
+        encoding="utf-8",
+    )
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Utilitaires
@@ -251,6 +391,7 @@ def test_list_formats() -> Result:
 
 
 def main() -> int:
+    _generate_test_files()
     print("=" * 60)
     print("Script de recette DocFuse / CorpusOne (CdC §21.4)")
     print("=" * 60)

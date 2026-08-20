@@ -86,5 +86,6 @@ def write_markdown_corpus(
         lines.append("")
 
     # CdC §11.1 — LF ou CRLF (conf, défaut CRLF sous Windows)
+    # Utiliser write_bytes pour éviter la conversion automatique \n → \r\n sur Windows
     sep = "\r\n" if line_ending == "crlf" else "\n"
-    output_path.write_text(sep.join(lines), encoding="utf-8")
+    output_path.write_bytes(sep.join(lines).encode("utf-8"))
