@@ -18,6 +18,8 @@ Usage sous Linux avec Wine:
 import os
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 # Chemin des assets (polices DejaVu)
@@ -34,7 +36,8 @@ a = Analysis(
         (str(i18n_dir / "fr.json"), "docfuse/i18n"),
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
     ],
-    hiddenimports=[
+    hiddenimports=collect_submodules("docfuse.extractors")
+    + [
         "tkinterdnd2",
         "charset_normalizer",
     ],

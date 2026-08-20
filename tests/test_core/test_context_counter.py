@@ -77,4 +77,4 @@ class TestAggregateTokens:
         e2 = estimate_tokens("efgh")  # 1 token, 2 avec marge
         total = aggregate_tokens([e1, e2])
         assert total.tokens_estimated == 2
-        assert total.tokens_with_margin == 4  # 2 + 2
+        assert total.tokens_with_margin == 3  # ceil(2 * 1.15), marge appliquée au total

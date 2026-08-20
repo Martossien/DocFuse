@@ -18,6 +18,7 @@ Ces métadonnées **comptent** dans le compteur de contexte.
 
 from __future__ import annotations
 
+from docfuse.core.context_counter import TokenEstimate, estimate_tokens
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -39,12 +40,45 @@ def build_source_header(
     Returns:
         Chaîne Markdown de l'en-tête SOURCE.
     """
-    from docfuse.core.context_counter import estimate_tokens
-
     if tokens_estimated is None or tokens_with_margin is None:
-        est = estimate_tokens(file.text, margin)
+        est = estimate_source_context(file, margin)
         tokens_estimated = est.tokens_estimated
         tokens_with_margin = est.tokens_with_margin
+
+    return _render_source_header(file, tokens_estimated, tokens_with_margin)
+
+
+def estimate_source_context(
+    file: ExtractedFile,
+    margin: float = 0.15,
+) -> TokenEstimate:
+    """Estime exactement le contenu et l'en-tête SOURCE envoyés au LLM.
+
+    L'en-tête contient lui-même les deux estimations. Une courte itération jusqu'au
+    point fixe garantit donc que le nombre de chiffres inscrit dans l'en-tête est
+    inclus dans le nombre d'octets annoncé.
+    """
+
+    estimate = estimate_tokens(file.text, margin)
+    for _ in range(20):
+        header = _render_source_header(
+            file,
+            estimate.tokens_estimated,
+            estimate.tokens_with_margin,
+        )
+        updated = estimate_tokens(f"{header}\n\n{file.text}", margin)
+        if updated == estimate:
+            return updated
+        estimate = updated
+    return estimate
+
+
+def _render_source_header(
+    file: ExtractedFile,
+    tokens_estimated: int,
+    tokens_with_margin: int,
+) -> str:
+    """Rend l'en-tête avec des estimations déjà stabilisées."""
 
     lines: list[str] = []
     lines.append("---")

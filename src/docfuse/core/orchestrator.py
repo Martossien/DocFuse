@@ -34,7 +34,6 @@ from docfuse.core.context_counter import (
     TokenEstimate,
     aggregate_tokens,
     check_limit,
-    estimate_tokens,
 )
 from docfuse.core.image_detector import determine_status
 from docfuse.core.inventory import collect_inputs
@@ -73,12 +72,14 @@ class OrchestratorResult:
         estimates: list[TokenEstimate],
         total: TokenEstimate,
         context_limit: int,
+        margin: float = DEFAULT_MARGIN,
     ) -> None:
         self.files = files
         self.ignored = ignored
         self.estimates = estimates
         self.total = total
         self.context_limit = context_limit
+        self.margin = margin
         self._base_statuses = [file.status for file in files]
         self.blocking_files: list[ExtractedFile] = []
         self.is_blocked = False
@@ -158,7 +159,7 @@ class OrchestratorResult:
         if reason is not None and all(path_key(item) != key for item, _ in self.ignored):
             self.ignored.append((removed.path, reason))
 
-        self.total = aggregate_tokens(self.estimates)
+        self.total = aggregate_tokens(self.estimates, self.margin)
         self.recompute_blocking(self.context_limit)
         return True
 
@@ -218,12 +219,23 @@ def run_analysis(
     total_files = len(inventory_entries)
     logger.info("Inventaire : %d fichiers supportés, %d ignorés", total_files, len(ignored))
 
+    if emitter:
+        for entry in inventory_entries:
+            emitter.emit(
+                ProgressEvent(
+                    file_path=entry.relative_path,
+                    current=0,
+                    total=total_files,
+                    status="pending",
+                )
+            )
+
     # 2. Extraction parallèle
     files: list[ExtractedFile] = []
 
     if total_files == 0:
         total = TokenEstimate(0, 0, 0)
-        return OrchestratorResult(files, ignored, [], total, context_limit)
+        return OrchestratorResult(files, ignored, [], total, context_limit, margin)
 
     def _extract_one(idx: int, path: Path, relative_path: str) -> tuple[int, ExtractedFile]:
         # I-15: Avertissement pour fichier volumineux
@@ -296,22 +308,28 @@ def run_analysis(
             )
 
     # 4. Compteur par fichier (en-têtes SOURCE comprises, CdC §8.2 §10.1)
-    from docfuse.output.source_header import build_source_header
+    from docfuse.output.source_header import estimate_source_context
 
     estimates: list[TokenEstimate] = []
     for f in files:
         if f.status.is_extracted():
-            # I-01: Le total inclut l'en-tête SOURCE + le texte
-            full_text = build_source_header(f, margin) + f.text
-            estimates.append(estimate_tokens(full_text, margin))
+            # I-01: Le compteur inclut exactement l'en-tête SOURCE + le texte.
+            estimates.append(estimate_source_context(f, margin))
         else:
             estimates.append(TokenEstimate(0, 0, 0))
 
     # 5. Agrégation
-    total = aggregate_tokens(estimates)
+    total = aggregate_tokens(estimates, margin)
 
     # 6. Décision de blocage
-    orchestrator_result = OrchestratorResult(files, ignored, estimates, total, context_limit)
+    orchestrator_result = OrchestratorResult(
+        files,
+        ignored,
+        estimates,
+        total,
+        context_limit,
+        margin,
+    )
 
     logger.info(
         "Analyse terminée : %d fichiers, %d tokens estimés, %d avec marge, blocage=%s",

@@ -4,8 +4,8 @@
   "app.version": "Version {version}",
 
   "gui.drop_zone": "Glissez un dossier ou des fichiers ici, ou",
-  "gui.choose_folder": "Choisir un dossier…",
-  "gui.choose_files": "Choisir des fichiers…",
+  "gui.choose_folder": "Ajouter un dossier…",
+  "gui.choose_files": "Ajouter des fichiers…",
   "gui.change_folder": "Changer",
   "gui.clear_selection": "Effacer",
   "gui.supported_documents": "Documents pris en charge",
@@ -43,6 +43,7 @@
   "status.too_large": "Trop volumineux",
   "status.ignored": "Ignoré",
   "status.error": "Erreur",
+  "status.pending": "En attente",
 
   "counter.estimated": "Estimé",
   "counter.with_margin": "Avec marge +15 %",
@@ -117,5 +118,6 @@
   "gui.analysis_failed_detail": "L'analyse n'a pas pu aboutir : {error}",
   "gui.analysis_cancelled": "Analyse arrêtée",
   "gui.analysis_cancelled_detail": "L'analyse a été arrêtée. Aucun corpus partiel ne sera généré.",
+  "gui.analysis_in_progress": "Inventaire terminé : extraction et calcul des tokens en cours…",
   "gui.help_context_text": "Le plafond de contexte est la quantité maximale de texte que l'IA peut traiter en une fois.\n\nDocFuse estime le volume avec la formule :\n  tokens = octets UTF-8 / 4\n  avec une marge de sécurité de +15 %.\n\nSi le total dépasse le plafond, la génération est bloquée.\nVous pouvez augmenter le plafond si votre IA le permet\n(ex: 200 000 pour Claude, 128 000 pour GPT-4o).\n\nCe compteur est générique et ne dépend d'aucun fournisseur."
 }

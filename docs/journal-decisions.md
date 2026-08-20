@@ -540,3 +540,48 @@ immédiat à partir du cache.
 ---
 
 *Fin du journal des décisions — Session 8.*
+
+---
+
+## Session 9 — 20 août 2026 — Stabilisation de la GUI et beta 0.1.1
+
+### D-047 : Les ajouts GUI sont cumulatifs et l'inventaire est progressif
+
+**Décision** : Les actions « Ajouter des fichiers… » et « Ajouter un dossier… »
+complètent la sélection existante au lieu de la remplacer. Lors du parcours d'un dossier,
+chaque fichier inventorié est immédiatement affiché avec un état d'attente avant son
+extraction.
+
+**Rationale** :
+- Une sélection successive doit être prévisible : choisir un second fichier ne doit pas
+  faire disparaître le premier.
+- L'affichage progressif rend explicite le contenu réellement retenu dans un dossier et
+  évite de confondre un traitement en cours avec un échec silencieux.
+
+### D-048 : Le compteur canonique porte sur les octets des blocs SOURCE
+
+**Décision** : L'estimation de chaque source utilise les octets UTF-8 normalisés de son
+en-tête `SOURCE` et de son contenu. Comme l'en-tête contient lui-même l'estimation, sa
+valeur est calculée jusqu'au point fixe. Le total additionne les octets des sources puis
+applique une seule fois `ceil(octets / 4)` et la marge configurée.
+
+**Rationale** :
+- Évite une variation lorsque le nombre de chiffres inscrit dans l'en-tête change.
+- Évite le léger surcomptage provoqué par l'addition de valeurs déjà arrondies et déjà
+  majorées fichier par fichier.
+- Respecte directement la formule contractuelle du CdC sur l'ensemble des sources.
+
+### D-049 : Les extracteurs dynamiques sont déclarés au build PyInstaller
+
+**Décision** : `CorpusOne.spec` collecte explicitement tous les sous-modules de
+`docfuse.extractors`. Un test de régression vérifie la présence de cette déclaration.
+
+**Rationale** :
+- Le registre charge les extracteurs avec `import_module`, ce que l'analyse statique de
+  PyInstaller ne découvre pas automatiquement.
+- Sans imports cachés, l'exécutable démarrait et inventoriait les fichiers, mais échouait
+  au début de l'extraction.
+
+---
+
+*Fin du journal des décisions — Session 9.*

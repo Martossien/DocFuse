@@ -131,7 +131,7 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 |---|---|---|
 | Code haute qualité | `ruff check` + `ruff format --check` | ✅ |
 | Typage strict | `mypy --strict` sur 38 fichiers | ✅ |
-| Tests versionnés | 232 collectés : 194 réussis, 38 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
+| Tests versionnés | 236 collectés : 198 réussis, 38 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
 | Maintenabilité | Un extracteur = un fichier, registry auto, docstrings | ✅ |
 | User-friendly | GUI CustomTkinter, jauge couleur, recalcul sans ré-extraction | ✅ |
 | Configurable | JSON 3 niveaux + validate() + scan_config + sort + max_depth | ✅ |
@@ -162,7 +162,7 @@ pytest tests/test_acceptance.py -v
 pip-licenses --from=classifier --allow-only="MIT;BSD;Apache Software License;ISC License;Mozilla Public License 2.0;Python Software Foundation License"
 
 # Build Windows portable (sur machine Windows)
-pyinstaller --noconfirm --onedir --windowed --name CorpusOne src/docfuse/__main__.py
+pyinstaller --noconfirm CorpusOne.spec
 ```
 
 ## 8. CI GitHub Actions
@@ -185,40 +185,39 @@ Conventional Commits (sans scope obligatoire) :
 
 ## 10. Journaux
 
-- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-046).
+- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-049).
 - `docs/journal-avancement.md` — suivi de l'implémentation, session par session, avec statut.
 - `docs/cahier-des-charges-docfuse.md` — cahier des charges contractuel (lecture seule).
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 8)
+## 11. État actuel (Session 9 — 0.1.1 beta)
 
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 38 |
 | Modules de test | 23 |
-| Tests collectés depuis un clone frais | 232 |
+| Tests collectés depuis un clone frais | 236 |
 | ruff | ✅ |
 | mypy --strict | ✅ |
-| pytest | ✅ 194 passed, 38 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 198 passed, 38 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ 75 annoncés historiquement, non présents dans le clone Git |
 | Edge cases testés | ✅ 15 cas (corrompus, vides, chiffrés, malformés) |
 | Tests de blocage 128K | ✅ 27 tests (blocage, codes retour, plafond variable, marge variable) |
 | Tests Windows | ✅ 10 vérifications (CRLF, APPDATA, frozen, HKLM, spec, log, GUI, cp1252) |
-| Décisions archivées | 46 (D-001 à D-046) |
+| Décisions archivées | 49 (D-001 à D-049) |
 | Extracteurs | 13 formats |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md |
 | Jeu de test + recette | ✅ tests/recette/ |
 | Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer et retrait instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
-| Build Windows spec | ✅ CorpusOne.spec + CI job build-windows |
+| Build Windows | ✅ PyInstaller `--onedir`, smoke tests Markdown et PDF |
 | Régressions connues sur la suite versionnée | 0 |
 
 ### Reste à faire
 
-- ⬜ Build Windows PyInstaller effectif (via CI GitHub Actions sur windows-latest)
 - ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 38 skips d'un clone frais
 
 ## 12. Règles critiques

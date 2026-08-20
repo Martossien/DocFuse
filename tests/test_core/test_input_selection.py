@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from docfuse.core.context_counter import TokenEstimate
@@ -9,6 +10,7 @@ from docfuse.core.orchestrator import OrchestratorResult, run_analysis
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 from docfuse.models.input_selection import InputSelection
+from docfuse.output.source_header import build_source_header
 
 
 class TestInputSelection:
@@ -29,6 +31,17 @@ class TestInputSelection:
 
         assert not selection.is_excluded(source)
         assert excluded.is_excluded(source)
+
+    def test_add_keeps_previous_sources_and_unrelated_exclusions(self, tmp_path: Path) -> None:
+        first = tmp_path / "first.txt"
+        second = tmp_path / "second.txt"
+        removed = tmp_path / "removed.txt"
+        selection = InputSelection.from_paths([first]).exclude(removed)
+
+        updated = selection.add([second])
+
+        assert updated.paths == (first.absolute(), second.absolute())
+        assert updated.is_excluded(removed)
 
 
 class TestMultipleInputs:
@@ -96,9 +109,38 @@ class TestMultipleInputs:
             estimates_by_name["grand.txt"].tokens_estimated
             > estimates_by_name["petit.txt"].tokens_estimated
         )
-        assert result.total.tokens_with_margin == sum(
-            estimate.tokens_with_margin for estimate in result.estimates
-        )
+        assert result.total.bytes_utf8 == sum(estimate.bytes_utf8 for estimate in result.estimates)
+
+    def test_token_estimates_match_exact_source_payload_bytes(self, tmp_path: Path) -> None:
+        margin = 0.15
+        first = tmp_path / "accentué.txt"
+        second = tmp_path / "court.md"
+        first.write_text("éàç — texte UTF-8 " * 40, encoding="utf-8")
+        second.write_text("# Titre\n\nContenu.", encoding="utf-8")
+
+        result = run_analysis([first, second], margin=margin)
+
+        for file, estimate in zip(result.files, result.estimates, strict=True):
+            header = build_source_header(
+                file,
+                margin,
+                estimate.tokens_estimated,
+                estimate.tokens_with_margin,
+            )
+            payload = f"{header}\n\n{file.text}"
+            expected_bytes = len(payload.encode("utf-8"))
+            expected_tokens = math.ceil(expected_bytes / 4)
+            expected_with_margin = math.ceil(expected_tokens * (1 + margin))
+
+            assert estimate.bytes_utf8 == expected_bytes
+            assert estimate.tokens_estimated == expected_tokens
+            assert estimate.tokens_with_margin == expected_with_margin
+
+        total_bytes = sum(estimate.bytes_utf8 for estimate in result.estimates)
+        total_tokens = math.ceil(total_bytes / 4)
+        assert result.total.bytes_utf8 == total_bytes
+        assert result.total.tokens_estimated == total_tokens
+        assert result.total.tokens_with_margin == math.ceil(total_tokens * (1 + margin))
 
 
 class TestResultRemoval:

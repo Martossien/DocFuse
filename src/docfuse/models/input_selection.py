@@ -84,6 +84,16 @@ class InputSelection:
 
         return InputSelection(self.paths, self.excluded_files | {path.absolute()})
 
+    def add(self, paths: Iterable[Path]) -> InputSelection:
+        """Ajoute des sources sans perdre la sélection ni les exclusions existantes."""
+
+        added = tuple(Path(path).absolute() for path in paths)
+        added_keys = {path_key(path) for path in added}
+        remaining_exclusions = frozenset(
+            path for path in self.excluded_files if path_key(path) not in added_keys
+        )
+        return InputSelection(self.paths + added, remaining_exclusions)
+
     def is_excluded(self, path: Path) -> bool:
         """Indique si un fichier a été retiré de la sélection."""
 

@@ -594,3 +594,45 @@ reproductible ou à documenter sa génération.
 ---
 
 *Fin du journal d'avancement — Session 8.*
+
+---
+
+## Session 9 — 20 août 2026 — Retours utilisateur et beta 0.1.1
+
+### Retours traités
+
+| Retour utilisateur | Correction |
+|---|---|
+| Le second fichier semblait remplacer le premier | Ajout cumulatif des fichiers et dossiers |
+| Les fichiers d'un dossier n'apparaissaient pas immédiatement | Lignes créées dès l'inventaire avec état d'attente |
+| La fenêtre devait être élargie horizontalement | Options réparties sur trois lignes et mise en page responsive |
+| Le plafond 128 K était difficile à trouver | Contrôle du contexte maximal rendu visible dans la zone d'options |
+| Doute sur le nombre de tokens | Audit de la formule, point fixe des en-têtes et marge appliquée une fois au total |
+
+### Préparation de la version
+
+- Version portée à **0.1.1 beta**.
+- `CorpusOne.spec` corrigé pour inclure les 13 extracteurs chargés dynamiquement.
+- Build Windows `--onedir` réalisé avec PyInstaller 6.22.2 et Python 3.13.15.
+- Exécutable compilé testé sur le dossier de recette : génération Markdown et PDF,
+  rapports Markdown/JSON présents, codes retour `0`.
+- Archive portable et empreinte SHA-256 préparées comme fichiers de la préversion.
+
+### Validation
+
+| Check | Résultat |
+|---|---|
+| ruff check | ✅ All checks passed |
+| ruff format --check | ✅ conforme |
+| mypy --strict | ✅ no issues found in 38 source files |
+| pytest complet du clone frais | ✅ 198 passed, 38 skipped |
+| Script de recette | ✅ 7/7 PASS |
+| Smoke test `.exe` → Markdown | ✅ code retour 0 |
+| Smoke test `.exe` → PDF | ✅ code retour 0 |
+
+Les 38 tests ignorés correspondent toujours au jeu `tests/samples_real/` absent du
+clone Git ; aucun test de la suite versionnée n'échoue.
+
+---
+
+*Fin du journal d'avancement — Session 9.*

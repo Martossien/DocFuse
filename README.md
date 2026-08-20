@@ -47,7 +47,7 @@ mypy --strict src/docfuse/
 ## Build Windows portable
 
 ```bash
-pyinstaller --noconfirm --onedir --windowed --name CorpusOne src/docfuse/__main__.py
+pyinstaller --noconfirm CorpusOne.spec
 ```
 
 ## Licence

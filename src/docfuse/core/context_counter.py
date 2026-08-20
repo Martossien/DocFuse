@@ -71,18 +71,22 @@ def check_limit(
     return tokens_with_margin <= context_limit
 
 
-def aggregate_tokens(estimates: list[TokenEstimate]) -> TokenEstimate:
+def aggregate_tokens(
+    estimates: list[TokenEstimate],
+    margin: float = DEFAULT_MARGIN,
+) -> TokenEstimate:
     """Agrège plusieurs estimations en une seule (pour le total du corpus).
 
     Args:
         estimates: Liste d'estimations par fichier.
+        margin: Marge appliquée au corpus complet.
 
     Returns:
         TokenEstimate agrégée (total).
     """
     total_bytes = sum(e.bytes_utf8 for e in estimates)
-    total_estimated = sum(e.tokens_estimated for e in estimates)
-    total_with_margin = sum(e.tokens_with_margin for e in estimates)
+    total_estimated = math.ceil(total_bytes / BYTES_PER_TOKEN)
+    total_with_margin = math.ceil(total_estimated * (1.0 + margin))
     return TokenEstimate(
         bytes_utf8=total_bytes,
         tokens_estimated=total_estimated,

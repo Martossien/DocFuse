@@ -1,7 +1,7 @@
 # Guide utilisateur DocFuse / CorpusOne
 
 > Mini guide français — usage GUI et exemples CLI (CdC §21.5)
-> Version 0.1.0 — 20 août 2026
+> Version 0.1.1 beta — 20 août 2026
 
 ---
 
@@ -25,12 +25,16 @@ Double-cliquez sur `CorpusOne.exe`. La fenêtre s'ouvre (pas de console noire).
 
 ### 2. Choisir les documents
 
-- Cliquez sur **« Choisir un dossier… »** pour analyser son contenu et, si l'option est
+- Cliquez sur **« Ajouter un dossier… »** pour analyser son contenu et, si l'option est
   cochée, ses sous-dossiers.
-- Cliquez sur **« Choisir des fichiers… »** pour sélectionner uniquement certains
-  fichiers. Les autres fichiers présents dans leur dossier ne seront pas ajoutés.
+- Cliquez sur **« Ajouter des fichiers… »** pour sélectionner uniquement certains
+  fichiers. Chaque nouvelle sélection s'ajoute aux précédentes ; les autres fichiers
+  présents dans leur dossier ne sont pas ajoutés.
 - Vous pouvez aussi glisser-déposer un dossier ou plusieurs fichiers sur la zone du haut.
 - L'analyse démarre automatiquement.
+
+Lorsqu'un dossier contient de nombreux documents, ils apparaissent d'abord avec le statut
+**En attente**, puis leurs estimations sont affichées au fur et à mesure de l'extraction.
 
 ### 3. Comprendre la liste
 

@@ -4,8 +4,8 @@
   "app.version": "Version {version}",
 
   "gui.drop_zone": "Drop a folder or files here, or",
-  "gui.choose_folder": "Choose a folder…",
-  "gui.choose_files": "Choose files…",
+  "gui.choose_folder": "Add a folder…",
+  "gui.choose_files": "Add files…",
   "gui.change_folder": "Change",
   "gui.clear_selection": "Clear",
   "gui.supported_documents": "Supported documents",
@@ -43,6 +43,7 @@
   "status.too_large": "Too large",
   "status.ignored": "Ignored",
   "status.error": "Error",
+  "status.pending": "Pending",
 
   "counter.estimated": "Estimated",
   "counter.with_margin": "With +15% margin",
@@ -117,5 +118,6 @@
   "gui.analysis_failed_detail": "The analysis could not be completed: {error}",
   "gui.analysis_cancelled": "Analysis stopped",
   "gui.analysis_cancelled_detail": "The analysis was stopped. No partial corpus will be generated.",
+  "gui.analysis_in_progress": "Inventory complete: extracting and estimating tokens…",
   "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nDocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o).\n\nThis counter is generic and does not depend on any provider."
 }

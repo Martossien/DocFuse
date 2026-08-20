@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from docfuse.core.orchestrator import generate_corpus, run_analysis
+from docfuse.core.progress import ProgressEmitter
 
 
 class TestRunAnalysis:
@@ -39,6 +40,18 @@ class TestRunAnalysis:
         result = run_analysis(tmp_path, context_limit=128000)
         assert len(result.files) == 0
         assert result.total.tokens_estimated == 0
+
+    def test_inventory_events_precede_extraction_results(self, tmp_path: Path) -> None:
+        (tmp_path / "a.txt").write_text("Premier texte.", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("Second texte.", encoding="utf-8")
+        emitter = ProgressEmitter()
+
+        run_analysis(tmp_path, emitter=emitter)
+        events = emitter.drain()
+
+        assert [event.file_path for event in events[:2]] == ["a.txt", "b.txt"]
+        assert all(event.status == "pending" for event in events[:2])
+        assert all(event.current == 0 for event in events[:2])
 
 
 class TestGenerateCorpus:

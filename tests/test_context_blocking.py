@@ -371,3 +371,8 @@ class TestWindowsBehavior:
         )
         assert "CorpusOne_output" in cli
         assert "CorpusOne_output" in gui
+
+    def test_pyinstaller_collects_dynamic_extractors(self) -> None:
+        """Le build embarque les extracteurs chargés via import_module()."""
+        spec = (Path(__file__).resolve().parent.parent / "CorpusOne.spec").read_text("utf-8")
+        assert 'collect_submodules("docfuse.extractors")' in spec

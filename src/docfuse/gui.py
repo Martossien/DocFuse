@@ -56,7 +56,7 @@ _DND_AVAILABLE, _dnd_mod = _try_import_dnd()
 class DocFuseGUI:
     """Interface graphique principale de DocFuse."""
 
-    def __init__(self) -> None:
+    def __init__(self, initial_directory: Path | None = None) -> None:
         import customtkinter as ctk
 
         self.config = load_config()
@@ -70,14 +70,16 @@ class DocFuseGUI:
         self._dnd_enabled = _DND_AVAILABLE
 
         self.root.title(t("app.title"))
-        self.root.geometry("960x680")
-        self.root.minsize(750, 560)
+        self.root.geometry("900x720")
+        self.root.minsize(700, 600)
 
+        self.initial_directory = initial_directory
         self.input_selection: InputSelection | None = None
         self.result: OrchestratorResult | None = None
         self.emitter = ProgressEmitter()
         self._analysis_thread: threading.Thread | None = None
         self._analysis_error: str | None = None
+        self._pending_status_labels: dict[str, Any] = {}
 
         self._build_ui()
 
@@ -93,6 +95,7 @@ class DocFuseGUI:
             top_frame,
             text=t("gui.drop_zone"),
             font=ctk.CTkFont(size=14),
+            wraplength=780,
         )
         self.path_label.pack(pady=(10, 5))
 
@@ -128,27 +131,29 @@ class DocFuseGUI:
         # ─── Options ───
         options_frame = ctk.CTkFrame(self.root, corner_radius=10)
         options_frame.pack(fill="x", padx=15, pady=5)
+        for column in range(4):
+            options_frame.grid_columnconfigure(column, weight=1)
 
         self.format_var = ctk.StringVar(value=self.config.format)
         ctk.CTkLabel(options_frame, text=t("gui.output_format")).grid(
-            row=0, column=0, padx=10, pady=10, sticky="w"
+            row=0, column=0, padx=10, pady=(10, 5), sticky="w"
         )
         ctk.CTkRadioButton(
             options_frame, text=t("gui.markdown"), variable=self.format_var, value="md"
-        ).grid(row=0, column=1, padx=5, pady=10)
+        ).grid(row=0, column=1, padx=5, pady=(10, 5), sticky="w")
         ctk.CTkRadioButton(
             options_frame, text=t("gui.pdf"), variable=self.format_var, value="pdf"
-        ).grid(row=0, column=2, padx=5, pady=10)
+        ).grid(row=0, column=2, padx=5, pady=(10, 5), sticky="w")
 
         ctk.CTkLabel(options_frame, text=t("gui.context_limit")).grid(
-            row=0, column=3, padx=(20, 5), pady=10, sticky="w"
+            row=1, column=0, padx=10, pady=5, sticky="w"
         )
         self.context_var = ctk.StringVar(value=str(self.config.context_limit))
         self.context_var.trace_add("write", self._on_context_limit_changed)
         context_entry = ctk.CTkEntry(options_frame, textvariable=self.context_var, width=80)
-        context_entry.grid(row=0, column=4, padx=5, pady=10)
+        context_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         ctk.CTkLabel(options_frame, text=t("gui.tokens_estimated"), font=ctk.CTkFont(size=11)).grid(
-            row=0, column=5, padx=(0, 10), pady=10, sticky="w"
+            row=1, column=2, padx=5, pady=5, sticky="w"
         )
 
         # M-14: lien « qu'est-ce que c'est ? »
@@ -159,19 +164,19 @@ class DocFuseGUI:
             text_color="#3b82f6",
             cursor="hand2",
         )
-        info_label.grid(row=0, column=6, padx=5, pady=10, sticky="w")
+        info_label.grid(row=1, column=3, padx=5, pady=5, sticky="w")
         info_label.bind("<Button-1>", lambda _e: self._show_context_help())
 
         self.recursive_var = ctk.BooleanVar(value=self.config.recursive)
         ctk.CTkCheckBox(
             options_frame, text=t("gui.include_subfolders"), variable=self.recursive_var
-        ).grid(row=0, column=7, padx=10, pady=10)
+        ).grid(row=2, column=0, columnspan=2, padx=10, pady=(5, 10), sticky="w")
 
         # I-12: case « Ouvrir le dossier à la fin »
         self.open_folder_var = ctk.BooleanVar(value=self.config.open_output_folder)
         ctk.CTkCheckBox(
             options_frame, text=t("gui.open_output_folder"), variable=self.open_folder_var
-        ).grid(row=0, column=8, padx=10, pady=10)
+        ).grid(row=2, column=2, columnspan=2, padx=10, pady=(5, 10), sticky="w")
 
         # ─── Bouton Analyser + barre de progression ───
         analyze_frame = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -220,6 +225,8 @@ class DocFuseGUI:
         # ─── Bandeau compteur ───
         counter_frame = ctk.CTkFrame(self.root, corner_radius=10)
         counter_frame.pack(fill="x", padx=15, pady=5)
+        for column in range(3):
+            counter_frame.grid_columnconfigure(column, weight=1)
 
         self.estimated_label = ctk.CTkLabel(
             counter_frame,
@@ -243,13 +250,13 @@ class DocFuseGUI:
         self.limit_label.grid(row=0, column=2, padx=12, pady=10)
 
         # I-11: jauge couleur vert/orange/rouge
-        self.progress_bar = ctk.CTkProgressBar(counter_frame, width=200, progress_color="#22c55e")
+        self.progress_bar = ctk.CTkProgressBar(counter_frame, progress_color="#22c55e")
         self.progress_bar.set(0)
-        self.progress_bar.grid(row=0, column=3, padx=12, pady=10)
+        self.progress_bar.grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 10), sticky="ew")
 
         # ─── Résumé ───
         self.summary_label = ctk.CTkLabel(
-            self.root, text="", font=ctk.CTkFont(size=12), wraplength=850
+            self.root, text="", font=ctk.CTkFont(size=12), wraplength=700
         )
         self.summary_label.pack(pady=5)
 
@@ -300,9 +307,9 @@ class DocFuseGUI:
         """Ouvre un dialogue de sélection de dossier."""
         from tkinter import filedialog
 
-        folder = filedialog.askdirectory()
+        folder = filedialog.askdirectory(initialdir=self._dialog_initial_directory())
         if folder:
-            self._set_input_paths([Path(folder)])
+            self._add_input_paths([Path(folder)])
 
     def _choose_files(self) -> None:
         """Ouvre un dialogue de sélection de plusieurs fichiers exacts."""
@@ -310,13 +317,27 @@ class DocFuseGUI:
 
         patterns = " ".join(f"*{extension}" for extension in sorted(ALL_EXTENSIONS))
         paths = filedialog.askopenfilenames(
+            initialdir=self._dialog_initial_directory(),
             filetypes=[
                 (t("gui.supported_documents"), patterns),
                 (t("gui.all_files"), "*.*"),
-            ]
+            ],
         )
         if paths:
-            self._set_input_paths([Path(path) for path in paths])
+            self._add_input_paths([Path(path) for path in paths])
+
+    def _dialog_initial_directory(self) -> str:
+        """Retourne un dossier existant et prévisible pour les dialogues natifs."""
+
+        if self.input_selection is not None:
+            candidate = self.input_selection.output_directory
+        elif self.initial_directory is not None:
+            candidate = self.initial_directory
+        else:
+            documents = Path.home() / "Documents"
+            candidate = documents if documents.is_dir() else Path.home()
+
+        return str(candidate if candidate.is_dir() else candidate.parent)
 
     def _clear_selection(self) -> None:
         """Efface la sélection courante et réinitialise les résultats."""
@@ -370,14 +391,17 @@ class DocFuseGUI:
         selected_paths = [Path(path) for path in paths]
         existing_paths = [path for path in selected_paths if path.is_file() or path.is_dir()]
         if existing_paths:
-            self._set_input_paths(existing_paths)
+            self._add_input_paths(existing_paths)
 
-    def _set_input_paths(self, paths: list[Path]) -> None:
-        """Définit une sélection exacte puis démarre son analyse."""
+    def _add_input_paths(self, paths: list[Path]) -> None:
+        """Ajoute des sources à la sélection exacte puis relance l'analyse."""
 
         if self._analysis_thread is not None and self._analysis_thread.is_alive():
             return
-        self.input_selection = InputSelection.from_paths(paths)
+        if self.input_selection is None:
+            self.input_selection = InputSelection.from_paths(paths)
+        else:
+            self.input_selection = self.input_selection.add(paths)
         self._update_selection_label()
         self.clear_button.configure(state="normal")
         self._start_analysis()
@@ -423,6 +447,10 @@ class DocFuseGUI:
         self.stop_button.configure(state="normal")
         self.analysis_progress.set(0)
         self.analysis_status_label.configure(text=t("gui.analyze") + "...")
+        self.summary_label.configure(text=t("gui.analysis_in_progress"))
+        self._pending_status_labels.clear()
+        for widget in self.file_rows_frame.winfo_children():
+            widget.destroy()
 
         self._analysis_thread = threading.Thread(
             target=self._run_analysis_thread,
@@ -466,11 +494,51 @@ class DocFuseGUI:
 
     def _update_file_row(self, event: ProgressEvent) -> None:
         """Met à jour la progression pendant l'analyse (en temps réel)."""
+        if event.status == "pending":
+            self._add_pending_file_row(event)
+            return
+
         progress = event.current / event.total if event.total > 0 else 0
         self.analysis_progress.set(progress)
         self.analysis_status_label.configure(
             text=f"{event.current}/{event.total} — {event.file_path}"
         )
+        status_label = self._pending_status_labels.get(event.file_path)
+        if status_label is not None:
+            try:
+                status = FileStatus(event.status)
+                status_label.configure(
+                    text=status.label(),
+                    text_color=STATUS_COLORS.get(status.value, "#9ca3af"),
+                )
+            except ValueError:
+                status_label.configure(text=event.status)
+
+    def _add_pending_file_row(self, event: ProgressEvent) -> None:
+        """Affiche immédiatement un fichier inventorié avant son extraction."""
+
+        import customtkinter as ctk
+
+        if event.file_path in self._pending_status_labels:
+            return
+
+        row = ctk.CTkFrame(self.file_rows_frame, fg_color="transparent")
+        row.pack(fill="x", pady=1)
+        ctk.CTkLabel(row, text=event.file_path, anchor="w", wraplength=280).grid(
+            row=0, column=0, padx=8, sticky="w"
+        )
+        file_type = Path(event.file_path).suffix.lower().lstrip(".") or "—"
+        ctk.CTkLabel(row, text=file_type, anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+        ctk.CTkLabel(row, text="—", anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+        ctk.CTkLabel(row, text="—", anchor="w").grid(row=0, column=3, padx=8, sticky="w")
+        status_label = ctk.CTkLabel(
+            row,
+            text=t("status.pending"),
+            text_color="#9ca3af",
+            anchor="w",
+        )
+        status_label.grid(row=0, column=4, padx=8, sticky="w")
+        self._pending_status_labels[event.file_path] = status_label
 
     def _analysis_complete(self) -> None:
         """Appelé quand l'analyse est terminée."""
