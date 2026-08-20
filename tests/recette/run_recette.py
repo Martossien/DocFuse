@@ -412,7 +412,7 @@ def main() -> int:
 
     for test_fn in tests:
         result = test_fn()
-        status = "✅ PASS" if result.passed else "❌ FAIL"
+        status = "PASS" if result.passed else "FAIL"
         print(f"  {status} — {result.name}")
         if result.message:
             print(f"         {result.message}")
