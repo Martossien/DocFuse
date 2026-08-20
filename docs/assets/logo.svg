@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="DocFuse logo">
+  <title>DocFuse</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f6feb"/>
+      <stop offset="100%" stop-color="#0d419d"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="4" y="4" width="120" height="120" rx="22" ry="22" fill="url(#g)"/>
+  <!-- Three document sheets stacked, fusing into one -->
+  <g fill="#ffffff" stroke="#ffffff" stroke-linejoin="round">
+    <!-- Left sheet -->
+    <path d="M28 32 H62 L74 44 V92 a4 4 0 0 1 -4 4 H32 a4 4 0 0 1 -4 -4 Z" opacity="0.55"/>
+    <!-- Middle sheet -->
+    <path d="M40 24 H80 L94 38 V96 a4 4 0 0 1 -4 4 H44 a4 4 0 0 1 -4 -4 Z" opacity="0.75"/>
+    <!-- Right (front) sheet, with text lines -->
+    <path d="M52 18 H92 L106 32 V100 a4 4 0 0 1 -4 4 H56 a4 4 0 0 1 -4 -4 Z"/>
+    <g fill="#1f6feb" stroke="none">
+      <rect x="60" y="46" width="38" height="3.5" rx="1.5"/>
+      <rect x="60" y="56" width="38" height="3.5" rx="1.5"/>
+      <rect x="60" y="66" width="30" height="3.5" rx="1.5"/>
+      <rect x="60" y="76" width="38" height="3.5" rx="1.5"/>
+      <rect x="60" y="86" width="22" height="3.5" rx="1.5"/>
+    </g>
+    <!-- Folded corner of the front sheet -->
+    <path d="M92 18 L106 32 H92 Z" fill="#0d419d" stroke="none"/>
+  </g>
+</svg>
