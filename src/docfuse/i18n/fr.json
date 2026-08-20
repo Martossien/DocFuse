@@ -1,11 +1,20 @@
 {
-  "app.title": "CorpusOne — Assembler un dossier pour une IA",
+  "app.title": "CorpusOne — Assembler des documents pour une IA",
   "app.subtitle": "Assemblage de documents pour un LLM",
   "app.version": "Version {version}",
 
-  "gui.drop_zone": "Glissez un dossier ici, ou",
+  "gui.drop_zone": "Glissez un dossier ou des fichiers ici, ou",
   "gui.choose_folder": "Choisir un dossier…",
+  "gui.choose_files": "Choisir des fichiers…",
   "gui.change_folder": "Changer",
+  "gui.clear_selection": "Effacer",
+  "gui.supported_documents": "Documents pris en charge",
+  "gui.all_files": "Tous les fichiers",
+  "gui.selection_folder": "Dossier : {path}",
+  "gui.selection_one_file": "Fichier : {path}",
+  "gui.selection_multiple": "{count} fichiers ou dossiers sélectionnés",
+  "gui.selection_removed": "{count} fichier(s) retiré(s)",
+  "gui.ok": "OK",
   "gui.output_format": "Format de sortie",
   "gui.markdown": "Markdown (recommandé pour l'IA)",
   "gui.pdf": "PDF (relecture)",
@@ -25,6 +34,8 @@
   "table.text_estimated": "Texte estimé",
   "table.context_margin": "Contexte +15 %",
   "table.status": "Statut",
+  "table.actions": "Actions",
+  "table.remove": "Retirer",
 
   "status.ready": "Prêt",
   "status.images": "Images",
@@ -90,6 +101,7 @@
   "inventory.excluded_by_pattern": "Exclu par pattern",
   "inventory.image_ocr_disabled": "Fichier image, OCR désactivé, non inclus",
   "inventory.unsupported_ext": "Extension non supportée: {ext}",
+  "inventory.removed_by_user": "Retiré par l'utilisateur",
 
   "corpus.title": "Corpus DocFuse",
   "corpus.generated": "Généré le",
@@ -101,5 +113,9 @@
   "gui.report_exported": "Rapport exporté : {path}",
   "gui.unusual_limit": "Plafond de contexte inhabituel ({tokens} tokens). Fichier énorme — vérifiez votre configuration.",
   "gui.analysis_done": "Analyse terminée",
+  "gui.analysis_failed": "Échec de l'analyse",
+  "gui.analysis_failed_detail": "L'analyse n'a pas pu aboutir : {error}",
+  "gui.analysis_cancelled": "Analyse arrêtée",
+  "gui.analysis_cancelled_detail": "L'analyse a été arrêtée. Aucun corpus partiel ne sera généré.",
   "gui.help_context_text": "Le plafond de contexte est la quantité maximale de texte que l'IA peut traiter en une fois.\n\nDocFuse estime le volume avec la formule :\n  tokens = octets UTF-8 / 4\n  avec une marge de sécurité de +15 %.\n\nSi le total dépasse le plafond, la génération est bloquée.\nVous pouvez augmenter le plafond si votre IA le permet\n(ex: 200 000 pour Claude, 128 000 pour GPT-4o).\n\nCe compteur est générique et ne dépend d'aucun fournisseur."
 }

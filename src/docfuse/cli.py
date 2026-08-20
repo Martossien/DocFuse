@@ -24,6 +24,7 @@ from docfuse.constants import ALL_EXTENSIONS
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.registry import list_supported_extensions
 from docfuse.i18n import format_number, set_language, t
+from docfuse.models.input_selection import InputSelection
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +269,8 @@ def main(argv: list[str] | None = None) -> int:
             print(t("error.unknown") + f": {p}", file=sys.stderr)
             return 1
 
-    # Le premier input sert de référence pour le calcul du chemin relatif
-    primary_input = input_paths[0]
+    selection = InputSelection.from_paths(input_paths)
+    primary_input = selection.primary_path
 
     # Output
     if args.output:
@@ -300,9 +301,9 @@ def main(argv: list[str] | None = None) -> int:
         print(t("exit.not_writable") + f": {output_path.parent}", file=sys.stderr)
         return 4
 
-    # Analyse (sur le premier input pour l'instant, multi-input fusionné plus tard)
+    # Tous les --input participent à une sélection unique et exacte.
     result = run_analysis(
-        input_path=primary_input,
+        input_path=selection,
         context_limit=context_limit,
         margin=margin,
         recursive=recursive,

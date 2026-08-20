@@ -119,6 +119,39 @@ class TestIncludeExt:
                 assert f["extension"] == "txt"
 
 
+class TestMultipleCLIInputs:
+    """Les --input répétés sont tous inclus dans le corpus."""
+
+    def test_repeated_inputs_are_merged_exactly(self, tmp_path: Path) -> None:
+        from docfuse.cli import main
+
+        first = tmp_path / "premier.txt"
+        second = tmp_path / "second.txt"
+        ignored_neighbor = tmp_path / "voisin.txt"
+        output = tmp_path / "sortie" / "corpus.md"
+        first.write_text("Contenu PREMIER sélectionné.", encoding="utf-8")
+        second.write_text("Contenu SECOND sélectionné.", encoding="utf-8")
+        ignored_neighbor.write_text("VOISIN NON SÉLECTIONNÉ", encoding="utf-8")
+
+        code = main(
+            [
+                "-i",
+                str(first),
+                "-i",
+                str(second),
+                "--yes",
+                "-o",
+                str(output),
+            ]
+        )
+
+        assert code == 0
+        content = output.read_text(encoding="utf-8")
+        assert "PREMIER" in content
+        assert "SECOND" in content
+        assert "VOISIN" not in content
+
+
 class TestImageMessage:
     """I-22: Images pures — message spécifique."""
 

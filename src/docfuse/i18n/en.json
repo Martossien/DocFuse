@@ -1,11 +1,20 @@
 {
-  "app.title": "CorpusOne — Assemble a folder for an AI",
+  "app.title": "CorpusOne — Assemble documents for an AI",
   "app.subtitle": "Document assembly for an LLM",
   "app.version": "Version {version}",
 
-  "gui.drop_zone": "Drop a folder here, or",
+  "gui.drop_zone": "Drop a folder or files here, or",
   "gui.choose_folder": "Choose a folder…",
+  "gui.choose_files": "Choose files…",
   "gui.change_folder": "Change",
+  "gui.clear_selection": "Clear",
+  "gui.supported_documents": "Supported documents",
+  "gui.all_files": "All files",
+  "gui.selection_folder": "Folder: {path}",
+  "gui.selection_one_file": "File: {path}",
+  "gui.selection_multiple": "{count} files or folders selected",
+  "gui.selection_removed": "{count} file(s) removed",
+  "gui.ok": "OK",
   "gui.output_format": "Output format",
   "gui.markdown": "Markdown (recommended for AI)",
   "gui.pdf": "PDF (review)",
@@ -25,6 +34,8 @@
   "table.text_estimated": "Estimated text",
   "table.context_margin": "Context +15%",
   "table.status": "Status",
+  "table.actions": "Actions",
+  "table.remove": "Remove",
 
   "status.ready": "Ready",
   "status.images": "Images",
@@ -90,6 +101,7 @@
   "inventory.excluded_by_pattern": "Excluded by pattern",
   "inventory.image_ocr_disabled": "Image file, OCR disabled, not included",
   "inventory.unsupported_ext": "Unsupported extension: {ext}",
+  "inventory.removed_by_user": "Removed by user",
 
   "corpus.title": "DocFuse Corpus",
   "corpus.generated": "Generated on",
@@ -101,5 +113,9 @@
   "gui.report_exported": "Report exported: {path}",
   "gui.unusual_limit": "Unusual context limit ({tokens} tokens). Very large file - check your configuration.",
   "gui.analysis_done": "Analysis complete",
+  "gui.analysis_failed": "Analysis failed",
+  "gui.analysis_failed_detail": "The analysis could not be completed: {error}",
+  "gui.analysis_cancelled": "Analysis stopped",
+  "gui.analysis_cancelled_detail": "The analysis was stopped. No partial corpus will be generated.",
   "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nDocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o).\n\nThis counter is generic and does not depend on any provider."
 }

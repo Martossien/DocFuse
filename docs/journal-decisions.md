@@ -487,4 +487,56 @@
 
 ---
 
-*Fin du journal des décisions — Session 4.*
+## Session 8 — 20 août 2026 — Sélection exacte et maîtrise du corpus
+
+### D-043 : Une sélection d'entrée explicite partagée par toutes les interfaces
+
+**Décision** : Introduire `InputSelection`, modèle immuable utilisé par la GUI, la CLI
+et l'orchestrateur. Il normalise et déduplique les chemins, conserve les exclusions
+utilisateur et détermine le dossier de sortie à partir de la première source.
+
+**Rationale** :
+- La GUI transformait auparavant un dépôt de fichiers en dossier parent, ce qui ajoutait
+  silencieusement des documents non choisis.
+- La CLI acceptait `--input` plusieurs fois mais n'analysait que la première valeur.
+- Une source de vérité commune évite que les trois interfaces divergent à nouveau.
+
+### D-044 : Inventaire multi-sources avec provenance unique
+
+**Décision** : `run_analysis()` accepte un fichier, un dossier, une séquence de chemins
+ou une `InputSelection`. L'inventaire agrège toutes les sources, élimine les doublons et
+produit un `relative_path` lisible et unique. Un fichier sélectionné explicitement n'est
+jamais élargi à son dossier parent.
+
+**Rationale** :
+- Conforme au CdC §2.3 et §6.2 : « Fichiers multiples → liste figée ».
+- Les en-têtes `SOURCE` doivent rester non ambigus lorsque deux dossiers contiennent un
+  fichier de même nom.
+- Les fichiers explicitement choisis mais non supportés restent listés dans le rapport.
+
+### D-045 : Retrait instantané sans ré-extraction
+
+**Décision** : Chaque ligne de la GUI possède une action « Retirer ». Le retrait supprime
+le fichier et son estimation du résultat en cache, recalcule le total et le blocage, puis
+persiste dans `InputSelection.excluded_files` pour les analyses suivantes de la session.
+
+**Rationale** :
+- Le message de blocage du CdC propose explicitement de retirer des fichiers.
+- L'utilisateur peut s'appuyer sur l'estimation de tokens par document pour décider.
+- Ré-extraire tous les documents après chaque retrait serait lent et inutile.
+
+### D-046 : Séparer statut d'extraction et statut de blocage
+
+**Décision** : `OrchestratorResult` conserve le statut d'analyse original de chaque
+fichier. `TOO_LARGE` reste un état d'affichage dérivé du plafond et ne détruit plus les
+alertes `IMAGES` ou `LOW_TEXT`. Le changement du plafond dans la GUI déclenche un recalcul
+immédiat à partir du cache.
+
+**Rationale** :
+- L'ancien recalcul restaurait systématiquement `READY`, ce qui faisait disparaître des
+  alertes importantes après une modification du plafond.
+- Le compteur, le blocage et les warnings doivent avoir chacun une source de vérité.
+
+---
+
+*Fin du journal des décisions — Session 8.*

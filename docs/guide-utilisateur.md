@@ -7,10 +7,11 @@
 
 ## Qu'est-ce que DocFuse ?
 
-DocFuse (nom de code CorpusOne) est un outil qui assemble les documents d'un dossier
-(PDF, Word, PowerPoint, Excel, HTML, texte, etc.) en **un seul fichier** prêt à être
-donné à une IA (LLM). Il extrait le texte, compte le « volume estimé » et vous avertit
-si le total dépasse le plafond de contexte.
+DocFuse (nom de code CorpusOne) est un outil qui assemble les documents d'un ou plusieurs
+dossiers, ou une sélection précise de fichiers (PDF, Word, PowerPoint, Excel, HTML,
+texte, etc.), en **un seul fichier** prêt à être donné à une IA (LLM). Il extrait le
+texte, estime le nombre de tokens de chaque fichier et du corpus complet, puis vous
+avertit si le plafond de contexte est dépassé.
 
 **Pas d'installation, pas de droits admin, pas d'internet.** Ça marche depuis une clé USB.
 
@@ -22,9 +23,13 @@ si le total dépasse le plafond de contexte.
 
 Double-cliquez sur `CorpusOne.exe`. La fenêtre s'ouvre (pas de console noire).
 
-### 2. Choisir un dossier
+### 2. Choisir les documents
 
-- Cliquez sur **« Choisir un dossier… »** et sélectionnez votre dossier de documents.
+- Cliquez sur **« Choisir un dossier… »** pour analyser son contenu et, si l'option est
+  cochée, ses sous-dossiers.
+- Cliquez sur **« Choisir des fichiers… »** pour sélectionner uniquement certains
+  fichiers. Les autres fichiers présents dans leur dossier ne seront pas ajoutés.
+- Vous pouvez aussi glisser-déposer un dossier ou plusieurs fichiers sur la zone du haut.
 - L'analyse démarre automatiquement.
 
 ### 3. Comprendre la liste
@@ -40,6 +45,11 @@ Chaque fichier apparaît avec son statut :
 | ⚪ Gris | Ignoré | Extension non supportée (ex: .exe, .jpg) |
 | 🔴 Rouge | Erreur | Corrompu, protégé par mot de passe |
 
+Les colonnes **Texte estimé** et **Contexte +15 %** donnent le nombre approximatif de
+tokens pour chaque fichier. Le bouton **Retirer** enlève immédiatement un document du
+corpus et recalcule le total sans relancer l'extraction. Le retrait reste appliqué si
+vous cliquez ensuite sur **Analyser**.
+
 ### 4. Le compteur de contexte
 
 En bas, un bandeau affiche :
@@ -49,7 +59,8 @@ En bas, un bandeau affiche :
 - **Jauge** : verte (< 80 %), orange (80-99 %), rouge (≥ 100 %)
 
 Si la jauge est rouge, le bouton **Générer** est désactivé.
-**Solution** : montez le plafond ou retirez des fichiers.
+**Solution** : montez le plafond ou cliquez sur **Retirer** pour les documents inutiles
+ou les plus volumineux.
 
 ### 5. Générer le corpus
 
@@ -90,6 +101,14 @@ CorpusOne.exe -i "D:\Projets" --dry-run --report "D:\rapport.json"
 ```
 CorpusOne.exe -i "D:\Projets" --context 200000
 ```
+
+**Assembler uniquement plusieurs fichiers précis :**
+```
+CorpusOne.exe -i "D:\Contrats\contrat.pdf" -i "D:\Notes\synthese.docx" -o "D:\Sortie\corpus.md"
+```
+
+Chaque option `--input` est prise en compte. Une liste de fichiers n'est jamais élargie
+automatiquement à tout leur dossier parent.
 
 **Non-interactif (scripts) — échoue si blocage :**
 ```
@@ -176,4 +195,5 @@ seuls (`.jpg`, `.png`) sont ignorés avec un message dans le rapport.
 
 **« Combien de tokens pour mon corpus ? »**
 L'estimation utilise la formule : `octets_UTF-8 / 4` avec une marge de +15 %.
-C'est un estimateur générique, pas un tokenizer d'un fournisseur spécifique.
+C'est un estimateur générique, pas un tokenizer d'un fournisseur spécifique. La GUI
+affiche l'estimation pour chaque fichier ainsi que le total du corpus.

@@ -526,4 +526,71 @@ Vérifier avec de vrais fichiers complexes, traquer les bugs subtils, tester les
 
 ---
 
-*Fin du journal d'avancement — Session 7.*
+## Session 8 — 20 août 2026 — Sélection multi-fichiers et GUI actionnable
+
+### Objectifs prioritaires
+
+1. Respecter exactement les fichiers et dossiers choisis par l'utilisateur.
+2. Afficher et conserver l'estimation de tokens de chaque fichier.
+3. Permettre de retirer un document et de débloquer le corpus sans ré-extraction.
+4. Corriger la CLI répétable et préserver les alertes pendant les recalculs.
+
+### Défauts corrigés
+
+| Défaut | Impact utilisateur | Correction |
+|---|---|---|
+| Dépôt de plusieurs fichiers remplacé par leur dossier parent | Documents non choisis ajoutés silencieusement | Sélection exacte via `InputSelection` |
+| CLI `--input` répétable mais seul le premier chemin analysé | Corpus incomplet | Fusion réelle de toutes les entrées |
+| Aucun moyen concret de « retirer des fichiers » | Blocage difficile à résoudre | Bouton Retirer + recalcul en cache |
+| Recalcul du plafond restaurant `READY` | Alertes images/scans perdues | Conservation des statuts d'analyse originaux |
+| Plafond GUI non recalculé pendant la saisie | État du bouton Générer obsolète | Callback de recalcul immédiat |
+| Accès à des variables Tk depuis le thread d'analyse | Risque d'erreur GUI intermittente | Options capturées sur le thread principal |
+| Arrêt pouvant laisser un résultat partiel générable | Corpus incomplet présenté comme valide | Résultat annulé et génération désactivée |
+
+### Fonctionnalités livrées
+
+- Bouton **Choisir des fichiers…** avec sélection multiple.
+- Glisser-déposer de plusieurs fichiers réellement figé.
+- Sélection de plusieurs dossiers/fichiers supportée par le pipeline.
+- Dédoublonnage des chemins et provenance unique dans les en-têtes `SOURCE`.
+- Estimation brute et avec marge conservée pour chaque fichier.
+- Bouton **Retirer** par ligne, mise à jour instantanée du compteur et du blocage.
+- Exclusions utilisateur présentes dans le rapport et persistantes lors d'une réanalyse.
+- Messages et libellés ajoutés aux catalogues français et anglais.
+- Gestion explicite d'une erreur d'analyse dans la GUI.
+- Annulation sûre : aucun corpus partiel ne peut être généré après « Arrêter ».
+
+### Tests ajoutés
+
+- Sélection immuable, dédoublonnage et dossier de sortie.
+- Liste explicite sans élargissement au dossier parent.
+- Multi-dossiers et noms de sources non ambigus.
+- Déduplication d'un fichier présent via plusieurs sources.
+- Exclusion persistante et présence au rapport.
+- Estimation de tokens par fichier et cohérence avec le total.
+- Retrait, recalcul du total et déblocage.
+- Préservation du warning images après changement de plafond.
+- CLI avec plusieurs `--input`.
+- Parsing DnD de plusieurs chemins avec ou sans espaces.
+
+### Validation
+
+| Check | Résultat |
+|---|---|
+| ruff check | ✅ All checks passed |
+| ruff format | ✅ 67 fichiers formatés ou déjà conformes |
+| mypy --strict | ✅ no issues found in 38 source files |
+| pytest ciblé après refactoring | ✅ 57 passed |
+| pytest complet du clone frais | ✅ 194 passed, 38 skipped |
+| Script de recette | ✅ 7/7 PASS |
+
+### Écart de reproductibilité constaté
+
+Le dossier `tests/samples_real/`, annoncé dans l'état de la Session 7 avec 75 fichiers,
+n'est pas présent dans un clone Git frais. Les 38 tests associés sont donc ignorés. La
+suite versionnée et la recette passent intégralement ; il reste à rendre ce jeu de données
+reproductible ou à documenter sa génération.
+
+---
+
+*Fin du journal d'avancement — Session 8.*

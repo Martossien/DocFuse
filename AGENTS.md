@@ -7,7 +7,7 @@
 
 ## 1. Le projet en une phrase
 
-**DocFuse** (nom de code **CorpusOne**) est un outil Windows portable, hors-ligne, sans droits admin, qui parcourt un dossier de documents hétérogènes (PDF, DOCX, PPTX, XLSX, RTF, HTML, TXT, etc.), en extrait le texte, et produit un corpus unique (Markdown ou PDF) destiné à nourrir un LLM — avec un compteur de contexte générique et un contrôle de plafond.
+**DocFuse** (nom de code **CorpusOne**) est un outil Windows portable, hors-ligne, sans droits admin, qui prend un ou plusieurs dossiers ou fichiers hétérogènes (PDF, DOCX, PPTX, XLSX, RTF, HTML, TXT, etc.), en extrait le texte, et produit un corpus unique (Markdown ou PDF) destiné à nourrir un LLM — avec un compteur de contexte générique par fichier et total, et un contrôle de plafond.
 
 ## 2. Cahier des charges
 
@@ -49,13 +49,13 @@ Points non négociables (résumé) :
 src/docfuse/
 ├── __main__.py             # sans args → GUI, avec args → CLI
 ├── cli.py                  # CLI argparse + i18n + codes retour 0-4
-├── gui.py                  # GUI CustomTkinter (jauge couleur, recalcul sans ré-extraction)
+├── gui.py                  # GUI CustomTkinter (sélection multiple, retrait, jauge dynamique)
 ├── config.py               # config JSON (3 niveaux) + validate() min/max
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
 ├── assets/                 # DejaVuSans.ttf + DejaVuSans-Bold.ttf (police PDF Unicode)
 ├── core/
-│   ├── orchestrator.py     # pipeline principal + scan_config + sort + max_depth
+│   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
 │   ├── registry.py         # @register + dispatch par extension
 │   ├── context_counter.py  # estimateur tokens (octets/4, +15%)
 │   ├── image_detector.py   # détection images + seuils pauvreté (configurables)
@@ -83,13 +83,15 @@ src/docfuse/
 │   └── source_header.py   # en-tête SOURCE + backticks adaptatifs
 └── models/
     ├── extraction_result.py # ExtractedFile (dataclass)
+    ├── input_selection.py   # sélection exacte, dédoublonnage, exclusions utilisateur
     └── file_status.py       # enum FileStatus
 ```
 
 ### Pipeline
 
 ```
-Entrée dossier
+Entrée : dossier(s) et/ou fichier(s) explicites
+  → sélection normalisée (dédoublonnage + exclusions utilisateur)
   → inventaire (liste blanche extensions, ignores ~$ Thumbs.db etc., sort name/mtime/type)
   → extraction parallèle (ThreadPoolExecutor, bornée)
   → mesure images + pauvreté texte (seuils config scan)
@@ -107,8 +109,9 @@ Entrée dossier
 - **Code défensif** : chaque extracteur capture ses erreurs → statut `Erreur` plutôt que crash.
 - **i18n** : toutes les chaînes via catalogue (cli, gui, report, orchestrator), aucune en dur.
 - **Cache mémoire** des textes extraits pour recalcul instantané du compteur si plafond modifié.
+- **Sélection exacte** : plusieurs fichiers ne sont jamais remplacés par leur dossier parent ; les retraits persistent pendant la session.
 - **Parallélisation** : ThreadPoolExecutor (IO-bound) + queue thread-safe pour progression GUI.
-- **Code haute qualité** : ruff + mypy --strict + 141 tests en CI.
+- **Code haute qualité** : ruff + mypy --strict + tests unitaires, d'acceptation et de recette.
 
 ## 5. Projets de référence (dans `_references/`)
 
@@ -127,8 +130,8 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 | Objectif | Mesure | Statut |
 |---|---|---|
 | Code haute qualité | `ruff check` + `ruff format --check` | ✅ |
-| Typage strict | `mypy --strict` sur 36 fichiers | ✅ |
-| Tests exhaustifs | 141 tests (extracteurs, core, acceptation CdC) | ✅ |
+| Typage strict | `mypy --strict` sur 38 fichiers | ✅ |
+| Tests versionnés | 232 collectés : 194 réussis, 38 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
 | Maintenabilité | Un extracteur = un fichier, registry auto, docstrings | ✅ |
 | User-friendly | GUI CustomTkinter, jauge couleur, recalcul sans ré-extraction | ✅ |
 | Configurable | JSON 3 niveaux + validate() + scan_config + sort + max_depth | ✅ |
@@ -182,40 +185,41 @@ Conventional Commits (sans scope obligatoire) :
 
 ## 10. Journaux
 
-- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-042).
+- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-046).
 - `docs/journal-avancement.md` — suivi de l'implémentation, session par session, avec statut.
 - `docs/cahier-des-charges-docfuse.md` — cahier des charges contractuel (lecture seule).
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 7)
+## 11. État actuel (Session 8)
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source | 37 |
-| Fichiers de test | 27 |
-| Tests | 581 |
+| Fichiers source Python | 38 |
+| Modules de test | 23 |
+| Tests collectés depuis un clone frais | 232 |
 | ruff | ✅ |
 | mypy --strict | ✅ |
-| pytest | ✅ 581 passed, 4 skipped |
+| pytest | ✅ 194 passed, 38 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
-| Fichiers de test réels | ✅ 75 fichiers (tests/samples_real/) |
+| Fichiers de test réels | ⚠️ 75 annoncés historiquement, non présents dans le clone Git |
 | Edge cases testés | ✅ 15 cas (corrompus, vides, chiffrés, malformés) |
 | Tests de blocage 128K | ✅ 27 tests (blocage, codes retour, plafond variable, marge variable) |
 | Tests Windows | ✅ 10 vérifications (CRLF, APPDATA, frozen, HKLM, spec, log, GUI, cp1252) |
-| Décisions archivées | 42 (D-001 à D-042) |
+| Décisions archivées | 46 (D-001 à D-046) |
 | Extracteurs | 13 formats |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md |
 | Jeu de test + recette | ✅ tests/recette/ |
-| Glisser-déposer GUI | ✅ via tkinterdnd2 |
+| Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer et retrait instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
 | Build Windows spec | ✅ CorpusOne.spec + CI job build-windows |
-| Bugs connus | 0 (8 bugs trouvés et corrigés) |
+| Régressions connues sur la suite versionnée | 0 |
 
 ### Reste à faire
 
 - ⬜ Build Windows PyInstaller effectif (via CI GitHub Actions sur windows-latest)
+- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 38 skips d'un clone frais
 
 ## 12. Règles critiques
 

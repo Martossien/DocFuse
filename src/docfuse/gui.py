@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.config import load_config
-from docfuse.constants import STATUS_COLORS
+from docfuse.constants import ALL_EXTENSIONS, STATUS_COLORS
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.i18n import format_number, set_language, t
 from docfuse.models.file_status import FileStatus
+from docfuse.models.input_selection import InputSelection
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +73,11 @@ class DocFuseGUI:
         self.root.geometry("960x680")
         self.root.minsize(750, 560)
 
-        self.input_path: Path | None = None
+        self.input_selection: InputSelection | None = None
         self.result: OrchestratorResult | None = None
         self.emitter = ProgressEmitter()
         self._analysis_thread: threading.Thread | None = None
+        self._analysis_error: str | None = None
 
         self._build_ui()
 
@@ -104,14 +106,20 @@ class DocFuseGUI:
         )
         self.choose_button.pack(side="left", padx=5)
 
-        # M-13: bouton « Changer » (caché tant qu'aucun dossier n'est choisi)
-        self.change_button = ctk.CTkButton(
+        self.choose_files_button = ctk.CTkButton(
             buttons_frame,
-            text=t("gui.change_folder"),
-            command=self._choose_folder,
+            text=t("gui.choose_files"),
+            command=self._choose_files,
+        )
+        self.choose_files_button.pack(side="left", padx=5)
+
+        self.clear_button = ctk.CTkButton(
+            buttons_frame,
+            text=t("gui.clear_selection"),
+            command=self._clear_selection,
             state="disabled",
         )
-        self.change_button.pack(side="left", padx=5)
+        self.clear_button.pack(side="left", padx=5)
 
         # C-10: enregistrer le drag-and-drop si tkinterdnd2 est disponible
         if self._dnd_enabled:
@@ -136,6 +144,7 @@ class DocFuseGUI:
             row=0, column=3, padx=(20, 5), pady=10, sticky="w"
         )
         self.context_var = ctk.StringVar(value=str(self.config.context_limit))
+        self.context_var.trace_add("write", self._on_context_limit_changed)
         context_entry = ctk.CTkEntry(options_frame, textvariable=self.context_var, width=80)
         context_entry.grid(row=0, column=4, padx=5, pady=10)
         ctk.CTkLabel(options_frame, text=t("gui.tokens_estimated"), font=ctk.CTkFont(size=11)).grid(
@@ -198,6 +207,7 @@ class DocFuseGUI:
             t("table.text_estimated"),
             t("table.context_margin"),
             t("table.status"),
+            t("table.actions"),
         ]
         for i, col in enumerate(headers):
             ctk.CTkLabel(header_frame, text=col, font=ctk.CTkFont(size=12, weight="bold")).grid(
@@ -283,7 +293,7 @@ class DocFuseGUI:
         label = ctk.CTkLabel(help_window, text=text, justify="left", font=ctk.CTkFont(size=12))
         label.pack(padx=20, pady=20)
 
-        close_button = ctk.CTkButton(help_window, text="OK", command=help_window.destroy)
+        close_button = ctk.CTkButton(help_window, text=t("gui.ok"), command=help_window.destroy)
         close_button.pack(pady=10)
 
     def _choose_folder(self) -> None:
@@ -292,7 +302,39 @@ class DocFuseGUI:
 
         folder = filedialog.askdirectory()
         if folder:
-            self._set_input_path(Path(folder))
+            self._set_input_paths([Path(folder)])
+
+    def _choose_files(self) -> None:
+        """Ouvre un dialogue de sélection de plusieurs fichiers exacts."""
+        from tkinter import filedialog
+
+        patterns = " ".join(f"*{extension}" for extension in sorted(ALL_EXTENSIONS))
+        paths = filedialog.askopenfilenames(
+            filetypes=[
+                (t("gui.supported_documents"), patterns),
+                (t("gui.all_files"), "*.*"),
+            ]
+        )
+        if paths:
+            self._set_input_paths([Path(path) for path in paths])
+
+    def _clear_selection(self) -> None:
+        """Efface la sélection courante et réinitialise les résultats."""
+
+        self.input_selection = None
+        self.result = None
+        self.path_label.configure(text=t("gui.drop_zone"))
+        self.clear_button.configure(state="disabled")
+        self.generate_button.configure(state="disabled")
+        self.report_button.configure(state="disabled")
+        self.summary_label.configure(text="")
+        self.analysis_status_label.configure(text="")
+        self.analysis_progress.set(0)
+        self.estimated_label.configure(text=f"{t('counter.estimated')}: 0")
+        self.margin_label.configure(text=f"{t('counter.with_margin')}: 0")
+        self.progress_bar.set(0)
+        for widget in self.file_rows_frame.winfo_children():
+            widget.destroy()
 
     def _setup_drag_and_drop(self, widget: Any) -> None:
         """C-10: enregistre les événements de glisser-déposer sur un widget."""
@@ -325,55 +367,92 @@ class DocFuseGUI:
         if not paths:
             return
 
-        first = Path(paths[0])
-        if first.is_dir():
-            # Dossier → racine d'entrée (CdC §2.3)
-            self._set_input_path(first)
-        elif first.is_file():
-            # Fichiers multiples → liste figée (pas de parent récursif)
-            self._set_input_path(first.parent)
+        selected_paths = [Path(path) for path in paths]
+        existing_paths = [path for path in selected_paths if path.is_file() or path.is_dir()]
+        if existing_paths:
+            self._set_input_paths(existing_paths)
 
-    def _set_input_path(self, path: Path) -> None:
-        """Définit le chemin d'entrée et démarre l'analyse."""
-        self.input_path = path
-        self.path_label.configure(text=str(self.input_path))
-        self.change_button.configure(state="normal")
+    def _set_input_paths(self, paths: list[Path]) -> None:
+        """Définit une sélection exacte puis démarre son analyse."""
+
+        if self._analysis_thread is not None and self._analysis_thread.is_alive():
+            return
+        self.input_selection = InputSelection.from_paths(paths)
+        self._update_selection_label()
+        self.clear_button.configure(state="normal")
         self._start_analysis()
+
+    def _update_selection_label(self) -> None:
+        """Affiche la sélection en langage simple sans chemin trompeur."""
+
+        if self.input_selection is None:
+            self.path_label.configure(text=t("gui.drop_zone"))
+            return
+
+        paths = self.input_selection.paths
+        if len(paths) == 1 and paths[0].is_dir():
+            label = t("gui.selection_folder", path=str(paths[0]))
+        elif len(paths) == 1:
+            label = t("gui.selection_one_file", path=str(paths[0]))
+        else:
+            label = t("gui.selection_multiple", count=len(paths))
+
+        removed = len(self.input_selection.excluded_files)
+        if removed:
+            label += " — " + t("gui.selection_removed", count=removed)
+        self.path_label.configure(text=label)
 
     def _start_analysis(self) -> None:
         """Lance l'analyse dans un thread séparé."""
-        if not self.input_path:
+        if self.input_selection is None:
             return
 
+        selection = self.input_selection
+        context_limit = self._get_current_limit()
+        recursive = bool(self.recursive_var.get())
+
+        self.emitter = ProgressEmitter()
+        self.result = None
+        self._analysis_error = None
+        self.choose_button.configure(state="disabled")
+        self.choose_files_button.configure(state="disabled")
+        self.clear_button.configure(state="disabled")
         self.analyze_button.configure(state="disabled")
         self.generate_button.configure(state="disabled")
+        self.report_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.analysis_progress.set(0)
         self.analysis_status_label.configure(text=t("gui.analyze") + "...")
 
-        self._analysis_thread = threading.Thread(target=self._run_analysis_thread, daemon=True)
+        self._analysis_thread = threading.Thread(
+            target=self._run_analysis_thread,
+            args=(selection, context_limit, recursive),
+            daemon=True,
+        )
         self._analysis_thread.start()
 
         self.root.after(100, self._poll_progress)
 
-    def _run_analysis_thread(self) -> None:
+    def _run_analysis_thread(
+        self,
+        selection: InputSelection,
+        context_limit: int,
+        recursive: bool,
+    ) -> None:
         """Thread d'analyse."""
-        if not self.input_path:
-            return
         try:
-            context_limit = int(self.context_var.get())
-        except ValueError:
-            context_limit = self.config.context_limit
-
-        self.result = run_analysis(
-            input_path=self.input_path,
-            context_limit=context_limit,
-            margin=self.config.margin,  # M-10: utilise config.margin
-            recursive=self.recursive_var.get(),
-            exclude_globs=self.config.exclude_globs,
-            emitter=self.emitter,
-            scan_config=self.config.scan,
-        )
+            self.result = run_analysis(
+                input_path=selection,
+                context_limit=context_limit,
+                margin=self.config.margin,  # M-10: utilise config.margin
+                recursive=recursive,
+                exclude_globs=self.config.exclude_globs,
+                emitter=self.emitter,
+                scan_config=self.config.scan,
+            )
+        except Exception as exc:
+            logger.exception("Échec de l'analyse")
+            self._analysis_error = str(exc)
 
     def _poll_progress(self) -> None:
         """Met à jour la GUI depuis les événements de progression."""
@@ -395,13 +474,32 @@ class DocFuseGUI:
 
     def _analysis_complete(self) -> None:
         """Appelé quand l'analyse est terminée."""
-        if self.result is None:
-            return
-
+        self.choose_button.configure(state="normal")
+        self.choose_files_button.configure(state="normal")
+        self.clear_button.configure(state="normal" if self.input_selection else "disabled")
         self.analyze_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
+
+        if self.emitter.is_cancelled:
+            self.result = None
+            self.analysis_progress.set(0)
+            self.analysis_status_label.configure(text=t("gui.analysis_cancelled"))
+            self.summary_label.configure(text=t("gui.analysis_cancelled_detail"))
+            return
+
+        if self.result is None:
+            self.analysis_progress.set(0)
+            self.analysis_status_label.configure(text=t("gui.analysis_failed"))
+            self.summary_label.configure(
+                text=t(
+                    "gui.analysis_failed_detail", error=self._analysis_error or t("error.unknown")
+                )
+            )
+            return
+
+        self.result.recompute_blocking(self._get_current_limit())
         self.analysis_progress.set(1.0)
-        self.analysis_status_label.configure(text="✅")
+        self.analysis_status_label.configure(text=t("gui.analysis_done"))
 
         self._populate_file_list()
         self._update_counter()
@@ -410,7 +508,7 @@ class DocFuseGUI:
         self._update_summary()
 
         # Bouton générer
-        if self.result.is_blocked:
+        if self.result.is_blocked or not self.result.files:
             self.generate_button.configure(state="disabled")
         else:
             self.generate_button.configure(state="normal")
@@ -420,9 +518,29 @@ class DocFuseGUI:
     def _get_current_limit(self) -> int:
         """Récupère la valeur du plafond éditée par l'utilisateur (I-09)."""
         try:
-            return int(self.context_var.get())
+            value = int(self.context_var.get())
+            return value if value > 0 else self.config.context_limit
         except ValueError:
             return self.config.context_limit
+
+    def _on_context_limit_changed(self, *_args: str) -> None:
+        """Recalcule instantanément le blocage sans ré-extraire les documents."""
+
+        if self.result is None:
+            return
+        try:
+            context_limit = int(self.context_var.get())
+        except ValueError:
+            return
+        if context_limit <= 0:
+            return
+
+        self.result.recompute_blocking(context_limit)
+        self._populate_file_list()
+        self._update_counter()
+        self._update_summary()
+        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
+        self.generate_button.configure(state=state)
 
     def _update_counter(self) -> None:
         """Met à jour le bandeau compteur avec la valeur éditée du plafond."""
@@ -492,15 +610,39 @@ class DocFuseGUI:
             ctk.CTkLabel(row, text=status_text, text_color=color, anchor="w").grid(
                 row=0, column=4, padx=8, sticky="w"
             )
+            ctk.CTkButton(
+                row,
+                text=t("table.remove"),
+                width=75,
+                command=lambda path=f.path: self._remove_file(path),
+            ).grid(row=0, column=5, padx=8, sticky="e")
+
+    def _remove_file(self, path: Path) -> None:
+        """Retire un document du corpus et actualise le compteur sans extraction."""
+
+        if self.result is None or self.input_selection is None:
+            return
+
+        reason = t("inventory.removed_by_user")
+        if not self.result.remove_file(path, reason):
+            return
+
+        self.input_selection = self.input_selection.exclude(path)
+        self._update_selection_label()
+        self._populate_file_list()
+        self._update_counter()
+        self._update_summary()
+        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
+        self.generate_button.configure(state=state)
 
     def _update_summary(self) -> None:
         """Met à jour le texte de résumé (I-21: conforme au CdC §6.1)."""
         if not self.result:
             return
 
-        images_count = sum(1 for f in self.result.files if f.status is FileStatus.IMAGES)
-        low_text_count = sum(1 for f in self.result.files if f.status is FileStatus.LOW_TEXT)
-        ready_count = sum(1 for f in self.result.files if f.status is FileStatus.READY)
+        images_count = self.result.count_base_status(FileStatus.IMAGES)
+        low_text_count = self.result.count_base_status(FileStatus.LOW_TEXT)
+        ready_count = self.result.count_base_status(FileStatus.READY)
         context_limit = self._get_current_limit()
 
         parts: list[str] = []
@@ -541,12 +683,12 @@ class DocFuseGUI:
 
     def _generate(self) -> None:
         """Génère le corpus dans CorpusOne_output/ (I-13)."""
-        if not self.result or not self.input_path:
+        if not self.result or self.input_selection is None:
             return
 
         ext = ".md" if self.format_var.get() == "md" else ".pdf"
         # I-13: sortie dans CorpusOne_output/
-        output_dir = self.input_path / "CorpusOne_output"
+        output_dir = self.input_selection.output_directory / "CorpusOne_output"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"corpus{ext}"
 
@@ -569,7 +711,7 @@ class DocFuseGUI:
         """M-15: exporte le rapport avec un dialogue de sauvegarde."""
         from tkinter import filedialog
 
-        if not self.result or not self.input_path:
+        if not self.result or self.input_selection is None:
             return
 
         filepath = filedialog.asksaveasfilename(

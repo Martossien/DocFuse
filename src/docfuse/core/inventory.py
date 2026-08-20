@@ -11,6 +11,7 @@ import fnmatch
 import logging
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from docfuse.constants import (
@@ -21,8 +22,17 @@ from docfuse.constants import (
     MAX_TRAVERSAL_DEPTH,
     natural_sort_key,
 )
+from docfuse.models.input_selection import InputSelection, path_key
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class InventoryEntry:
+    """Fichier retenu et chemin de provenance affiché dans le corpus."""
+
+    path: Path
+    relative_path: str
 
 
 def _should_ignore(filename: str) -> bool:
@@ -145,6 +155,28 @@ def _matches_file(
     return ext in extensions
 
 
+def _ignored_reason(
+    filename: str,
+    extensions: frozenset[str],
+    exclude_globs: list[str],
+) -> str | None:
+    """Retourne la raison localisée pour laquelle un fichier est ignoré."""
+
+    from docfuse.i18n import t
+
+    if _should_ignore(filename):
+        return t("inventory.special_ignored")
+    if any(fnmatch.fnmatch(filename, pattern) for pattern in exclude_globs):
+        return t("inventory.excluded_by_pattern")
+
+    ext = Path(filename).suffix.lower()
+    if ext not in extensions:
+        if ext in IMAGE_EXTENSIONS:
+            return t("inventory.image_ocr_disabled")
+        return t("inventory.unsupported_ext", ext=ext or "(none)")
+    return None
+
+
 def scan_files(
     paths: list[Path],
     extensions: frozenset[str] | None = None,
@@ -176,6 +208,27 @@ def scan_files(
     return found
 
 
+def list_ignored_files(
+    paths: list[Path],
+    extensions: frozenset[str] | None = None,
+    exclude_globs: list[str] | None = None,
+) -> list[tuple[Path, str]]:
+    """Liste les fichiers explicitement choisis mais non retenus."""
+
+    if extensions is None:
+        extensions = ALL_EXTENSIONS
+    exclude_globs = exclude_globs or []
+
+    ignored: list[tuple[Path, str]] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        reason = _ignored_reason(path.name, extensions, exclude_globs)
+        if reason is not None:
+            ignored.append((path, reason))
+    return ignored
+
+
 def list_ignored(
     root: Path,
     recursive: bool = True,
@@ -197,42 +250,136 @@ def list_ignored(
     Returns:
         Liste de (chemin, raison) pour chaque fichier ignoré.
     """
-    from docfuse.i18n import t
-
     if extensions is None:
         extensions = ALL_EXTENSIONS
 
     exclude_globs = exclude_globs or []
     ignored: list[tuple[Path, str]] = []
 
-    def _classify(filename: str, ext: str) -> str | None:
-        """Classifie un fichier ignoré et retourne la raison (i18n) ou None."""
-        if _should_ignore(filename):
-            return t("inventory.special_ignored")
-        if any(fnmatch.fnmatch(filename, pat) for pat in exclude_globs):
-            return t("inventory.excluded_by_pattern")
-        if ext not in extensions:
-            if ext in IMAGE_EXTENSIONS:
-                return t("inventory.image_ocr_disabled")
-            return t("inventory.unsupported_ext", ext=ext or "(none)")
-        return None
-
     if recursive:
         for dirpath, dirnames, filenames in _walk_with_depth(root, max_depth):
             dirnames[:] = [d for d in dirnames if not _should_ignore_dir(d)]
             for filename in filenames:
                 filepath = Path(dirpath) / filename
-                ext = Path(filename).suffix.lower()
-                reason = _classify(filename, ext)
+                reason = _ignored_reason(filename, extensions, exclude_globs)
                 if reason:
                     ignored.append((filepath, reason))
     else:
         for entry in root.iterdir():
             if not entry.is_file():
                 continue
-            ext = entry.suffix.lower()
-            reason = _classify(entry.name, ext)
+            reason = _ignored_reason(entry.name, extensions, exclude_globs)
             if reason:
                 ignored.append((entry, reason))
 
     return ignored
+
+
+def _unique_relative_path(path: Path, preferred: str, used: set[str]) -> str:
+    """Produit un libellé relatif lisible et unique pour l'en-tête SOURCE."""
+
+    candidate = preferred
+    if candidate.casefold() not in used:
+        used.add(candidate.casefold())
+        return candidate
+
+    parts = path.parts
+    for width in range(2, len(parts) + 1):
+        candidate = str(Path(*parts[-width:]))
+        if candidate.casefold() not in used:
+            used.add(candidate.casefold())
+            return candidate
+
+    suffix = 2
+    while f"{candidate} ({suffix})".casefold() in used:
+        suffix += 1
+    candidate = f"{candidate} ({suffix})"
+    used.add(candidate.casefold())
+    return candidate
+
+
+def collect_inputs(
+    selection: InputSelection,
+    recursive: bool,
+    exclude_globs: list[str],
+    extensions: frozenset[str] | None,
+    sort: str,
+    max_depth: int,
+) -> tuple[list[InventoryEntry], list[tuple[Path, str]]]:
+    """Inventorie plusieurs sources sans élargir une sélection de fichiers."""
+
+    from docfuse.i18n import t
+
+    candidates: list[tuple[Path, str]] = []
+    ignored: list[tuple[Path, str]] = []
+    seen_files: set[str] = set()
+    multiple_sources = len(selection.paths) > 1
+
+    for source in selection.paths:
+        if source.is_dir():
+            paths = scan_directory(
+                source,
+                recursive=recursive,
+                exclude_globs=exclude_globs,
+                extensions=extensions,
+                sort=sort,
+                max_depth=max_depth,
+            )
+            ignored.extend(
+                list_ignored(
+                    source,
+                    recursive=recursive,
+                    exclude_globs=exclude_globs,
+                    extensions=extensions,
+                    max_depth=max_depth,
+                )
+            )
+            for path in paths:
+                relative = path.relative_to(source)
+                preferred = str(Path(source.name) / relative) if multiple_sources else str(relative)
+                key = path_key(path)
+                if key not in seen_files:
+                    seen_files.add(key)
+                    candidates.append((path, preferred))
+        elif source.is_file():
+            paths = scan_files([source], exclude_globs=exclude_globs, extensions=extensions)
+            ignored.extend(
+                list_ignored_files([source], exclude_globs=exclude_globs, extensions=extensions)
+            )
+            for path in paths:
+                key = path_key(path)
+                if key not in seen_files:
+                    seen_files.add(key)
+                    candidates.append((path, path.name))
+
+    excluded_keys = {path_key(path) for path in selection.excluded_files}
+    included: list[tuple[Path, str]] = []
+    for path, preferred in candidates:
+        if path_key(path) in excluded_keys:
+            ignored.append((path, t("inventory.removed_by_user")))
+        else:
+            included.append((path, preferred))
+
+    used_relative_paths: set[str] = set()
+    entries = [
+        InventoryEntry(path, _unique_relative_path(path, preferred, used_relative_paths))
+        for path, preferred in included
+    ]
+
+    if sort == "mtime":
+        entries.sort(key=lambda entry: entry.path.stat().st_mtime, reverse=True)
+    elif sort == "type":
+        entries.sort(
+            key=lambda entry: (entry.path.suffix.lower(), natural_sort_key(entry.relative_path))
+        )
+    else:
+        entries.sort(key=lambda entry: natural_sort_key(entry.relative_path))
+
+    unique_ignored: list[tuple[Path, str]] = []
+    seen_ignored: set[str] = set()
+    for path, reason in ignored:
+        key = path_key(path)
+        if key not in seen_ignored:
+            seen_ignored.add(key)
+            unique_ignored.append((path, reason))
+    return entries, unique_ignored

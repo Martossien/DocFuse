@@ -14,6 +14,7 @@ CdC §13.3 — Pipeline :
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -36,13 +37,14 @@ from docfuse.core.context_counter import (
     estimate_tokens,
 )
 from docfuse.core.image_detector import determine_status
-from docfuse.core.inventory import list_ignored, scan_directory, scan_files
+from docfuse.core.inventory import collect_inputs
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
 from docfuse.core.report import generate_json_report, generate_markdown_report
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
+from docfuse.models.input_selection import InputSelection, path_key
 
 # Supprimer les warnings bruyants de pypdf/pdfminer en mode normal
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -77,6 +79,7 @@ class OrchestratorResult:
         self.estimates = estimates
         self.total = total
         self.context_limit = context_limit
+        self._base_statuses = [file.status for file in files]
         self.blocking_files: list[ExtractedFile] = []
         self.is_blocked = False
         self.block_reason: str | None = None
@@ -90,10 +93,9 @@ class OrchestratorResult:
         """
         self.context_limit = context_limit
 
-        # Restaurer les statuts TOO_LARGE → READY/Images/LOW_TEXT pour recalcul propre
-        for f in self.files:
-            if f.status is FileStatus.TOO_LARGE:
-                f.status = FileStatus.READY
+        # Restaurer exactement les alertes d'extraction avant chaque recalcul.
+        for file, base_status in zip(self.files, self._base_statuses, strict=True):
+            file.status = base_status
 
         # Recalculer les fichiers bloquants
         self.blocking_files = [
@@ -130,9 +132,39 @@ class OrchestratorResult:
         else:
             self.block_reason = None
 
+    def count_base_status(self, status: FileStatus) -> int:
+        """Compte un statut d'analyse sans masquer les alertes par le blocage."""
+
+        return self._base_statuses.count(status)
+
+    def remove_file(self, path: Path, reason: str | None = None) -> bool:
+        """Retire un fichier et recalcule immédiatement total et blocage.
+
+        Returns:
+            True si le fichier appartenait au résultat, False sinon.
+        """
+
+        key = path_key(path)
+        index = next(
+            (i for i, file in enumerate(self.files) if path_key(file.path) == key),
+            None,
+        )
+        if index is None:
+            return False
+
+        removed = self.files.pop(index)
+        self.estimates.pop(index)
+        self._base_statuses.pop(index)
+        if reason is not None and all(path_key(item) != key for item, _ in self.ignored):
+            self.ignored.append((removed.path, reason))
+
+        self.total = aggregate_tokens(self.estimates)
+        self.recompute_blocking(self.context_limit)
+        return True
+
 
 def run_analysis(
-    input_path: Path,
+    input_path: Path | Sequence[Path] | InputSelection,
     context_limit: int = DEFAULT_CONTEXT_LIMIT,
     margin: float = DEFAULT_MARGIN,
     recursive: bool = DEFAULT_RECURSIVE,
@@ -146,7 +178,7 @@ def run_analysis(
     """Lance l'analyse complète : inventaire → extraction → comptage.
 
     Args:
-        input_path: Dossier ou fichier d'entrée.
+        input_path: Sélection, dossier, fichier ou liste de chemins d'entrée.
         context_limit: Plafond de contexte (défaut 128 000).
         margin: Marge (défaut 0.15).
         recursive: Parcourir les sous-dossiers.
@@ -159,6 +191,7 @@ def run_analysis(
         OrchestratorResult avec les fichiers, estimations, statut de blocage.
     """
     exclude_globs = exclude_globs or []
+    selection = InputSelection.from_value(input_path)
 
     # Extraction des seuils de scan depuis scan_config (C-08)
     if scan_config is not None:
@@ -172,27 +205,17 @@ def run_analysis(
         sparse_page_chars = SCAN_SPARSE_PAGE_CHARS
         sparse_page_ratio = SCAN_SPARSE_PAGE_RATIO
 
-    # 1. Inventaire
-    if input_path.is_dir():
-        file_paths = scan_directory(
-            input_path,
-            recursive=recursive,
-            exclude_globs=exclude_globs,
-            extensions=extensions,
-            sort=sort,
-            max_depth=max_depth,
-        )
-        ignored = list_ignored(
-            input_path,
-            recursive=recursive,
-            exclude_globs=exclude_globs,
-            extensions=extensions,
-        )
-    else:
-        file_paths = scan_files([input_path], exclude_globs=exclude_globs, extensions=extensions)
-        ignored = []
+    # 1. Inventaire : les fichiers explicites restent une liste figée.
+    inventory_entries, ignored = collect_inputs(
+        selection,
+        recursive,
+        exclude_globs,
+        extensions,
+        sort,
+        max_depth,
+    )
 
-    total_files = len(file_paths)
+    total_files = len(inventory_entries)
     logger.info("Inventaire : %d fichiers supportés, %d ignorés", total_files, len(ignored))
 
     # 2. Extraction parallèle
@@ -202,15 +225,15 @@ def run_analysis(
         total = TokenEstimate(0, 0, 0)
         return OrchestratorResult(files, ignored, [], total, context_limit)
 
-    def _extract_one(idx: int, path: Path) -> tuple[int, ExtractedFile]:
-        rel = str(path.relative_to(input_path)) if input_path.is_dir() else path.name
-
+    def _extract_one(idx: int, path: Path, relative_path: str) -> tuple[int, ExtractedFile]:
         # I-15: Avertissement pour fichier volumineux
         try:
             file_size = path.stat().st_size
             if file_size > LARGE_FILE_THRESHOLD:
                 logger.warning(
-                    "Fichier volumineux (%d Mo): %s — patience", file_size // (1024 * 1024), rel
+                    "Fichier volumineux (%d Mo): %s — patience",
+                    file_size // (1024 * 1024),
+                    relative_path,
                 )
         except OSError:
             pass
@@ -220,7 +243,7 @@ def run_analysis(
         if extractor_cls is None:
             result = ExtractedFile(
                 path=path,
-                relative_path=rel,
+                relative_path=relative_path,
                 extension=path.suffix.lower().lstrip("."),
                 file_type=path.suffix.lower().lstrip("."),
                 size_bytes=path.stat().st_size if path.exists() else 0,
@@ -228,12 +251,12 @@ def run_analysis(
                 error_message=t("error.no_extractor", ext=path.suffix),
             )
         else:
-            result = extractor_cls.safe_extract(path, rel)
+            result = extractor_cls.safe_extract(path, relative_path)
 
         if emitter:
             emitter.emit(
                 ProgressEvent(
-                    file_path=rel,
+                    file_path=relative_path,
                     current=idx + 1,
                     total=total_files,
                     status=result.status.value,
@@ -244,7 +267,10 @@ def run_analysis(
         return idx, result
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(_extract_one, i, p): i for i, p in enumerate(file_paths)}
+        futures = {
+            executor.submit(_extract_one, i, entry.path, entry.relative_path): i
+            for i, entry in enumerate(inventory_entries)
+        }
         results_map: dict[int, ExtractedFile] = {}
         for future in as_completed(futures):
             if emitter and emitter.is_cancelled:
