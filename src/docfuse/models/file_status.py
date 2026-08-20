@@ -9,7 +9,6 @@ from enum import StrEnum
 
 
 class FileStatus(StrEnum):
-
     READY = "ready"
     """Texte extractible, sous le plafond. Pastille verte."""
 
