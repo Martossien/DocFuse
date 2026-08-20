@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# PyInstaller
+_internal/
+CorpusOne/
+CorpusOne.exe
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Mypy
+.mypy_cache/
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# DocFuse — references (cloned for study, not part of the project)
+/_references/
+
+# DocFuse — generated test data
+/samples/
+/tests/samples_real/
+/tests/recette/dossier_mixte/
+/tests/recette/dossier_blocage/
+/tests/recette/dossier_images/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

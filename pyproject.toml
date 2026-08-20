@@ -1,0 +1,139 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docfuse"
+version = "0.1.0"
+description = "Outil portable Windows d'assemblage de documents bureautiques vers un corpus unique (Markdown ou PDF) destiné aux LLM"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "DocFuse Contributors" }]
+keywords = ["llm", "corpus", "pdf", "docx", "pptx", "xlsx", "markdown", "extraction", "portable", "offline"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing",
+    "Topic :: Office/Business",
+]
+
+dependencies = [
+    "pdfminer.six>=20231228",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.23",
+    "openpyxl>=3.1.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "striprtf>=0.0.26",
+    "charset-normalizer>=3.3.0",
+    "reportlab>=4.0.0",
+    "customtkinter>=5.2.0",
+    "tkinterdnd2>=0.3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "pip-licenses>=4.0.0",
+    "types-beautifulsoup4>=4.12.0",
+]
+
+[project.scripts]
+docfuse = "docfuse.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/docfuse/docfuse"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+docfuse = ["i18n/*.json", "assets/*.ttf"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4", "PIE", "PT", "ARG"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["docfuse"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+no_implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = "reportlab.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "customtkinter.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tkinterdnd2.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "striprtf.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pptx.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "docx.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "openpyxl.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "bs4.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "lxml.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+norecursedirs = ["samples_real", "fixtures", "recette", "_references"]

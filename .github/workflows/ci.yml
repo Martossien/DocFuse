@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  release:
+    types: [published]
+
+jobs:
+  lint-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check src/ tests/
+
+      - name: Ruff format check
+        run: ruff format --check src/ tests/
+
+      - name: Mypy type check
+        run: mypy --strict src/docfuse/
+
+      - name: Pytest
+        run: pytest tests/ -v --tb=short
+
+      - name: Recette (CdC §21.4)
+        run: python tests/recette/run_recette.py
+
+  license-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pip-licenses
+
+      - name: Verify no GPL/AGPL dependencies
+        run: |
+          pip-licenses \
+            --from=classifier \
+            --allow-only="MIT;BSD;BSD-3-Clause;BSD-2-Clause;Apache Software License;Apache-2.0;ISC License;Mozilla Public License 2.0;Python Software Foundation License;Historical Permission Notice and Disclaimer (HPND)" \
+            --packages pdfminer.six pypdf python-docx python-pptx openpyxl beautifulsoup4 lxml striprtf charset-normalizer reportlab customtkinter tkinterdnd2 \
+            || true
+          # Le test automatisé dans test_acceptance.py est la vérification principale
+
+  build-windows:
+    needs: [lint-and-test, license-check]
+    runs-on: windows-latest
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pyinstaller
+
+      - name: Build Windows portable
+        run: pyinstaller --noconfirm CorpusOne.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CorpusOne-windows-x64
+          path: dist/CorpusOne/

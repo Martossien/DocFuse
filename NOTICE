@@ -1,0 +1,79 @@
+DocFuse / CorpusOne
+Copyright 2026 DocFuse Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This product includes software developed by third parties. Their licenses
+are listed below. All are compatible with the Apache License 2.0.
+
+== pdfminer.six ==
+  License: MIT
+  Copyright (c) Yusuke Shinyama
+  https://github.com/pdfminer/pdfminer.six
+
+== pypdf ==
+  License: BSD-3-Clause
+  Copyright (c) Mathieu Fenniak and contributors
+  https://github.com/py-pdf/pypdf
+
+== python-docx ==
+  License: MIT
+  Copyright (c) Steve Canny
+  https://github.com/python-docx/python-docx
+
+== python-pptx ==
+  License: MIT
+  Copyright (c) Steve Canny
+  https://github.com/scanny/python-pptx
+
+== openpyxl ==
+  License: MIT
+  Copyright (c) Eric Gazoni
+  https://github.com/openpyxl/openpyxl
+
+== beautifulsoup4 ==
+  License: MIT
+  Copyright (c) Leonard Richardson
+  https://www.crummy.com/software/BeautifulSoup/
+
+== lxml ==
+  License: BSD
+  Copyright (c) lxml dev team
+  https://lxml.de/
+
+== striprtf ==
+  License: MIT
+  Copyright (c) Josua Schmid
+  https://github.com/josua-striprtf/striprtf
+
+== charset-normalizer ==
+  License: MIT
+  Copyright (c) Ahmed TAHRI
+  https://github.com/jawah/charset_normalizer
+
+== ReportLab ==
+  License: BSD
+  Copyright (c) ReportLab Inc.
+  https://www.reportlab.com/
+
+== CustomTkinter ==
+  License: MIT
+  Copyright (c) Tom Schimansky
+  https://github.com/TomSchimansky/CustomTkinter
+
+== tkinterdnd2 ==
+  License: MIT
+  Copyright (c) Eliav2 / Petasis
+  https://github.com/Eliav2/tkinterdnd2

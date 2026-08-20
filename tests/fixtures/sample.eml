@@ -1,0 +1,10 @@
+Subject: Test EML
+From: sender@example.com
+To: recipient@example.com
+Date: Thu, 20 Aug 2026 12:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Ceci est le corps de l email de test avec suffisamment de texte pour depasser=
+ le seuil de caracteres et ne pas declencher d alerte.
