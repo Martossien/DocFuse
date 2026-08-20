@@ -636,3 +636,128 @@ clone Git ; aucun test de la suite versionnée n'échoue.
 ---
 
 *Fin du journal d'avancement — Session 9.*
+
+---
+
+## Session 10 — 20 août 2026 — Reprise après commit 0.1.1 et nettoyage
+
+### Contexte
+
+Le dépôt venait d'être commité avec le tag `v0.1.1` (commit `166e595 chore: préparer la beta 0.1.1`).
+Cette session est une **reprise** : installation de l'environnement sur une machine
+fraîche, validation complète de la qualité et nettoyage d'un artefact accidentel.
+
+### Installation de l'environnement
+
+- Python par défaut détecté : `C:\Python27\python.exe` (2.7.9) — non utilisable
+  (le projet exige Python ≥ 3.11).
+- Python retenu : `C:\Windows\Temp\Python313\python.exe` (3.13.15, déjà présent sur la machine).
+- Vérification `tkinter` et `customtkinter` : présents.
+- Vérification de toutes les dépendances prod + dev : déjà installées sur cet interpréteur.
+- `pip install -e ".[dev]"` : upgrade de `docfuse 0.1.0` (installé en editable) vers **`docfuse 0.1.1`**.
+- Outils disponibles après install : `ruff 0.16.3`, `mypy 2.3.1`, `pytest 9.1.1`, `pip-licenses 5.5.5`.
+- Script `docfuse.exe` installé dans `C:\Windows\Temp\Python313\Scripts\` (hors PATH ;
+  utilisation directe via `-m docfuse.cli` ou `python -m docfuse`).
+
+### Nettoyage
+
+- `extraction_result.py` (87 lignes) détecté en **untracked** à la racine.
+- Vérification `fc.exe` : identique au bit près à `src/docfuse/models/extraction_result.py`
+  (doublon accidentel).
+- Supprimé après validation utilisateur. `git status` → working tree clean.
+
+### Validation complète
+
+| Check | Résultat |
+|---|---|
+| `ruff check src/ tests/` | ✅ All checks passed |
+| `ruff format --check src/ tests/` | ✅ 67 files already formatted |
+| `mypy --strict src/docfuse/` | ✅ no issues found in 38 source files |
+| `pytest` complet | ✅ **199 passed, 38 skipped in 6.31s** (+1 nouveau test) |
+| `tests/test_acceptance.py::TestLicenseCompliance` | ✅ 2/2 (no GPL/AGPL, licenses compatibles) |
+| `tests/test_acceptance.py::TestPortability::test_no_network_imports` | ✅ 1/1 |
+| `tests/test_context_blocking.py` | ✅ 29/29 (dont nouveau test_cli_output_dir_without_extension) |
+| `piplicenses --allow-only` | ✅ Aucune GPL/AGPL runtime ; seul `pyinstaller` (build-only, exception) |
+
+### Bug DLL Python manquant : passage du binaire à `--onefile`
+
+**Symptôme rapporté par l'utilisateur** : déplacer `CorpusOne.exe` seul déclenche
+un message Windows « DLL Python 3.13 manquante ». C'est le comportement attendu
+d'un build `--onedir` qui produit un `.exe` dépendant d'un dossier `_internal/`
+voisin (`python313.dll`, `python3.dll`, `VCRUNTIME140.dll`, etc.). Si l'utilisateur
+ne copie que l'exécutable, Windows ne trouve pas la DLL au chargement.
+
+**Décision** : `CorpusOne.spec` passe en mode `--onefile` (D-052). La runtime Python
+est désormais embarquée dans l'unique `CorpusOne.exe` (~35.9 Mo). Le dossier
+`_internal/` n'est plus distribué. Le CdC §5.1 prévoyait déjà cette option comme
+privilégiée pour la portabilité.
+
+**Changements dans le spec** : suppression du bloc `COLLECT(exe, a.binaries, a.datas, ...)`,
+passage de `exclude_binaries=True` à `False`, ajout de `a.binaries` et `a.datas`
+comme arguments de `EXE(...)`.
+
+**Smoke test du binaire onefile** :
+- `CorpusOne.exe --version` → `docfuse 0.1.1`, exit 0, **aucune DLL manquante**.
+- `CorpusOne.exe --input tests/recette/dossier_mixte --output dist/smoke_final --format md --yes`
+  → corpus.md + corpus_rapport.md + corpus_rapport.json générés, exit 0.
+
+### Bug CLI `--output` dossier : ValueError
+
+**Symptôme découvert pendant le smoke test** : avec `--output dist/smoke` (dossier
+sans extension `.md`/`.pdf`), la CLI levait `ValueError: Format de sortie non supporté :`
+dans l'orchestrateur (`output_path.suffix` valait `""`).
+
+**Décision** : la CLI ajoute automatiquement l'extension quand `--output` désigne
+un dossier sans extension (D-053). Le dossier est créé au besoin. Test de
+non-régression `test_cli_output_dir_without_extension` ajouté.
+
+### Validation finale après les deux fixes
+
+| Check | Résultat |
+|---|---|
+| `ruff check src/ tests/` | ✅ |
+| `mypy --strict src/docfuse/` | ✅ 38 fichiers |
+| `pytest` complet | ✅ 199 passed, 38 skipped |
+| Smoke binaire onefile (--version) | ✅ exit 0, docfuse 0.1.1 |
+| Smoke binaire onefile (run complet) | ✅ corpus.md + rapport MD + rapport JSON générés |
+
+### DLL `_tkinter` / `_ctypes` manquantes au lancement de la GUI onefile
+
+**Symptôme rapporté** : double `ImportError: DLL load failed while importing _tkinter`
+puis `_ctypes` au démarrage de la GUI CustomTkinter via le binaire. Les `.pyd` étaient
+dans le bundle mais pas leurs dépendances natives (`tcl86t.dll`, `tk86t.dll`, `zlib1.dll`
+pour Tcl/Tk ; `libffi-8.dll` pour ctypes).
+
+**Décision** (D-054 + D-055) : `CorpusOne.spec` collecte désormais dynamiquement
+**toutes les `*.dll` du dossier `<python>/DLLs/`** et les embarque dans le bundle.
+Solution générique recommandée par PyInstaller pour les GUI onefile.
+
+**Smoke test final** : `dist\CorpusOne.exe` (40.6 Mo) démarre sans erreur,
+fenêtre GUI CustomTkinter visible à l'écran. Suite complète `199 passed, 38 skipped`.
+
+### Décisions prises
+
+- **D-050** : Python 2.7.9 trouvé dans le PATH utilisateur est ignoré ;
+  on documente l'utilisation de Python 3.13.15 depuis `C:\Windows\Temp\Python313`
+  pour les sessions sur cette machine.
+- **D-051** : Un doublon accidentel `extraction_result.py` à la racine du dépôt a été
+  supprimé (le module canonique vit sous `src/docfuse/models/`). Ajout implicite
+  au `.gitignore` non requis (le fichier n'a jamais été commité).
+
+### État après Session 10
+
+| Métrique | Valeur |
+|---|---|
+| Version | 0.1.1 beta |
+| ruff | ✅ |
+| mypy --strict | ✅ (38 fichiers) |
+| pytest | ✅ 199 passed, 38 skipped (clone frais) |
+| Binaire Windows | ✅ `CorpusOne.exe` **onefile** (~40.6 Mo, autoportant, GUI fonctionnelle) |
+| Working tree | clean |
+
+### Reste à faire
+
+- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 38 skips d'un clone frais.
+- ⬜ Documenter l'emplacement de l'interpréteur Python 3.13 utilisé sur cette machine
+  (`C:\Windows\Temp\Python313\python.exe`) dans une note de session si nécessaire.
+

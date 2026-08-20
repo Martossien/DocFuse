@@ -185,13 +185,13 @@ Conventional Commits (sans scope obligatoire) :
 
 ## 10. Journaux
 
-- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-049).
+- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-055).
 - `docs/journal-avancement.md` — suivi de l'implémentation, session par session, avec statut.
 - `docs/cahier-des-charges-docfuse.md` — cahier des charges contractuel (lecture seule).
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 9 — 0.1.1 beta)
+## 11. État actuel (Session 10 — 0.1.1 beta)
 
 | Métrique | Valeur |
 |---|---|
@@ -204,21 +204,32 @@ Conventional Commits (sans scope obligatoire) :
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ 75 annoncés historiquement, non présents dans le clone Git |
 | Edge cases testés | ✅ 15 cas (corrompus, vides, chiffrés, malformés) |
-| Tests de blocage 128K | ✅ 27 tests (blocage, codes retour, plafond variable, marge variable) |
+| Tests de blocage 128K | ✅ 28 tests (blocage, codes retour, plafond variable, marge variable) |
 | Tests Windows | ✅ 10 vérifications (CRLF, APPDATA, frozen, HKLM, spec, log, GUI, cp1252) |
-| Décisions archivées | 49 (D-001 à D-049) |
+| Décisions archivées | 55 (D-001 à D-055) |
 | Extracteurs | 13 formats |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md |
 | Jeu de test + recette | ✅ tests/recette/ |
 | Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer et retrait instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
-| Build Windows | ✅ PyInstaller `--onedir`, smoke tests Markdown et PDF |
+| Build Windows | ✅ PyInstaller **`--onefile`** (un seul .exe autoportant ~40.6 Mo, GUI + CLI), smoke tests OK |
 | Régressions connues sur la suite versionnée | 0 |
+| Working tree | clean |
+
+### Python utilisé sur cette machine
+
+Le PATH utilisateur pointe par défaut vers `C:\Python27\python.exe` (Python 2.7.9), inutilisable
+pour ce projet. Les commandes de ce guide utilisent **Python 3.13.15** depuis :
+
+```
+C:\Windows\Temp\Python313\python.exe
+```
 
 ### Reste à faire
 
 - ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 38 skips d'un clone frais
+- ⬜ Documenter l'emplacement de l'interpréteur Python 3.13 sur cette machine (au-delà de cette note dans AGENTS.md)
 
 ## 12. Règles critiques
 

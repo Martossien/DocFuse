@@ -584,4 +584,118 @@ applique une seule fois `ceil(octets / 4)` et la marge configurée.
 
 ---
 
-*Fin du journal des décisions — Session 9.*
+## Session 10 — 20 août 2026 — Reprise après commit 0.1.1
+
+### D-050 : Python 2.7.9 du PATH utilisateur ignoré, Python 3.13.15 utilisé
+
+**Décision** : Sur la machine de développement, `C:\Python27\python.exe` (2.7.9)
+demeure le `python` par défaut du PATH utilisateur mais est **ignoré**. Les commandes
+de validation, les tests et le développement utilisent `C:\Windows\Temp\Python313\python.exe`
+(Python 3.13.15) qui satisfait la contrainte `requires-python = ">=3.11"`.
+
+**Rationale** :
+- Le projet requiert Python ≥ 3.11 (cf. `pyproject.toml`) ; Python 2.7.9 ne peut pas
+  exécuter `mypy --strict`, `ruff`, ou importer `customtkinter`.
+- Le clonage d'un Python récent dans `C:\Windows\Temp` est cohérent avec le caractère
+  portable et sans droits admin de DocFuse : pas d'installation système, pas
+  d'UAC, juste un interpréteur portable.
+- Cette note est consignée dans `AGENTS.md` (section « Python utilisé sur cette machine »).
+
+### D-051 : Suppression d'un doublon accidentel `extraction_result.py` à la racine
+
+**Décision** : Le fichier `extraction_result.py` (87 lignes, identique au bit près à
+`src/docfuse/models/extraction_result.py`) détecté en **untracked** lors de la
+reprise a été supprimé. Le module canonique vit sous `src/docfuse/models/` et est
+le seul importé par le code.
+
+**Rationale** :
+- Un `fc.exe` binaire a confirmé l'égalité parfaite : c'est un copier-coller accidentel.
+- Le module n'est pas référencé par `pyproject.toml` ni par aucun import ; sa présence
+  à la racine n'apportait rien et pouvait laisser penser qu'il était un point d'entrée.
+- Aucune ligne supprimée n'avait été committée (le fichier était untracked), donc
+  aucun commit de nettoyage n'est nécessaire.
+
+### D-052 : Binaire Windows en mode `--onefile` (un seul .exe autoportant)
+
+**Décision** : `CorpusOne.spec` passe du mode `--onedir` (exe + dossier `_internal/`
+contenant `python313.dll`, `python3.dll`, `VCRUNTIME140.dll`, etc.) au mode
+**`--onefile`** : un unique `CorpusOne.exe` (~35.9 Mo) embarque la runtime Python
+et toutes les dépendances. Plus de dossier `_internal/` distribué.
+
+**Rationale** :
+- L'utilisateur a constaté que déplacer `CorpusOne.exe` seul provoquait un message
+  Windows « DLL Python 3.13 manquante » : c'est le symptôme classique d'un build
+  `--onedir` mal distribué (le `.exe` n'est pas autoportant, il a besoin de ses
+  voisines dans `_internal/`).
+- Le CdC §5.1 prévoit explicitement l'option privilégiée d'un `.exe` unique
+  (cf. `corpusone/CorpusOne.exe ← seul fichier visible indispensable`) ; l'option
+  `--onedir` n'était mentionnée que comme alternative acceptable en cas de
+  ralentissement rédhibitoire au démarrage.
+- Le coût au démarrage d'un `--onefile` (extraction du bundle dans `%TEMP%`) est
+  acceptable pour un outil de génération de corpus qui n'est pas lancé en boucle.
+- Le binaire reste portable : un seul fichier à copier sur clé USB, par mail, etc.
+
+**Changements techniques dans le spec** :
+- `EXE(..., exclude_binaries=True, [], ...)` + bloc `COLLECT(exe, a.binaries, a.datas, ...)`
+  → `EXE(..., a.scripts, a.binaries, a.datas, [], ...)` sans bloc `COLLECT`.
+- Le `[]` final dans `EXE(...)` est le paramètre `icon` (laissé par défaut).
+
+### D-053 : La CLI ajoute automatiquement l'extension quand `--output` est un dossier
+
+**Décision** : Dans `src/docfuse/cli.py`, la branche « --output fourni mais sans
+extension `.md`/`.pdf` » traite désormais le chemin comme un **dossier de sortie**
+et y écrit `corpus.md` (ou `corpus.pdf`), en créant le dossier au besoin.
+
+**Rationale** :
+- Avant : si l'utilisateur passait `--output dist/smoke` (dossier, sans extension),
+  `output_path.suffix.lower()` valait `""`, l'orchestrateur levait
+  `ValueError: Format de sortie non supporté : `.
+- Le cas « --output désigne un dossier » est légitime : on veut y placer le corpus
+  sans avoir à choisir son nom complet.
+- La résolution est non ambiguë : `--output foo.pdf` → PDF, `--output foo.md` → MD,
+  `--output foo` (sans extension ou inexistant) → dossier → on dérive l'extension
+  depuis `--format` (ou la config).
+- Test de non-régression : `test_cli_output_dir_without_extension` dans
+  `tests/test_context_blocking.py::TestCLIExitCodes`.
+
+### D-054 : Le binaire onefile embarque les DLL Tcl/Tk runtime (tcl86t/tk86t/zlib1)
+
+**Décision** : `CorpusOne.spec` ajoute explicitement les DLL `tcl86t.dll`,
+`tk86t.dll` et `zlib1.dll` (présentes dans `<python>/DLLs/`) au paramètre
+`binaries` de `Analysis`. Sans elles, le chargement de `_tkinter.pyd` échoue
+au démarrage de la GUI avec `ImportError: DLL load failed while importing _tkinter`.
+
+**Rationale** :
+- En mode `--onefile`, PyInstaller extrait le bundle dans `sys._MEIPASS` au
+  démarrage. Les `.pyd` (`_tkinter.pyd`, `_ctypes.pyd`, etc.) sont embarquées,
+  mais pas les DLL natives dont elles dépendent, car aucun module Python ne les
+  importe via `import`.
+- Quand on lance `python.exe` directement, Windows trouve ces DLL via le PATH
+  système ou le `DLLs/` adjacent à `python.exe`. Dans le bundle extrait en
+  `%TEMP%/_MEIXXXXX/`, ce mécanisme ne fonctionne pas.
+- Le hook PyInstaller officiel `hook-_tkinter.py` collecte les **data files**
+  Tcl/Tk (`tcl8.6/`, `tk8.6/`) mais pas les DLL elles-mêmes.
+
+### D-055 : Le binaire onefile embarque toutes les DLL natives de `<python>/DLLs/`
+
+**Décision** : Généralisation de D-054 : au lieu de lister les DLL une à une,
+`CorpusOne.spec` collecte dynamiquement **toutes les `*.dll` présentes dans
+`<python>/DLLs/`** et les ajoute au bundle. Si la DLL est absente du Python de
+build, elle est ignorée silencieusement.
+
+**Rationale** :
+- L'approche au cas par cas (D-054) s'est cassée dès la deuxième DLL manquante :
+  `libffi-8.dll` (dépendance de `_ctypes.pyd`, requise par CustomTkinter).
+- D'autres DLL natives (libssl-3, libcrypto-3, sqlite3.dll) ont la même
+  vulnérabilité : aucun `import` Python, mais chargées dynamiquement par les
+  modules `_ssl` / `_sqlite3`.
+- L'approche générique « tout ce qui est dans `<python>/DLLs/*.dll` est embarqué »
+  est la solution standard recommandée par la documentation PyInstaller pour les
+  applications onefile avec GUI.
+- Coût en taille : ~3 Mo supplémentaires (passage de 35.9 Mo à 40.6 Mo).
+- Sécurité : aucune DLL arbitraire ; ce sont uniquement celles livrées avec le
+  Python portable utilisé pour le build, sous contrôle de l'environnement DocFuse.
+
+---
+
+*Fin du journal des décisions — Session 10.*
