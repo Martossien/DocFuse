@@ -112,3 +112,56 @@ class TestTokenizerEngineIntegration:
         data = json.loads(report_json.read_text(encoding="utf-8"))
         assert data["tokenizer_engine"] == "mistral"
         assert data["files"][0]["tokens_estimated"] > 0
+
+
+class TestRecomputeEngine:
+    """OrchestratorResult.recompute_engine() : bascule de moteur sans ré-extraction.
+
+    Régression : la GUI ne recalculait rien tant qu'on ne relançait pas
+    l'analyse complète après avoir changé le menu déroulant — le tableau
+    affichait encore les chiffres de l'ancien moteur sous le libellé du
+    nouveau. `recompute_engine` doit produire, sans re-extraire, exactement
+    le même résultat qu'un run_analysis direct avec ce moteur.
+    """
+
+    def test_recompute_matches_direct_run_with_same_engine(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000)
+        assert result.engine_id == "approx"
+
+        result.recompute_engine("mistral")
+
+        direct = run_analysis(tmp_workspace, context_limit=128000, tokenizer_engine="mistral")
+        assert result.engine_id == "mistral"
+        assert result.total.tokens_estimated == direct.total.tokens_estimated
+        assert [e.tokens_estimated for e in result.estimates] == [
+            e.tokens_estimated for e in direct.estimates
+        ]
+
+    def test_recompute_does_not_touch_extracted_files(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000)
+        files_before = result.files
+
+        result.recompute_engine("mistral")
+
+        assert result.files is files_before  # même liste, pas de ré-extraction
+
+    def test_recompute_unknown_engine_falls_back_to_approx(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000, tokenizer_engine="mistral")
+        assert result.engine_id == "mistral"
+
+        result.recompute_engine("does-not-exist")
+
+        assert result.engine_id == "approx"
+
+    def test_recompute_updates_blocking_state(self, tmp_path: Path) -> None:
+        (tmp_path / "big.txt").write_text("A" * 10_000, encoding="utf-8")
+        result = run_analysis(tmp_path, context_limit=100)
+        assert result.is_blocked
+
+        # Remonter le plafond avant de rebasculer le moteur : recompute_engine
+        # doit réappliquer la logique de blocage avec le plafond courant.
+        result.recompute_blocking(1_000_000)
+        assert not result.is_blocked
+
+        result.recompute_engine("mistral")
+        assert result.context_limit == 1_000_000

@@ -188,6 +188,9 @@ class DocFuseGUI:
         self.tokenizer_engine_var = ctk.StringVar(
             value=t(f"tokenizer.{self.config.tokenizer_engine}")
         )
+        # Recalcul instantané (sans ré-extraction) si une analyse existe déjà —
+        # même principe que context_var pour le plafond (I-08/I-09).
+        self.tokenizer_engine_var.trace_add("write", self._on_tokenizer_engine_changed)
         ctk.CTkOptionMenu(
             options_frame,
             variable=self.tokenizer_engine_var,
@@ -626,6 +629,26 @@ class DocFuseGUI:
             return
 
         self.result.recompute_blocking(context_limit)
+        self._populate_file_list()
+        self._update_counter()
+        self._update_summary()
+        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
+        self.generate_button.configure(state=state)
+
+    def _on_tokenizer_engine_changed(self, *_args: str) -> None:
+        """Recalcule instantanément les tokens avec le nouveau moteur, sans ré-extraire.
+
+        Sans ça, changer le menu après une analyse laissait le tableau affiché
+        avec les chiffres de l'ancien moteur alors que le menu affichait déjà
+        le nouveau — trompeur, pas juste périmé.
+        """
+        if self.result is None:
+            return
+
+        tokenizer_engine = resolve_tokenizer_choice(
+            self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
+        )
+        self.result.recompute_engine(tokenizer_engine)
         self._populate_file_list()
         self._update_counter()
         self._update_summary()

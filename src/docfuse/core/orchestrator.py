@@ -143,6 +143,28 @@ class OrchestratorResult:
         else:
             self.block_reason = None
 
+    def recompute_engine(self, engine_id: str) -> None:
+        """Recalcule les estimations avec un nouveau moteur, sans ré-extraction.
+
+        Réutilise les textes déjà extraits (self.files[i].text) — même principe
+        que recompute_blocking() pour le plafond : la GUI peut changer de moteur
+        de comptage et voir le résultat instantanément, sans relancer l'analyse.
+        """
+        from docfuse.output.source_header import estimate_source_context
+
+        engine = resolve_engine(engine_id)
+        new_estimates: list[TokenEstimate] = []
+        for file, base_status in zip(self.files, self._base_statuses, strict=True):
+            if base_status.is_extracted():
+                new_estimates.append(estimate_source_context(file, self.margin, engine))
+            else:
+                new_estimates.append(TokenEstimate(0, 0, 0))
+
+        self.engine = engine
+        self.estimates = new_estimates
+        self.total = aggregate_tokens(self.estimates, self.margin, engine)
+        self.recompute_blocking(self.context_limit)
+
     def count_base_status(self, status: FileStatus) -> int:
         """Compte un statut d'analyse sans masquer les alertes par le blocage."""
 
