@@ -22,6 +22,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Rapport MD/JSON : nouvelle ligne « Moteur de comptage » + détail des
   tokens par fichier avec le moteur réellement utilisé.
 
+### Corrigé
+
+- **GUI : changer de moteur de comptage recalcule instantanément** (sans
+  ré-extraction), au lieu de laisser le tableau affiché sur les chiffres de
+  l'ancien moteur tant qu'on ne relançait pas l'analyse.
+- **CI : upload de l'artifact Windows** — le chemin pointait encore vers
+  l'ancien dossier `--onedir` depuis le passage en `--onefile` ; chaque run
+  échouait silencieusement à publier l'exe (`if-no-files-found: warn`,
+  jamais remarqué). Corrigé + transformé en échec explicite si ça se
+  reproduit (D-059).
+
 ### Technique
 
 - Nouvelle dépendance : `tiktoken` (MIT). Le paquet `mistral-common` n'est

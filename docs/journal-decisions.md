@@ -791,6 +791,29 @@ ré-encodé à chaque itération de convergence.
   entier qu'une seule fois (`test_source_header.py::
   test_large_file_text_is_encoded_only_once`).
 
+### D-059 : Corrige le chemin d'upload d'artifact CI, cassé silencieusement depuis le passage en `--onefile`
+
+**Décision** : `.github/workflows/ci.yml`, job `build-windows` : le chemin
+`path:` de `actions/upload-artifact` passe de `dist/CorpusOne/` (dossier,
+ancien mode `--onedir`) à `dist/CorpusOne.exe` (fichier unique, mode
+`--onefile` actuel). Ajout de `if-no-files-found: error` pour que ce genre
+de régression fasse échouer la CI au lieu d'un simple avertissement ignoré.
+
+**Rationale** :
+- Découvert en vérifiant, sur demande, que la CI construisait bien l'exe
+  avec les nouvelles dépendances (`tiktoken`) : le job `build-windows`
+  s'affichait vert sur GitHub Actions depuis le passage en onefile, mais
+  chaque run affichait *« No files were found with the provided path:
+  dist/CorpusOne/. No artifacts will be uploaded »* — silencieusement
+  ignoré parce que `if-no-files-found` valait `warn` par défaut.
+- Le build PyInstaller lui-même a toujours réussi (`Build complete!`) ;
+  seul le téléchargement de l'artifact depuis l'onglet Actions était cassé.
+  Les .zip publiés sur les Releases GitHub n'en dépendent pas (upload
+  manuel), donc ce n'était pas visible pour les utilisateurs finaux.
+- `if-no-files-found: error` transforme ce genre de régression silencieuse
+  en échec explicite de la CI, cohérent avec la discipline du projet (tests
+  d'acceptation stricts plutôt que des `|| true` qui masquent les problèmes).
+
 ---
 
 *Fin du journal des décisions — Session 11.*
