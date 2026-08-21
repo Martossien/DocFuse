@@ -68,10 +68,11 @@ ou les plus volumineux.
 
 **Précision du comptage** : par défaut, DocFuse utilise l'approximation générique
 ci-dessus. Le menu déroulant « Précision du comptage » permet de choisir un moteur
-précis (**Mistral**) qui compte les tokens réels de ce modèle, calculé localement
-sans connexion réseau. Utile si vous visez précisément un modèle Mistral ; pour les
-autres IA, l'approximation reste un bon indicateur générique. Changer le menu
-recalcule **instantanément** le tableau et les totaux, sans relancer l'analyse.
+précis — **Mistral** (Tekken) ou **OpenAI** (`o200k_base`, GPT-4o/4.1) — qui
+compte les tokens réels de ce modèle, calculé localement sans connexion réseau.
+Utile si vous visez précisément l'un de ces modèles ; pour les autres IA,
+l'approximation reste un bon indicateur générique. Changer le menu recalcule
+**instantanément** le tableau et les totaux, sans relancer l'analyse.
 
 <p align="center">
   <img src="assets/screenshots/gui-tokenizer-approx.png" width="31%" alt="Menu Précision du comptage sur Approximation générique, avant analyse"/>
@@ -225,5 +226,5 @@ Par défaut, l'estimation utilise la formule : `octets_UTF-8 / 4` avec une marge
 +15 %. C'est un estimateur générique, pas un tokenizer d'un fournisseur spécifique.
 La GUI affiche l'estimation pour chaque fichier ainsi que le total du corpus.
 Pour un compte réel plutôt qu'une approximation, choisissez le moteur **Mistral**
-dans « Précision du comptage » (GUI) ou `--tokenizer-engine mistral` (CLI) — calculé
-localement, sans connexion réseau.
+ou **OpenAI** dans « Précision du comptage » (GUI) ou `--tokenizer-engine
+{mistral,openai}` (CLI) — calculé localement, sans connexion réseau.

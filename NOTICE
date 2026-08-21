@@ -91,3 +91,10 @@ are listed below. All are compatible with the Apache License 2.0.
   pour le détail (mistral-common tire pydantic-extra-types[pycountry],
   et pycountry est LGPL-2.1).
   https://github.com/mistralai/mistral-common
+
+== o200k_base.tiktoken (vocabulaire de l'encodage OpenAI o200k_base) ==
+  License: MIT (même licence que le paquet tiktoken qui le distribue)
+  Copyright (c) 2022 OpenAI, Shantanu Jain
+  Fichier officiel distribué par tiktoken_ext.openai_public, hash SHA-256
+  vérifié à l'identique — voir src/docfuse/core/tokenizers/openai.py.
+  https://github.com/openai/tiktoken

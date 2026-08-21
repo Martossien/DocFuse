@@ -12,15 +12,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Ajouté
 
-- **Moteur de comptage précis en option (Mistral)** : en plus de
-  l'approximation générique (`octets/4`, inchangée par défaut), un moteur
-  `--tokenizer-engine mistral` / config `tokenizer_engine` / GUI « Précision
-  du comptage » calcule le nombre de tokens réel du tokenizer Mistral
-  (Tekken), entièrement local, sans connexion réseau. Registre extensible
-  (`core/tokenizers/`) pour d'autres moteurs à venir.
+- **Moteurs de comptage précis en option (Mistral, OpenAI)** : en plus de
+  l'approximation générique (`octets/4`, inchangée par défaut), deux moteurs
+  `--tokenizer-engine {mistral,openai}` / config `tokenizer_engine` / GUI
+  « Précision du comptage » calculent le nombre de tokens réel du tokenizer
+  Mistral (Tekken) ou d'OpenAI (`o200k_base`, GPT-4o/4.1), entièrement local,
+  sans connexion réseau. Registre extensible (`core/tokenizers/`) pour
+  d'autres moteurs à venir.
 - `--list-tokenizers` : liste les moteurs de comptage disponibles.
 - Rapport MD/JSON : nouvelle ligne « Moteur de comptage » + détail des
   tokens par fichier avec le moteur réellement utilisé.
+- **Release GitHub automatisée** : quand une Release est publiée, la CI
+  attache automatiquement `CorpusOne-{version}-windows-x64.zip` + son
+  `.sha256` (auparavant fait à la main).
 
 ### Corrigé
 
@@ -41,9 +45,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `docs/journal-decisions.md`.
 - Vocabulaire Tekken de Mistral vendoré (`assets/tekken_240911.json`,
   Apache-2.0, voir `NOTICE`), utilisé directement avec `tiktoken.Encoding`.
-- Nouveaux tests : parité avec le vrai `Tekkenizer` de `mistral-common`,
-  absence d'appel réseau (socket mocké), non-régression sur les 236 tests
-  existants.
+- Vocabulaire OpenAI `o200k_base` vendoré (`assets/o200k_base.tiktoken`,
+  MIT, fichier officiel `tiktoken`, hash vérifié — voir `NOTICE` et D-060).
+- Nouveaux tests : parité avec le vrai `Tekkenizer` de `mistral-common` et
+  avec le vrai `tiktoken.get_encoding("o200k_base")` (offline via cache
+  amorcé), absence d'appel réseau (socket mocké) pour les deux moteurs,
+  non-régression sur les tests existants.
 
 ## [0.1.1] - 2026-08-20 — Beta
 

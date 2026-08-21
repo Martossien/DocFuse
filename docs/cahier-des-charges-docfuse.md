@@ -462,8 +462,12 @@ fournisseur — CLI `--tokenizer-engine`, config `tokenizer_engine`, GUI
 silencieusement sur l’approximation (jamais de blocage à cause d’un choix de
 moteur).
 
-v1 : un seul moteur précis, **Mistral** (tokenizer Tekken). Contraintes
-inchangées (NFR-02/NFR-06) — un moteur précis n’est accepté que si :
+v1 : **Mistral** (tokenizer Tekken). v2 : **OpenAI** (encodage `o200k_base`,
+GPT-4o/4.1/o-série) — même architecture, un fichier `.tiktoken` officiel
+vendoré (`assets/o200k_base.tiktoken`, hash SHA-256 vérifié à l'identique de
+celui que `tiktoken` attend) plutôt que le mécanisme de téléchargement par
+défaut de `tiktoken.get_encoding()`. Contraintes inchangées (NFR-02/NFR-06)
+— un moteur précis n’est accepté que si :
 
 - **Zéro réseau** : vocabulaire chargé depuis un fichier embarqué, jamais
   téléchargé à l’exécution.
@@ -472,7 +476,8 @@ inchangées (NFR-02/NFR-06) — un moteur précis n’est accepté que si :
   dépendance transitive, `pycountry`, est LGPL-2.1) : il dépend uniquement de
   `tiktoken` (MIT) et d’un fichier de vocabulaire Tekken extrait du dépôt
   `mistral-common` (Apache-2.0) et vendoré dans `assets/` — voir
-  `core/tokenizers/mistral.py` et `NOTICE`.
+  `core/tokenizers/mistral.py` et `NOTICE`. Le moteur OpenAI dépend
+  uniquement de `tiktoken` (déjà présent) — voir `core/tokenizers/openai.py`.
 - Quand le total agrégé est produit par un moteur précis, il est recalculé
   comme la **somme** des comptes par fichier (pas un recalcul depuis un total
   d’octets, impossible à faire correctement pour un vrai tokenizer BPE).

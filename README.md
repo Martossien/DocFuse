@@ -55,8 +55,9 @@ contrôle de plafond pour ne pas dépasser la fenêtre de contexte.
   ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML.
 - **Compteur de contexte générique** : estimation tokens
   (`octets UTF-8 / 4`) + marge configurable (15 % par défaut).
-- **Moteur de comptage précis en option** : tokens réels d'un modèle Mistral
-  (`--tokenizer-engine mistral`), calculé localement, sans réseau.
+- **Moteurs de comptage précis en option** : tokens réels de Mistral ou
+  d'OpenAI (`--tokenizer-engine {mistral,openai}`), calculé localement,
+  sans réseau.
 - **Contrôle de plafond** : blocage si un fichier OU le total dépasse le
   plafond (128 000 tokens par défaut).
 - **Détection d'images et de scans** : alerte sans bloquer (pas d'OCR).
@@ -141,7 +142,7 @@ Options :
   -f, --format {md,pdf}     Format de sortie (défaut : md)
   -c, --context INT         Plafond de contexte en tokens (défaut : 128000)
       --margin FLOAT        Marge sur l'estimation tokens (défaut : 0.15)
-      --tokenizer-engine    Moteur de comptage : approx (défaut) ou mistral
+      --tokenizer-engine    Moteur de comptage : approx (défaut), mistral, openai
       --list-tokenizers     Affiche les moteurs de comptage disponibles
       --recursive           Parcourir les sous-dossiers
       --no-recursive        Ne pas parcourir les sous-dossiers
@@ -226,7 +227,7 @@ src/docfuse/
 ├── config.py               # config JSON (3 niveaux) + validate()
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf (police PDF Unicode), tekken_240911.json (vocab Mistral)
+├── assets/                 # DejaVuSans.ttf (police PDF Unicode), tekken_240911.json (vocab Mistral), o200k_base.tiktoken (vocab OpenAI)
 ├── core/
 │   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
 │   ├── registry.py         # @register + dispatch par extension
@@ -327,8 +328,9 @@ context window.
   ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML.
 - **Generic context counter**: tokens estimate (`UTF-8 bytes / 4`) +
   configurable margin (15% by default).
-- **Optional precise counting engine**: real token count for a Mistral model
-  (`--tokenizer-engine mistral`), computed locally, no network.
+- **Optional precise counting engines**: real token count for Mistral or
+  OpenAI (`--tokenizer-engine {mistral,openai}`), computed locally, no
+  network.
 - **Ceiling control**: blocks if a single file OR the total exceeds the
   ceiling (128,000 tokens by default).
 - **Image and scan detection**: warns but does not block (no OCR).
@@ -413,7 +415,7 @@ Options:
   -f, --format {md,pdf}     Output format (default: md)
   -c, --context INT         Context ceiling in tokens (default: 128000)
       --margin FLOAT        Margin on token estimate (default: 0.15)
-      --tokenizer-engine    Counting engine: approx (default) or mistral
+      --tokenizer-engine    Counting engine: approx (default), mistral, openai
       --list-tokenizers     List available counting engines
       --recursive           Walk sub-folders
       --no-recursive        Do not walk sub-folders
@@ -497,7 +499,7 @@ src/docfuse/
 ├── config.py               # JSON config (3 layers) + validate()
 ├── i18n.py                 # FR/EN catalog + format_number()
 ├── constants.py            # extensions, thresholds, colours, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf (Unicode PDF font), tekken_240911.json (Mistral vocab)
+├── assets/                 # DejaVuSans.ttf (Unicode PDF font), tekken_240911.json (Mistral vocab), o200k_base.tiktoken (OpenAI vocab)
 ├── core/
 │   ├── orchestrator.py     # multi-source pipeline + scan_config + sort + max_depth
 │   ├── registry.py         # @register + dispatch by extension

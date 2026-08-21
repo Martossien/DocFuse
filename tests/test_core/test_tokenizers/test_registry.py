@@ -18,8 +18,13 @@ class TestListEngines:
     def test_all_listed_engines_are_available(self) -> None:
         from docfuse.core.tokenizers.approx import ApproxEngine
         from docfuse.core.tokenizers.mistral import MistralEngine
+        from docfuse.core.tokenizers.openai import OpenAIEngine
 
-        by_id = {ApproxEngine.info.id: ApproxEngine(), MistralEngine.info.id: MistralEngine()}
+        by_id = {
+            ApproxEngine.info.id: ApproxEngine(),
+            MistralEngine.info.id: MistralEngine(),
+            OpenAIEngine.info.id: OpenAIEngine(),
+        }
         for info in list_engines():
             assert by_id[info.id].is_available()
 

@@ -816,4 +816,63 @@ de régression fasse échouer la CI au lieu d'un simple avertissement ignoré.
 
 ---
 
-*Fin du journal des décisions — Session 11.*
+## Session 12 — 21 août 2026
+
+### D-060 : Ajout du moteur de comptage précis OpenAI (`o200k_base`)
+
+**Décision** : Deuxième moteur précis dans le registre, `core/tokenizers/openai.py`.
+Même architecture que le moteur Mistral (D-057) : aucune dépendance
+supplémentaire (`tiktoken` est déjà présent), un fichier de vocabulaire
+officiel vendoré (`assets/o200k_base.tiktoken`, hash SHA-256 vérifié
+identique à celui que `tiktoken_ext.openai_public.o200k_base()` attend :
+`446a9538…`), chargé directement depuis le fichier local — jamais via
+`tiktoken.get_encoding()` qui téléchargerait sinon depuis
+`openaipublic.blob.core.windows.net` au premier appel. Aucun token spécial
+enregistré (comme Mistral) : un document qui contiendrait littéralement
+`<|endoftext|>` est compté comme texte normal plutôt que de lever une
+exception.
+
+**Rationale** :
+- Choix demandé comme "le plus facile pour la prochaine version" : `tiktoken`
+  étant déjà une dépendance (pour Mistral), ajouter l'encodage GPT natif de
+  `tiktoken` ne coûte qu'un fichier de vocabulaire (~3,6 Mo, contre 19 Mo pour
+  Mistral) et aucune nouvelle dépendance — contrairement à Llama/HuggingFace
+  `tokenizers` (dépendance Rust supplémentaire), gardé pour plus tard.
+- Vérifié par parité (`tests/test_core/test_tokenizers/test_openai_parity.py`)
+  contre le vrai `tiktoken.get_encoding("o200k_base")` officiel, sur 7 textes
+  (ASCII, accents, japonais, code, emoji) — comptes identiques. Contrairement
+  au test de parité Mistral, celui-ci s'exécute dans la CI standard (pas de
+  paquet optionnel à installer) : le cache de `tiktoken` est amorcé avec notre
+  fichier vendoré (`TIKTOKEN_CACHE_DIR` pointé vers un dossier temporaire
+  contenant le fichier sous la clé `sha1(url)` attendue), donc zéro réseau
+  même pendant ce test.
+- Testé sur un corpus de documents réels (DOCX/PDF/TXT, 10 Ko à 2 Mo, fourni
+  par l'utilisateur) : extraction une fois, puis `recompute_engine()` (D-056)
+  pour comparer approx/Mistral/OpenAI sur exactement le même texte extrait
+  sans reproduire le coût d'extraction 3 fois.
+
+### D-061 : Publication automatique de l'exe Windows sur les Releases GitHub
+
+**Décision** : `.github/workflows/ci.yml`, job `build-windows` : quand le
+déclencheur est une Release GitHub publiée (`github.event_name == 'release'`,
+pas un simple push sur `main`), une étape supplémentaire zippe
+`dist/CorpusOne.exe`, calcule son SHA-256, et attache les deux fichiers
+(`CorpusOne-{version}-windows-x64.zip` + `.zip.sha256`) à cette Release via
+`gh release upload`. Ajout de `permissions: contents: write` sur le job
+(nécessaire pour cette action, pas garanti par les permissions par défaut).
+
+**Rationale** :
+- Jusqu'ici, l'exe buildé par la CI n'était accessible que via l'onglet
+  Actions → artifacts (connexion GitHub requise, expire à 90 jours, peu
+  découvrable — l'utilisateur ne savait pas que ça existait). La release
+  v0.1.1 avait été publiée avec un zip uploadé **manuellement**.
+- Même convention de nommage que ce zip manuel (`CorpusOne-{version}-windows-x64.zip`,
+  `.sha256` au format `HASH<espace><espace>nom_fichier`, cf. `docs/releases/v0.1.1.md`)
+  pour ne rien changer côté utilisateur — juste automatiser ce qui était fait
+  à la main.
+- Ne se déclenche que sur `release: published`, pas sur chaque push : décision
+  de version explicite, pas un artifact de CI de dev.
+
+---
+
+*Fin du journal des décisions — Session 12.*

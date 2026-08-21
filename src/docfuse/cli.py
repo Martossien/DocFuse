@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tokenizer-engine",
-        choices=["approx", "mistral"],
+        choices=["approx", "mistral", "openai"],
         default=None,
         help=t("cli.tokenizer_engine"),
     )

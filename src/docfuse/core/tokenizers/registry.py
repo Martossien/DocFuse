@@ -14,11 +14,12 @@ import logging
 from docfuse.core.tokenizers.approx import ApproxEngine
 from docfuse.core.tokenizers.base import TokenizerEngine, TokenizerEngineInfo
 from docfuse.core.tokenizers.mistral import MistralEngine
+from docfuse.core.tokenizers.openai import OpenAIEngine
 
 logger = logging.getLogger(__name__)
 
 # Ordre d'enregistrement = ordre d'affichage. "approx" est toujours premier.
-_ENGINES: list[TokenizerEngine] = [ApproxEngine(), MistralEngine()]
+_ENGINES: list[TokenizerEngine] = [ApproxEngine(), MistralEngine(), OpenAIEngine()]
 
 
 def resolve_engine(engine_id: str) -> TokenizerEngine:

@@ -32,6 +32,7 @@
 
   "tokenizer.approx": "Generic approximation (fast)",
   "tokenizer.mistral": "Precise (Mistral)",
+  "tokenizer.openai": "Precise (OpenAI GPT-4o)",
 
   "table.file": "File",
   "table.type": "Type",
@@ -65,7 +66,7 @@
   "cli.format": "Output format (md or pdf)",
   "cli.context": "Context limit",
   "cli.margin": "Margin to apply",
-  "cli.tokenizer_engine": "Counting engine: approx (default) or mistral (precise)",
+  "cli.tokenizer_engine": "Counting engine: approx (default), mistral or openai (precise)",
   "cli.list_tokenizers": "List available counting engines and exit",
   "cli.recursive": "Include subfolders",
   "cli.no_recursive": "Do not include subfolders",
@@ -126,5 +127,5 @@
   "gui.analysis_cancelled": "Analysis stopped",
   "gui.analysis_cancelled_detail": "The analysis was stopped. No partial corpus will be generated.",
   "gui.analysis_in_progress": "Inventory complete: extracting and estimating tokens…",
-  "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nBy default, DocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\nThis generic counter does not depend on any provider.\n\nYou can pick a precise counting engine (e.g. Mistral) under\n\"Counting precision\" for a real token count, computed locally\nwith no network connection.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o)."
+  "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nBy default, DocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\nThis generic counter does not depend on any provider.\n\nYou can pick a precise counting engine (Mistral or OpenAI) under\n\"Counting precision\" for a real token count, computed locally\nwith no network connection.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o)."
 }

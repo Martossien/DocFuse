@@ -58,6 +58,7 @@ a = Analysis(
         (str(assets_dir / "DejaVuSans.ttf"), "docfuse/assets"),
         (str(assets_dir / "DejaVuSans-Bold.ttf"), "docfuse/assets"),
         (str(assets_dir / "tekken_240911.json"), "docfuse/assets"),
+        (str(assets_dir / "o200k_base.tiktoken"), "docfuse/assets"),
         (str(i18n_dir / "fr.json"), "docfuse/i18n"),
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
     ],
