@@ -77,3 +77,17 @@ are listed below. All are compatible with the Apache License 2.0.
   License: MIT
   Copyright (c) Eliav2 / Petasis
   https://github.com/Eliav2/tkinterdnd2
+
+== tiktoken ==
+  License: MIT
+  Copyright (c) 2022 OpenAI, Shantanu Jain
+  https://github.com/openai/tiktoken
+
+== tekken_240911.json (vocabulaire du tokenizer Mistral "Tekken") ==
+  License: Apache-2.0
+  Copyright (c) Mistral AI
+  Extrait du paquet mistral-common (data/tekken_240911.json), sans
+  installer ce paquet lui-même — voir src/docfuse/core/tokenizers/mistral.py
+  pour le détail (mistral-common tire pydantic-extra-types[pycountry],
+  et pycountry est LGPL-2.1).
+  https://github.com/mistralai/mistral-common

@@ -57,14 +57,17 @@ a = Analysis(
     datas=[
         (str(assets_dir / "DejaVuSans.ttf"), "docfuse/assets"),
         (str(assets_dir / "DejaVuSans-Bold.ttf"), "docfuse/assets"),
+        (str(assets_dir / "tekken_240911.json"), "docfuse/assets"),
         (str(i18n_dir / "fr.json"), "docfuse/i18n"),
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
     ],
     hiddenimports=collect_submodules("docfuse.extractors")
+    + collect_submodules("tiktoken_ext")
     + [
         "tkinter",
         "tkinterdnd2",
         "charset_normalizer",
+        "tiktoken",
     ],
     hookspath=[],
     hooksconfig={},

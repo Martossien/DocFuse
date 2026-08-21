@@ -15,6 +15,7 @@ Ces tests vérifient le scénario complet :
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -272,6 +273,45 @@ class TestCLIExitCodes:
         assert proc.returncode == 0
         assert ".pdf" in proc.stdout
         assert ".docx" in proc.stdout
+
+    def test_cli_list_tokenizers_returns_0(self) -> None:
+        """CLI --list-tokenizers → code 0, approx toujours listé."""
+        proc = subprocess.run(
+            [sys.executable, "-m", "docfuse", "--list-tokenizers"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0
+        assert "approx" in proc.stdout
+
+    def test_cli_tokenizer_engine_mistral(self, tmp_path: Path) -> None:
+        """CLI --tokenizer-engine mistral → corpus généré normalement."""
+        (tmp_path / "doc.txt").write_text(
+            "Un texte de test avec suffisamment de caracteres.", encoding="utf-8"
+        )
+        output = tmp_path / "corpus.md"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "docfuse",
+                "-i",
+                str(tmp_path),
+                "--tokenizer-engine",
+                "mistral",
+                "--yes",
+                "-o",
+                str(output),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0
+        assert output.exists()
+        report = json.loads((tmp_path / "corpus_rapport.json").read_text(encoding="utf-8"))
+        assert report["tokenizer_engine"] == "mistral"
 
     def test_cli_version(self) -> None:
         """CLI --version → code 0."""

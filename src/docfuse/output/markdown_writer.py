@@ -47,6 +47,7 @@ def write_markdown_corpus(
         f"- **{t('report.context_limit')}** : {format_number(result.context_limit)} tokens"
     )
     lines.append(f"- **{t('report.margin')}** : +{margin * 100:.0f} %")
+    lines.append(f"- **{t('report.tokenizer_engine')}** : {t(f'tokenizer.{result.engine_id}')}")
     lines.append(
         f"- **{t('report.total_estimated')}** : {format_number(result.total.tokens_estimated)}"
     )

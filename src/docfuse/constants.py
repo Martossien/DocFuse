@@ -124,6 +124,10 @@ SCAN_SPARSE_PAGE_RATIO: float = 0.30
 BYTES_PER_TOKEN: int = 4
 """Approximation : 1 token ≈ 4 octets UTF-8."""
 
+DEFAULT_TOKENIZER_ENGINE: str = "approx"
+"""Moteur de comptage par défaut. "approx" = octets/4 (CdC §10), toujours
+disponible. Autres moteurs enregistrés dans core/tokenizers/registry.py."""
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Performance
 # ──────────────────────────────────────────────────────────────────────────────

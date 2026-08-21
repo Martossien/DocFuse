@@ -23,6 +23,7 @@ from docfuse.constants import (
     DEFAULT_CONTEXT_LIMIT,
     DEFAULT_MARGIN,
     DEFAULT_RECURSIVE,
+    DEFAULT_TOKENIZER_ENGINE,
     LARGE_FILE_THRESHOLD,
     MAX_WORKERS,
     SCAN_MIN_CHARS_FILE,
@@ -40,6 +41,8 @@ from docfuse.core.inventory import collect_inputs
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
 from docfuse.core.report import generate_json_report, generate_markdown_report
+from docfuse.core.tokenizers.base import TokenizerEngine
+from docfuse.core.tokenizers.registry import resolve_engine
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -73,6 +76,7 @@ class OrchestratorResult:
         total: TokenEstimate,
         context_limit: int,
         margin: float = DEFAULT_MARGIN,
+        engine: TokenizerEngine | None = None,
     ) -> None:
         self.files = files
         self.ignored = ignored
@@ -80,11 +84,17 @@ class OrchestratorResult:
         self.total = total
         self.context_limit = context_limit
         self.margin = margin
+        self.engine = engine
         self._base_statuses = [file.status for file in files]
         self.blocking_files: list[ExtractedFile] = []
         self.is_blocked = False
         self.block_reason: str | None = None
         self.recompute_blocking(context_limit)
+
+    @property
+    def engine_id(self) -> str:
+        """Identifiant du moteur de comptage utilisé ("approx" si aucun)."""
+        return self.engine.info.id if self.engine is not None else DEFAULT_TOKENIZER_ENGINE
 
     def recompute_blocking(self, context_limit: int) -> None:
         """Recalcule l'état de blocage avec un nouveau plafond.
@@ -159,7 +169,7 @@ class OrchestratorResult:
         if reason is not None and all(path_key(item) != key for item, _ in self.ignored):
             self.ignored.append((removed.path, reason))
 
-        self.total = aggregate_tokens(self.estimates, self.margin)
+        self.total = aggregate_tokens(self.estimates, self.margin, self.engine)
         self.recompute_blocking(self.context_limit)
         return True
 
@@ -175,6 +185,7 @@ def run_analysis(
     scan_config: ScanConfig | None = None,
     sort: str = "name",
     max_depth: int = 12,
+    tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE,
 ) -> OrchestratorResult:
     """Lance l'analyse complète : inventaire → extraction → comptage.
 
@@ -187,12 +198,16 @@ def run_analysis(
         emitter: Émetteur de progression (pour GUI/CLI).
         extensions: Surcharge des extensions supportées (liste blanche).
         scan_config: Configuration des seuils de scan (ScanConfig).
+        tokenizer_engine: Identifiant du moteur de comptage ("approx" par
+            défaut). Un id inconnu ou indisponible retombe sur "approx"
+            (voir core/tokenizers/registry.py) — n'échoue jamais.
 
     Returns:
         OrchestratorResult avec les fichiers, estimations, statut de blocage.
     """
     exclude_globs = exclude_globs or []
     selection = InputSelection.from_value(input_path)
+    engine = resolve_engine(tokenizer_engine)
 
     # Extraction des seuils de scan depuis scan_config (C-08)
     if scan_config is not None:
@@ -235,7 +250,7 @@ def run_analysis(
 
     if total_files == 0:
         total = TokenEstimate(0, 0, 0)
-        return OrchestratorResult(files, ignored, [], total, context_limit, margin)
+        return OrchestratorResult(files, ignored, [], total, context_limit, margin, engine)
 
     def _extract_one(idx: int, path: Path, relative_path: str) -> tuple[int, ExtractedFile]:
         # I-15: Avertissement pour fichier volumineux
@@ -314,12 +329,12 @@ def run_analysis(
     for f in files:
         if f.status.is_extracted():
             # I-01: Le compteur inclut exactement l'en-tête SOURCE + le texte.
-            estimates.append(estimate_source_context(f, margin))
+            estimates.append(estimate_source_context(f, margin, engine))
         else:
             estimates.append(TokenEstimate(0, 0, 0))
 
     # 5. Agrégation
-    total = aggregate_tokens(estimates, margin)
+    total = aggregate_tokens(estimates, margin, engine)
 
     # 6. Décision de blocage
     orchestrator_result = OrchestratorResult(
@@ -329,6 +344,7 @@ def run_analysis(
         total,
         context_limit,
         margin,
+        engine,
     )
 
     logger.info(
@@ -398,6 +414,8 @@ def _write_report_only(
         result.total.tokens_estimated,
         result.total.tokens_with_margin,
         report_md,
+        estimates=result.estimates,
+        engine_id=result.engine_id,
     )
     generate_json_report(
         result.files,
@@ -407,4 +425,6 @@ def _write_report_only(
         result.total.tokens_estimated,
         result.total.tokens_with_margin,
         report_json,
+        estimates=result.estimates,
+        engine_id=result.engine_id,
     )

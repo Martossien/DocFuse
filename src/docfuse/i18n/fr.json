@@ -28,6 +28,10 @@
   "gui.report": "Rapport",
   "gui.stop": "Arrêter",
   "gui.margin": "Marge +15 % (non décochable)",
+  "gui.tokenizer_engine": "Précision du comptage",
+
+  "tokenizer.approx": "Approximation générique (rapide)",
+  "tokenizer.mistral": "Précis (Mistral)",
 
   "table.file": "Fichier",
   "table.type": "Type",
@@ -61,6 +65,8 @@
   "cli.format": "Format de sortie (md ou pdf)",
   "cli.context": "Plafond de contexte",
   "cli.margin": "Marge à appliquer",
+  "cli.tokenizer_engine": "Moteur de comptage : approx (défaut) ou mistral (précis)",
+  "cli.list_tokenizers": "Affiche les moteurs de comptage disponibles et sort",
   "cli.recursive": "Parcourir les sous-dossiers",
   "cli.no_recursive": "Ne pas parcourir les sous-dossiers",
   "cli.include_ext": "Surcharge des extensions",
@@ -80,6 +86,7 @@
   "report.date": "Date",
   "report.context_limit": "Plafond de contexte",
   "report.margin": "Marge",
+  "report.tokenizer_engine": "Moteur de comptage",
   "report.total_estimated": "Total estimé",
   "report.total_with_margin": "Total avec marge",
   "report.files_analyzed": "Fichiers analysés",
@@ -119,5 +126,5 @@
   "gui.analysis_cancelled": "Analyse arrêtée",
   "gui.analysis_cancelled_detail": "L'analyse a été arrêtée. Aucun corpus partiel ne sera généré.",
   "gui.analysis_in_progress": "Inventaire terminé : extraction et calcul des tokens en cours…",
-  "gui.help_context_text": "Le plafond de contexte est la quantité maximale de texte que l'IA peut traiter en une fois.\n\nDocFuse estime le volume avec la formule :\n  tokens = octets UTF-8 / 4\n  avec une marge de sécurité de +15 %.\n\nSi le total dépasse le plafond, la génération est bloquée.\nVous pouvez augmenter le plafond si votre IA le permet\n(ex: 200 000 pour Claude, 128 000 pour GPT-4o).\n\nCe compteur est générique et ne dépend d'aucun fournisseur."
+  "gui.help_context_text": "Le plafond de contexte est la quantité maximale de texte que l'IA peut traiter en une fois.\n\nPar défaut, DocFuse estime le volume avec la formule :\n  tokens = octets UTF-8 / 4\n  avec une marge de sécurité de +15 %.\nCe compteur générique ne dépend d'aucun fournisseur.\n\nVous pouvez choisir un moteur de comptage précis (ex: Mistral) dans\n« Précision du comptage » pour un nombre de tokens réel, calculé\nlocalement sans connexion réseau.\n\nSi le total dépasse le plafond, la génération est bloquée.\nVous pouvez augmenter le plafond si votre IA le permet\n(ex: 200 000 pour Claude, 128 000 pour GPT-4o)."
 }

@@ -412,7 +412,7 @@ tokens_avec_marge = ceil(tokens_estimes * (1 + margin))
 
 Justification : approximation publique largement utilisée (~4 octets / token en moyenne pour l’anglais/français technique). La marge **+15 %** couvre la variance (code, tableaux, langues agglutinantes).
 
-**Interdit** d’appeler une API pour compter. **Pas obligatoire** d’embarquer `tiktoken`. Si le développeur l’ajoute (MIT), les fichiers d’encodage doivent être **dans le bundle**, cache local, **zéro réseau**. L’UI reste « compteur générique », pas « tokens GPT ».
+**Interdit** d’appeler une API pour compter. **Pas obligatoire** d’embarquer `tiktoken`. Si le développeur l’ajoute (MIT), les fichiers d’encodage doivent être **dans le bundle**, cache local, **zéro réseau**. L’UI reste « compteur générique », pas « tokens GPT » **par défaut** — voir §10.6 pour le moteur précis optionnel qui, lui, a le droit de se nommer.
 
 ### 10.2 Double contrôle (entrée et total)
 
@@ -451,6 +451,31 @@ Les warnings / alertes images n’empêchent jamais la génération.
 Toujours montrer les **deux** chiffres : brut et +15 %. Le comparatif au plafond utilise **uniquement** `tokens_avec_marge`.
 
 Exemple : 120 000 estimés → 138 000 avec marge → bloqué à 128 000. L’utilisateur doit comprendre pourquoi « 120K » est refusé : **à cause de la marge**. Phrase UI obligatoire.
+
+### 10.6 Moteurs de comptage précis (optionnel)
+
+Le compteur générique (§10.1) reste le **défaut**. En plus, un registre de
+moteurs de comptage précis (`core/tokenizers/`, même pattern que le registre
+d’extracteurs) permet de choisir un moteur qui compte les tokens réels d’un
+fournisseur — CLI `--tokenizer-engine`, config `tokenizer_engine`, GUI
+« Précision du comptage ». Un id inconnu ou indisponible retombe toujours
+silencieusement sur l’approximation (jamais de blocage à cause d’un choix de
+moteur).
+
+v1 : un seul moteur précis, **Mistral** (tokenizer Tekken). Contraintes
+inchangées (NFR-02/NFR-06) — un moteur précis n’est accepté que si :
+
+- **Zéro réseau** : vocabulaire chargé depuis un fichier embarqué, jamais
+  téléchargé à l’exécution.
+- **Licence compatible** : la dépendance retenue doit être Apache-2.0/MIT/BSD.
+  Le moteur Mistral n’installe **pas** le paquet `mistral-common` (dont une
+  dépendance transitive, `pycountry`, est LGPL-2.1) : il dépend uniquement de
+  `tiktoken` (MIT) et d’un fichier de vocabulaire Tekken extrait du dépôt
+  `mistral-common` (Apache-2.0) et vendoré dans `assets/` — voir
+  `core/tokenizers/mistral.py` et `NOTICE`.
+- Quand le total agrégé est produit par un moteur précis, il est recalculé
+  comme la **somme** des comptes par fichier (pas un recalcul depuis un total
+  d’octets, impossible à faire correctement pour un vrai tokenizer BPE).
 
 ---
 

@@ -26,6 +26,7 @@ from docfuse.constants import (
     DEFAULT_OPEN_OUTPUT_FOLDER,
     DEFAULT_RECURSIVE,
     DEFAULT_SORT,
+    DEFAULT_TOKENIZER_ENGINE,
     SCAN_MIN_CHARS_FILE,
     SCAN_MIN_CHARS_PER_PAGE,
     SCAN_SPARSE_PAGE_CHARS,
@@ -62,6 +63,7 @@ class Config:
     scan: ScanConfig = field(default_factory=ScanConfig)
     exclude_globs: list[str] = field(default_factory=list)
     max_depth: int = 12  # I-04: CdC §16 — profondeur max configurable, défaut 12
+    tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -188,6 +190,8 @@ def _merge_config(base: Config, data: dict[str, Any]) -> Config:
         base.exclude_globs = [str(g) for g in data["exclude_globs"]]
     if "max_depth" in data:  # I-04
         base.max_depth = int(data["max_depth"])
+    if "tokenizer_engine" in data:
+        base.tokenizer_engine = str(data["tokenizer_engine"])
     if "scan" in data and isinstance(data["scan"], dict):
         scan_data: dict[str, Any] = data["scan"]
         if "min_chars_file" in scan_data:

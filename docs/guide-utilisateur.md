@@ -66,6 +66,12 @@ Si la jauge est rouge, le bouton **Générer** est désactivé.
 **Solution** : montez le plafond ou cliquez sur **Retirer** pour les documents inutiles
 ou les plus volumineux.
 
+**Précision du comptage** : par défaut, DocFuse utilise l'approximation générique
+ci-dessus. Le menu déroulant « Précision du comptage » permet de choisir un moteur
+précis (**Mistral**) qui compte les tokens réels de ce modèle, calculé localement
+sans connexion réseau. Utile si vous visez précisément un modèle Mistral ; pour les
+autres IA, l'approximation reste un bon indicateur générique.
+
 ### 5. Générer le corpus
 
 - Choisissez **Markdown** (recommandé pour l'IA) ou **PDF** (relecture humaine).
@@ -104,6 +110,16 @@ CorpusOne.exe -i "D:\Projets" --dry-run --report "D:\rapport.json"
 **Changer le plafond de contexte :**
 ```
 CorpusOne.exe -i "D:\Projets" --context 200000
+```
+
+**Compter les tokens réels d'un modèle Mistral :**
+```
+CorpusOne.exe -i "D:\Projets" --tokenizer-engine mistral
+```
+
+**Lister les moteurs de comptage disponibles :**
+```
+CorpusOne.exe --list-tokenizers
 ```
 
 **Assembler uniquement plusieurs fichiers précis :**
@@ -198,6 +214,9 @@ leur contenu visuel n'est pas lu. Le texte autour est bien extrait. Les fichiers
 seuls (`.jpg`, `.png`) sont ignorés avec un message dans le rapport.
 
 **« Combien de tokens pour mon corpus ? »**
-L'estimation utilise la formule : `octets_UTF-8 / 4` avec une marge de +15 %.
-C'est un estimateur générique, pas un tokenizer d'un fournisseur spécifique. La GUI
-affiche l'estimation pour chaque fichier ainsi que le total du corpus.
+Par défaut, l'estimation utilise la formule : `octets_UTF-8 / 4` avec une marge de
++15 %. C'est un estimateur générique, pas un tokenizer d'un fournisseur spécifique.
+La GUI affiche l'estimation pour chaque fichier ainsi que le total du corpus.
+Pour un compte réel plutôt qu'une approximation, choisissez le moteur **Mistral**
+dans « Précision du comptage » (GUI) ou `--tokenizer-engine mistral` (CLI) — calculé
+localement, sans connexion réseau.

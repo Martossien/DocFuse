@@ -18,7 +18,10 @@ Ces métadonnées **comptent** dans le compteur de contexte.
 
 from __future__ import annotations
 
+import math
+
 from docfuse.core.context_counter import TokenEstimate, estimate_tokens
+from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -51,26 +54,61 @@ def build_source_header(
 def estimate_source_context(
     file: ExtractedFile,
     margin: float = 0.15,
+    engine: TokenizerEngine | None = None,
 ) -> TokenEstimate:
     """Estime exactement le contenu et l'en-tête SOURCE envoyés au LLM.
 
     L'en-tête contient lui-même les deux estimations. Une courte itération jusqu'au
     point fixe garantit donc que le nombre de chiffres inscrit dans l'en-tête est
     inclus dans le nombre d'octets annoncé.
+
+    Avec le moteur "approx" (défaut), ce point fixe est calculé en ré-encodant
+    le texte complet à chaque itération — gratuit pour un simple ceil(octets/4).
+    Avec un moteur précis (ex: Mistral), ré-encoder tout le texte jusqu'à 20 fois
+    serait coûteux sur un gros corpus. On encode alors `file.text` une seule
+    fois, et seul le court en-tête (qui varie d'une itération à l'autre) est
+    ré-encodé. Effet de bord accepté : à la frontière en-tête/texte, le BPE
+    pourrait fusionner les tout derniers caractères de l'en-tête avec les tout
+    premiers du texte en un seul token — écart possible de ±1-2 tokens,
+    négligeable devant la marge de sécurité déjà appliquée.
     """
 
-    estimate = estimate_tokens(file.text, margin)
+    if engine is None or engine.info.id == "approx":
+        estimate = estimate_tokens(file.text, margin, engine)
+        for _ in range(20):
+            header = _render_source_header(
+                file,
+                estimate.tokens_estimated,
+                estimate.tokens_with_margin,
+            )
+            updated = estimate_tokens(f"{header}\n\n{file.text}", margin, engine)
+            if updated == estimate:
+                return updated
+            estimate = updated
+        return estimate
+
+    text_tokens = engine.count_tokens(file.text)
+    text_bytes = len(file.text.encode("utf-8"))
+    tokens_estimated = text_tokens
+    tokens_with_margin = math.ceil(tokens_estimated * (1.0 + margin))
     for _ in range(20):
-        header = _render_source_header(
-            file,
-            estimate.tokens_estimated,
-            estimate.tokens_with_margin,
-        )
-        updated = estimate_tokens(f"{header}\n\n{file.text}", margin)
-        if updated == estimate:
-            return updated
-        estimate = updated
-    return estimate
+        header = _render_source_header(file, tokens_estimated, tokens_with_margin)
+        new_tokens_estimated = engine.count_tokens(f"{header}\n\n") + text_tokens
+        new_tokens_with_margin = math.ceil(new_tokens_estimated * (1.0 + margin))
+        if (
+            new_tokens_estimated == tokens_estimated
+            and new_tokens_with_margin == tokens_with_margin
+        ):
+            break
+        tokens_estimated, tokens_with_margin = new_tokens_estimated, new_tokens_with_margin
+
+    final_header = _render_source_header(file, tokens_estimated, tokens_with_margin)
+    total_bytes = len(f"{final_header}\n\n".encode()) + text_bytes
+    return TokenEstimate(
+        bytes_utf8=total_bytes,
+        tokens_estimated=tokens_estimated,
+        tokens_with_margin=tokens_with_margin,
+    )
 
 
 def _render_source_header(

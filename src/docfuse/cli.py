@@ -23,6 +23,7 @@ from docfuse.config import load_config
 from docfuse.constants import ALL_EXTENSIONS
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.registry import list_supported_extensions
+from docfuse.core.tokenizers.registry import list_engines
 from docfuse.i18n import format_number, set_language, t
 from docfuse.models.input_selection import InputSelection
 
@@ -67,6 +68,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help=t("cli.margin"),
+    )
+    parser.add_argument(
+        "--tokenizer-engine",
+        choices=["approx", "mistral"],
+        default=None,
+        help=t("cli.tokenizer_engine"),
+    )
+    parser.add_argument(
+        "--list-tokenizers",
+        action="store_true",
+        help=t("cli.list_tokenizers"),
     )
     parser.add_argument(
         "--recursive",
@@ -159,19 +171,29 @@ def _write_report(
         result.total.tokens_estimated,
         result.total.tokens_with_margin,
     )
+    estimates = result.estimates
+    engine_id = result.engine_id
 
     if report_path:
         rp = Path(report_path)
         if rp.suffix == ".json":
-            generate_json_report(*args, rp)
-            generate_markdown_report(*args, rp.with_suffix(".md"))
+            generate_json_report(*args, rp, estimates=estimates, engine_id=engine_id)
+            generate_markdown_report(
+                *args, rp.with_suffix(".md"), estimates=estimates, engine_id=engine_id
+            )
         else:
-            generate_markdown_report(*args, rp)
-            generate_json_report(*args, rp.with_suffix(".json"))
+            generate_markdown_report(*args, rp, estimates=estimates, engine_id=engine_id)
+            generate_json_report(
+                *args, rp.with_suffix(".json"), estimates=estimates, engine_id=engine_id
+            )
     else:
         stem = output_path.stem + "_rapport"
-        generate_markdown_report(*args, output_path.with_name(stem + ".md"))
-        generate_json_report(*args, output_path.with_name(stem + ".json"))
+        generate_markdown_report(
+            *args, output_path.with_name(stem + ".md"), estimates=estimates, engine_id=engine_id
+        )
+        generate_json_report(
+            *args, output_path.with_name(stem + ".json"), estimates=estimates, engine_id=engine_id
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,6 +244,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {ext}")
         return 0
 
+    # --list-tokenizers
+    if args.list_tokenizers:
+        print(f"{t('cli.list_tokenizers')}:")
+        for engine_info in list_engines():
+            print(f"  {engine_info.id} — {t(engine_info.label_key)}")
+        return 0
+
     # Charger la config (avec chemin explicite si fourni)
     config = load_config(args.config)
 
@@ -233,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
 
     context_limit = args.context if args.context is not None else config.context_limit
     margin = args.margin if args.margin is not None else config.margin
+    tokenizer_engine = (
+        args.tokenizer_engine if args.tokenizer_engine is not None else config.tokenizer_engine
+    )
     recursive = (
         True
         if args.recursive
@@ -319,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         scan_config=config.scan,
         sort=config.sort,
         max_depth=config.max_depth,
+        tokenizer_engine=tokenizer_engine,
     )
 
     # Aucun fichier supporté

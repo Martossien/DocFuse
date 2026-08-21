@@ -103,6 +103,18 @@ class TestLicenseCompliance:
         for pkg in forbidden:
             assert pkg not in content.lower(), f"Dépendance interdite : {pkg}"
 
+    def test_mistral_common_not_a_dependency(self) -> None:
+        """Le paquet `mistral-common` tire `pydantic-extra-types[pycountry]`,
+        et `pycountry` est LGPL-2.1 (voir core/tokenizers/mistral.py). Le
+        moteur Mistral n'utilise que `tiktoken` + un vocabulaire vendoré —
+        garde-fou pour ne pas réintroduire `mistral-common` par mégarde.
+        """
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        content = pyproject.read_text(encoding="utf-8").lower()
+
+        assert "mistral-common" not in content
+        assert "mistral_common" not in content
+
     def test_dependencies_licenses_compatible(self) -> None:
         """Vérifie que toutes les dépendances directes de DocFuse ont une licence compatible.
 
@@ -127,6 +139,9 @@ class TestLicenseCompliance:
             "reportlab",
             "customtkinter",
             "darkdetect",  # dep of customtkinter
+            "tiktoken",  # moteur de comptage précis "mistral" (core/tokenizers/mistral.py)
+            "regex",  # dep of tiktoken
+            "requests",  # dep of tiktoken (jamais appelé par notre code, cf. tests offline)
         ]
 
         for pkg_name in runtime_deps:

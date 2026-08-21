@@ -81,3 +81,34 @@ class TestGenerateCorpus:
         report_json = tmp_workspace / "corpus_rapport.json"
         assert report_md.exists()
         assert report_json.exists()
+
+
+class TestTokenizerEngineIntegration:
+    """Bout-en-bout avec un moteur de comptage précis (CdC §10 étendu)."""
+
+    def test_default_engine_is_approx(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000)
+        assert result.engine_id == "approx"
+
+    def test_mistral_engine_resolves_and_produces_totals(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000, tokenizer_engine="mistral")
+        assert result.engine_id == "mistral"
+        assert result.total.tokens_estimated > 0
+        assert not result.is_blocked
+
+    def test_unknown_engine_falls_back_to_approx(self, tmp_workspace: Path) -> None:
+        result = run_analysis(
+            tmp_workspace, context_limit=128000, tokenizer_engine="does-not-exist"
+        )
+        assert result.engine_id == "approx"
+
+    def test_mistral_report_mentions_engine(self, tmp_workspace: Path) -> None:
+        result = run_analysis(tmp_workspace, context_limit=128000, tokenizer_engine="mistral")
+        output = tmp_workspace / "corpus.md"
+        generate_corpus(result, output, 128000, 0.15)
+        report_json = tmp_workspace / "corpus_rapport.json"
+        import json
+
+        data = json.loads(report_json.read_text(encoding="utf-8"))
+        assert data["tokenizer_engine"] == "mistral"
+        assert data["files"][0]["tokens_estimated"] > 0

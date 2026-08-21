@@ -10,6 +10,19 @@ from docfuse.core.context_counter import (
     check_limit,
     estimate_tokens,
 )
+from docfuse.core.tokenizers.base import TokenizerEngine, TokenizerEngineInfo
+
+
+class _WordCountEngine(TokenizerEngine):
+    """Moteur factice déterministe : 1 token par mot (test uniquement)."""
+
+    info = TokenizerEngineInfo(id="fake", label_key="tokenizer.fake")
+
+    def is_available(self) -> bool:
+        return True
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
 
 
 class TestEstimateTokens:
@@ -78,3 +91,41 @@ class TestAggregateTokens:
         total = aggregate_tokens([e1, e2])
         assert total.tokens_estimated == 2
         assert total.tokens_with_margin == 3  # ceil(2 * 1.15), marge appliquée au total
+
+
+class TestEstimateTokensWithEngine:
+    """Un moteur précis remplace tokens_estimated ; bytes_utf8 reste calculé."""
+
+    def test_none_engine_keeps_historical_approx_behavior(self) -> None:
+        est = estimate_tokens("abcd", margin=0.0, engine=None)
+        assert est.tokens_estimated == 1  # ceil(4/4), inchangé
+
+    def test_precise_engine_replaces_tokens_estimated(self) -> None:
+        est = estimate_tokens("a b c d", margin=0.0, engine=_WordCountEngine())
+        assert est.tokens_estimated == 4  # 4 mots, pas ceil(7 octets / 4)
+        assert est.bytes_utf8 == 7  # toujours calculé (métadonnée)
+
+    def test_precise_engine_margin_applied_after_count(self) -> None:
+        est = estimate_tokens("a b c d", margin=0.5, engine=_WordCountEngine())
+        assert est.tokens_estimated == 4
+        assert est.tokens_with_margin == 6  # ceil(4 * 1.5)
+
+
+class TestAggregateTokensWithEngine:
+    """Avec un moteur précis, le total est la somme des tokens par fichier
+    (pas un recalcul depuis le total d'octets, impossible pour un vrai BPE)."""
+
+    def test_precise_engine_sums_per_file_tokens(self) -> None:
+        engine = _WordCountEngine()
+        e1 = estimate_tokens("a b", margin=0.0, engine=engine)  # 2 tokens
+        e2 = estimate_tokens("c d e", margin=0.0, engine=engine)  # 3 tokens
+        total = aggregate_tokens([e1, e2], margin=0.0, engine=engine)
+        assert total.tokens_estimated == 5
+
+    def test_approx_engine_still_recomputes_from_total_bytes(self) -> None:
+        # Comportement historique inchangé : ceil(total_octets / 4), pas la
+        # somme des ceil(octets_fichier / 4) — cf. formule CdC §10.
+        e1 = estimate_tokens("ab", margin=0.0)  # 2 octets -> 1 token
+        e2 = estimate_tokens("ab", margin=0.0)  # 2 octets -> 1 token
+        total = aggregate_tokens([e1, e2], margin=0.0)
+        assert total.tokens_estimated == 1  # ceil(4/4) = 1, pas 1+1

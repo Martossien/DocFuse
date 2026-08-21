@@ -698,4 +698,99 @@ build, elle est ignorée silencieusement.
 
 ---
 
-*Fin du journal des décisions — Session 10.*
+## Session 11 — 21 août 2026
+
+### D-056 : Registre de moteurs de comptage de tokens, "approx" par défaut
+
+**Décision** : Nouveau package `src/docfuse/core/tokenizers/` calqué sur le
+pattern déjà utilisé pour les extracteurs (`core/registry.py`) : un
+`TokenizerEngine` (ABC) avec `is_available()` / `count_tokens()`, un registre
+qui liste les moteurs disponibles et résout un id (`resolve_engine`) sans
+jamais lever d'exception — un id inconnu ou un moteur indisponible retombe
+silencieusement sur `ApproxEngine` (octets/4, CdC §10.1), qui reste le
+comportement par défaut inchangé.
+
+**Rationale** :
+- Un utilisateur a demandé de pouvoir se rapprocher du compte réel d'un
+  moteur donné (en priorité Mistral), tout en gardant l'approximation
+  générique comme option — pas un remplacement.
+- Le pattern registre+id existait déjà pour les extracteurs ; le reproduire
+  pour les moteurs de comptage évite d'inventer une deuxième façon de faire
+  la même chose (maintenabilité).
+- `context_counter.estimate_tokens`/`aggregate_tokens` gagnent un paramètre
+  `engine` optionnel ; `engine=None` (défaut) reproduit exactement le calcul
+  historique — zéro régression sur les 236 tests existants.
+- `aggregate_tokens` corrige un point qui n'avait pas d'importance en mode
+  approx mais en aurait eu un avec un vrai tokenizer : le total n'est plus
+  recalculé depuis la somme des octets (`ceil(total_octets/4)`) quand un
+  moteur précis est utilisé, mais devient la somme des comptes par fichier —
+  un total BPE exact ne peut pas se déduire d'un total d'octets.
+
+### D-057 : Moteur Mistral = `tiktoken` + vocabulaire vendoré, PAS le paquet `mistral-common`
+
+**Décision** : `src/docfuse/core/tokenizers/mistral.py` reconstruit à la main
+l'`Encoding` `tiktoken` du tokenizer Tekken de Mistral, à partir d'un fichier
+de vocabulaire (`assets/tekken_240911.json`, 19 Mo) extrait du dépôt
+`mistral-common` et committé dans le repo — sans installer le paquet
+`mistral-common` lui-même. Dépendance ajoutée à `pyproject.toml` :
+`tiktoken` (MIT) uniquement.
+
+**Rationale** :
+- Inspection du wheel réel `mistral-common` (1.11.7, 6.6 Mo) : il tire
+  `pydantic-extra-types[pycountry]` en dépendance obligatoire, et
+  `pycountry` est sous licence **LGPL-2.1** (vérifié dans son wheel :
+  `License-Expression: LGPL-2.1-only`). `tests/test_acceptance.py::
+  TestLicenseCompliance` interdit déjà explicitement `lgpl` dans les
+  dépendances runtime — `mistral-common` tel quel aurait fait échouer ce
+  garde-fou, et à raison : figer une dépendance LGPL dans un `.exe`
+  PyInstaller onefile revient à de la liaison statique, sans le mécanisme de
+  liaison dynamique que LGPL suppose (même remarque déjà faite dans ce CdC
+  à propos de PySide6, §13.2).
+- Le tokenizer Tekken de Mistral n'est lui-même qu'une fine couche autour du
+  moteur BPE de `tiktoken` : il charge son vocabulaire (`data/tekken_*.json`,
+  Apache-2.0, même dépôt) dans un `tiktoken.Encoding`. Rien d'autre dans
+  `mistral-common` (formatage de chat, appels d'outils, tokens image/audio)
+  ne sert à « combien de tokens fait ce document ».
+- Vérifié par parité (`tests/test_core/test_tokenizers/test_mistral_parity.py`,
+  ignoré si `mistral-common` n'est pas installé) : sur 7 textes (ASCII,
+  accents FR, vide, texte long, japonais, code, emoji), notre adaptateur
+  produit **exactement** le même nombre de tokens que
+  `Tekkenizer.encode(text, bos=False, eos=False)` du vrai paquet.
+- `tiktoken` tire lui-même `requests` (Apache-2.0) en dépendance — jamais
+  appelé par notre code (`Tekkenizer`/notre adaptateur ne font que construire
+  un `Encoding` depuis un dict local). Couvert par
+  `test_no_network_call_during_load_and_encode` (mock de `socket.socket`,
+  dans l'esprit déjà anticipé par le CdC §10.1 pour un tiktoken embarqué).
+- Fichier vendoré plutôt que dépendance pip pour `mistral-common` uniquement
+  dans le but d'en extraire un fichier de données : ~80 lignes de code
+  maîtrisées valent mieux que ~10 dépendances transitives (pydantic,
+  jsonschema, pillow, numpy...) pour une fonctionnalité qui n'en utilise
+  qu'une fraction.
+
+### D-058 : Convergence de l'en-tête SOURCE sans ré-encoder tout le texte
+
+**Décision** : `estimate_source_context()` (source_header.py) garde son
+algorithme historique (ré-encoder la concaténation en-tête+texte jusqu'à 20
+fois) uniquement pour le moteur "approx". Avec un moteur précis, le texte du
+fichier est encodé **une seule fois** ; seul le court en-tête (qui varie
+d'une itération à l'autre à cause du nombre de chiffres qu'il contient) est
+ré-encodé à chaque itération de convergence.
+
+**Rationale** :
+- Avec octets/4, ré-encoder tout le texte est gratuit (un `len()` et une
+  division). Avec un vrai tokenizer BPE, ré-encoder un gros fichier jusqu'à
+  20 fois pour converger sur un en-tête de quelques lignes aurait dégradé
+  les performances sur un corpus volumineux — pour rien.
+- Effet de bord accepté : à la frontière en-tête/texte, le BPE pourrait en
+  théorie fusionner les tout derniers caractères de l'en-tête avec les tout
+  premiers caractères du texte en un seul token, ce que le découpage en deux
+  appels séparés ne peut pas reproduire. Écart possible ±1-2 tokens,
+  négligeable devant la marge de sécurité +15 % déjà appliquée.
+- Test de non-régression perf-comportement : un moteur factice qui
+  journalise ses appels vérifie qu'un texte de 5000 mots n'est encodé en
+  entier qu'une seule fois (`test_source_header.py::
+  test_large_file_text_is_encoded_only_once`).
+
+---
+
+*Fin du journal des décisions — Session 11.*

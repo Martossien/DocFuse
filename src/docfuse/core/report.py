@@ -14,7 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 from docfuse import __version__
-from docfuse.constants import BYTES_PER_TOKEN
+from docfuse.constants import BYTES_PER_TOKEN, DEFAULT_TOKENIZER_ENGINE
+from docfuse.core.context_counter import TokenEstimate
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -28,6 +29,9 @@ def generate_json_report(
     total_tokens_estimated: int,
     total_tokens_with_margin: int,
     output_path: Path,
+    *,
+    estimates: list[TokenEstimate] | None = None,
+    engine_id: str = DEFAULT_TOKENIZER_ENGINE,
 ) -> None:
     """Génère le rapport JSON.
 
@@ -39,17 +43,30 @@ def generate_json_report(
         total_tokens_estimated: Total tokens estimés.
         total_tokens_with_margin: Total tokens avec marge.
         output_path: Chemin du fichier JSON à écrire.
+        estimates: Estimations par fichier (même ordre que `files`), pour
+            détailler les tokens de chaque fichier avec le moteur réellement
+            utilisé. Si `None`, ce détail est omis.
+        engine_id: Identifiant du moteur de comptage utilisé pour ce rapport.
     """
+    files_data: list[dict[str, object]] = []
+    for i, f in enumerate(files):
+        data = f.to_dict()
+        if estimates is not None and i < len(estimates):
+            data["tokens_estimated"] = estimates[i].tokens_estimated
+            data["tokens_with_margin"] = estimates[i].tokens_with_margin
+        files_data.append(data)
+
     report: dict[str, object] = {
         "version": __version__,
         "timestamp": datetime.now().isoformat(),
         "context_limit": context_limit,
         "margin": margin,
+        "tokenizer_engine": engine_id,
         "total_tokens_estimated": total_tokens_estimated,
         "total_tokens_with_margin": total_tokens_with_margin,
         "total_files": len(files),
         "total_ignored": len(ignored_files),
-        "files": [f.to_dict() for f in files],
+        "files": files_data,
         "ignored": [{"path": str(p), "reason": r} for p, r in ignored_files],
     }
     output_path.write_text(
@@ -66,6 +83,9 @@ def generate_markdown_report(
     total_tokens_estimated: int,
     total_tokens_with_margin: int,
     output_path: Path,
+    *,
+    estimates: list[TokenEstimate] | None = None,
+    engine_id: str = DEFAULT_TOKENIZER_ENGINE,
 ) -> None:
     """Génère le rapport Markdown lisible.
 
@@ -77,6 +97,10 @@ def generate_markdown_report(
         total_tokens_estimated: Total tokens estimés.
         total_tokens_with_margin: Total tokens avec marge.
         output_path: Chemin du fichier Markdown à écrire.
+        estimates: Estimations par fichier (même ordre que `files`). Si
+            fourni, le tableau par fichier utilise le moteur réellement
+            utilisé au lieu de recalculer une approximation octets/4.
+        engine_id: Identifiant du moteur de comptage utilisé pour ce rapport.
     """
     lines: list[str] = []
     lines.append(f"# {t('report.title')}")
@@ -85,6 +109,7 @@ def generate_markdown_report(
     lines.append(f"- **{t('report.date')}** : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"- **{t('report.context_limit')}** : {format_number(context_limit)}")
     lines.append(f"- **{t('report.margin')}** : +{margin * 100:.0f} %")
+    lines.append(f"- **{t('report.tokenizer_engine')}** : {t(f'tokenizer.{engine_id}')}")
     lines.append(f"- **{t('report.total_estimated')}** : {format_number(total_tokens_estimated)}")
     lines.append(
         f"- **{t('report.total_with_margin')}** : {format_number(total_tokens_with_margin)}"
@@ -102,10 +127,14 @@ def generate_markdown_report(
             f"{t('table.context_margin')} | {t('table.status')} |"
         )
         lines.append("|---|---|---|---|---|")
-        for f in files:
-            # I-02: Formule correcte : ceil(octets/4), ceil(tokens*(1+margin))
-            tokens = math.ceil(f.text_bytes_utf8 / BYTES_PER_TOKEN) if f.text else 0
-            tokens_margin = math.ceil(tokens * (1 + margin))
+        for i, f in enumerate(files):
+            if estimates is not None and i < len(estimates):
+                tokens = estimates[i].tokens_estimated
+                tokens_margin = estimates[i].tokens_with_margin
+            else:
+                # I-02: Formule correcte : ceil(octets/4), ceil(tokens*(1+margin))
+                tokens = math.ceil(f.text_bytes_utf8 / BYTES_PER_TOKEN) if f.text else 0
+                tokens_margin = math.ceil(tokens * (1 + margin))
             status_label = f.status.label()
             lines.append(
                 f"| {f.relative_path} | {f.file_type} | {format_number(tokens)} | "

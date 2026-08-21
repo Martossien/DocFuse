@@ -68,7 +68,7 @@ jobs:
           pip-licenses \
             --from=classifier \
             --allow-only="MIT;BSD;BSD-3-Clause;BSD-2-Clause;Apache Software License;Apache-2.0;ISC License;Mozilla Public License 2.0;Python Software Foundation License;Historical Permission Notice and Disclaimer (HPND)" \
-            --packages pdfminer.six pypdf python-docx python-pptx openpyxl beautifulsoup4 lxml striprtf charset-normalizer reportlab customtkinter tkinterdnd2 \
+            --packages pdfminer.six pypdf python-docx python-pptx openpyxl beautifulsoup4 lxml striprtf charset-normalizer reportlab customtkinter tkinterdnd2 tiktoken regex requests \
             || true
           # Le test automatisé dans test_acceptance.py est la vérification principale
 

@@ -30,9 +30,10 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.config import load_config
-from docfuse.constants import ALL_EXTENSIONS, STATUS_COLORS
+from docfuse.constants import ALL_EXTENSIONS, DEFAULT_TOKENIZER_ENGINE, STATUS_COLORS
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
+from docfuse.core.tokenizers.registry import list_engines
 from docfuse.i18n import format_number, set_language, t
 from docfuse.models.file_status import FileStatus
 from docfuse.models.input_selection import InputSelection
@@ -177,6 +178,21 @@ class DocFuseGUI:
         ctk.CTkCheckBox(
             options_frame, text=t("gui.open_output_folder"), variable=self.open_folder_var
         ).grid(row=2, column=2, columnspan=2, padx=10, pady=(5, 10), sticky="w")
+
+        # Moteur de comptage : "Approximation" (défaut) ou un moteur précis
+        # (ex: Mistral) si disponible dans cet environnement.
+        ctk.CTkLabel(options_frame, text=t("gui.tokenizer_engine")).grid(
+            row=3, column=0, padx=10, pady=(5, 10), sticky="w"
+        )
+        self._tokenizer_label_to_id = {t(info.label_key): info.id for info in list_engines()}
+        self.tokenizer_engine_var = ctk.StringVar(
+            value=t(f"tokenizer.{self.config.tokenizer_engine}")
+        )
+        ctk.CTkOptionMenu(
+            options_frame,
+            variable=self.tokenizer_engine_var,
+            values=list(self._tokenizer_label_to_id.keys()),
+        ).grid(row=3, column=1, columnspan=2, padx=5, pady=(5, 10), sticky="w")
 
         # ─── Bouton Analyser + barre de progression ───
         analyze_frame = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -469,6 +485,9 @@ class DocFuseGUI:
     ) -> None:
         """Thread d'analyse."""
         try:
+            tokenizer_engine = resolve_tokenizer_choice(
+                self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
+            )
             self.result = run_analysis(
                 input_path=selection,
                 context_limit=context_limit,
@@ -477,6 +496,7 @@ class DocFuseGUI:
                 exclude_globs=self.config.exclude_globs,
                 emitter=self.emitter,
                 scan_config=self.config.scan,
+                tokenizer_engine=tokenizer_engine,
             )
         except Exception as exc:
             logger.exception("Échec de l'analyse")
@@ -800,6 +820,8 @@ class DocFuseGUI:
                 self.result.total.tokens_estimated,
                 self.result.total.tokens_with_margin,
                 rp,
+                estimates=self.result.estimates,
+                engine_id=self.result.engine_id,
             )
             json_rp = rp.with_suffix(".json")
             generate_json_report(
@@ -810,6 +832,8 @@ class DocFuseGUI:
                 self.result.total.tokens_estimated,
                 self.result.total.tokens_with_margin,
                 json_rp,
+                estimates=self.result.estimates,
+                engine_id=self.result.engine_id,
             )
             self.summary_label.configure(text=t("gui.report_exported", path=str(rp)))
 
@@ -821,6 +845,16 @@ class DocFuseGUI:
     def run(self) -> None:
         """Lance la boucle principale."""
         self.root.mainloop()
+
+
+def resolve_tokenizer_choice(label: str, label_to_id: dict[str, str]) -> str:
+    """Traduit le libellé affiché dans le menu déroulant vers l'id du moteur.
+
+    Fonction pure (testable sans ouvrir de fenêtre) : un libellé inconnu
+    (ex: langue changée entre-temps) retombe sur l'approximation par défaut
+    plutôt que de faire planter l'analyse.
+    """
+    return label_to_id.get(label, DEFAULT_TOKENIZER_ENGINE)
 
 
 def _parse_dnd_paths(data: str) -> list[str]:

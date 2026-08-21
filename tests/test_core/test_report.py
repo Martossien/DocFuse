@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from docfuse.core.context_counter import TokenEstimate
 from docfuse.core.report import generate_json_report, generate_markdown_report
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -68,3 +69,45 @@ class TestReport:
         assert "doc1.txt" in content
         assert "app.exe" in content
         assert "PDF corrompu" in content  # Section erreurs
+
+    def test_json_report_defaults_to_approx_engine(self, tmp_path: Path) -> None:
+        files = self._make_files()
+        output = tmp_path / "report.json"
+
+        generate_json_report(files, [], 128000, 0.15, 500, 575, output)
+
+        data = json.loads(output.read_text(encoding="utf-8"))
+        assert data["tokenizer_engine"] == "approx"
+        assert "tokens_estimated" not in data["files"][0]  # pas d'estimates fournies
+
+    def test_json_report_with_estimates_uses_engine_per_file_tokens(self, tmp_path: Path) -> None:
+        files = self._make_files()
+        estimates = [TokenEstimate(400, 100, 115), TokenEstimate(0, 0, 0)]
+        output = tmp_path / "report.json"
+
+        generate_json_report(
+            files, [], 128000, 0.15, 100, 115, output, estimates=estimates, engine_id="mistral"
+        )
+
+        data = json.loads(output.read_text(encoding="utf-8"))
+        assert data["tokenizer_engine"] == "mistral"
+        assert data["files"][0]["tokens_estimated"] == 100
+        assert data["files"][0]["tokens_with_margin"] == 115
+
+    def test_markdown_report_uses_estimates_instead_of_recomputing(self, tmp_path: Path) -> None:
+        # Le premier fichier a un texte non vide ; sans `estimates`, le rapport
+        # recalculerait ceil(octets/4). On vérifie qu'avec `estimates`, c'est
+        # bien cette valeur (et pas le recalcul) qui apparaît dans le tableau.
+        files = self._make_files()
+        estimates = [TokenEstimate(400, 999, 1149), TokenEstimate(0, 0, 0)]
+        output = tmp_path / "report.md"
+
+        generate_markdown_report(
+            files, [], 128000, 0.15, 999, 1149, output, estimates=estimates, engine_id="mistral"
+        )
+
+        from docfuse.i18n import format_number
+
+        content = output.read_text(encoding="utf-8")
+        assert format_number(999) in content
+        assert format_number(1149) in content
