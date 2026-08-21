@@ -450,6 +450,10 @@ class DocFuseGUI:
         selection = self.input_selection
         context_limit = self._get_current_limit()
         recursive = bool(self.recursive_var.get())
+        # Lu sur le thread principal : StringVar.get() n'est pas thread-safe.
+        tokenizer_engine = resolve_tokenizer_choice(
+            self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
+        )
 
         self.emitter = ProgressEmitter()
         self.result = None
@@ -470,7 +474,7 @@ class DocFuseGUI:
 
         self._analysis_thread = threading.Thread(
             target=self._run_analysis_thread,
-            args=(selection, context_limit, recursive),
+            args=(selection, context_limit, recursive, tokenizer_engine),
             daemon=True,
         )
         self._analysis_thread.start()
@@ -482,12 +486,10 @@ class DocFuseGUI:
         selection: InputSelection,
         context_limit: int,
         recursive: bool,
+        tokenizer_engine: str,
     ) -> None:
         """Thread d'analyse."""
         try:
-            tokenizer_engine = resolve_tokenizer_choice(
-                self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
-            )
             self.result = run_analysis(
                 input_path=selection,
                 context_limit=context_limit,
