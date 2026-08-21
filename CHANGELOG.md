@@ -8,7 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
-## [Unreleased]
+## [0.1.2] - 2026-08-21 — Beta
 
 ### Ajouté
 
@@ -51,6 +51,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   avec le vrai `tiktoken.get_encoding("o200k_base")` (offline via cache
   amorcé), absence d'appel réseau (socket mocké) pour les deux moteurs,
   non-régression sur les tests existants.
+- Validé sur un corpus de documents réels (65 fichiers synthétiques 10 Ko à
+  2 Mo + 14 documents utilisateur variés — DOCX/PDF/MD/HTML/PPTX/ODT/RTF/XLSX/CSV) :
+  0 erreur d'extraction, contenu intact, comptes de tokens cohérents et
+  différenciés par moteur.
+- 295 tests collectés (256 passed / 39 skipped — `tests/samples_real/` non
+  versionné).
+- 61 décisions d'architecture archivées (D-001 à D-061).
 
 ## [0.1.1] - 2026-08-20 — Beta
 
@@ -128,6 +135,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.1.2]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.1
 [0.1.1-beta]: https://github.com/Martossien/DocFuse/compare/166e595...main
 [0.1.0]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.1

@@ -106,7 +106,7 @@ jobs:
       # Uniquement quand une Release GitHub est publiee (pas sur les push main) :
       # zippe l'exe, calcule le SHA-256, et attache les deux a la Release. Meme
       # convention de nommage que la v0.1.1 (upload manuel a l'epoque) :
-      # CorpusOne-{version}-windows-x64.zip + .zip.sha256.
+      # CorpusOne-{version}-beta-windows-x64.zip + .zip.sha256.
       - name: Package and publish release asset
         if: github.event_name == 'release'
         shell: pwsh
@@ -114,7 +114,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
-          $zipName = "CorpusOne-$version-windows-x64.zip"
+          $zipName = "CorpusOne-$version-beta-windows-x64.zip"
           Compress-Archive -Path dist/CorpusOne.exe -DestinationPath $zipName -Force
           $hash = (Get-FileHash -Path $zipName -Algorithm SHA256).Hash
           Set-Content -Path "$zipName.sha256" -Value "$hash  $zipName" -NoNewline -Encoding ascii

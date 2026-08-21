@@ -41,7 +41,8 @@ Points non négociables (résumé) :
 | Tests | pytest | MIT |
 | Lint | ruff | MIT |
 | Type check | mypy | MIT |
-| Empaquetage | PyInstaller --onedir | GPL (exception PyInstaller) |
+| Empaquetage | PyInstaller --onefile | GPL (exception PyInstaller) |
+| Tokenizers précis (option) | tiktoken | MIT |
 
 ## 4. Architecture
 
@@ -53,11 +54,17 @@ src/docfuse/
 ├── config.py               # config JSON (3 niveaux) + validate() min/max
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf + DejaVuSans-Bold.ttf (police PDF Unicode)
+├── assets/                 # DejaVuSans.ttf/-Bold (police PDF), tekken_240911.json (vocab Mistral), o200k_base.tiktoken (vocab OpenAI)
 ├── core/
 │   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
 │   ├── registry.py         # @register + dispatch par extension
-│   ├── context_counter.py  # estimateur tokens (octets/4, +15%)
+│   ├── context_counter.py  # compteur tokens (octets/4 par défaut, ou moteur precis)
+│   ├── tokenizers/         # registre de moteurs : approx (défaut), mistral, openai
+│   │   ├── base.py         # TokenizerEngine (ABC), TokenizerEngineInfo
+│   │   ├── approx.py       # octets/4 (formule historique, comportement inchangé)
+│   │   ├── mistral.py      # tiktoken.Encoding + vocab Tekken vendoré (pas mistral-common : pycountry est LGPL)
+│   │   ├── openai.py       # tiktoken.Encoding + vocab o200k_base vendoré (pas de téléchargement au 1er lancement)
+│   │   └── registry.py     # resolve_engine() ne lève jamais, list_engines()
 │   ├── image_detector.py   # détection images + seuils pauvreté (configurables)
 │   ├── inventory.py        # parcours dossier, liste blanche, tri name/mtime/type
 │   ├── progress.py         # ProgressEvent (thread-safe)
@@ -95,7 +102,7 @@ Entrée : dossier(s) et/ou fichier(s) explicites
   → inventaire (liste blanche extensions, ignores ~$ Thumbs.db etc., sort name/mtime/type)
   → extraction parallèle (ThreadPoolExecutor, bornée)
   → mesure images + pauvreté texte (seuils config scan)
-  → compteur par fichier (octets/4, +15%, en-têtes SOURCE comprises)
+  → compteur par fichier (octets/4 par défaut ou moteur précis, +15%, en-têtes SOURCE comprises)
   → agrégation + compteur total
   → décision: bloquer / autoriser (fichier OU total > plafond)
   → écriture MD ou PDF + rapport MD/JSON
@@ -108,7 +115,8 @@ Entrée : dossier(s) et/ou fichier(s) explicites
 - **0 dépendance réseau** : aucune lib n'a le droit de faire d'HTTP.
 - **Code défensif** : chaque extracteur capture ses erreurs → statut `Erreur` plutôt que crash.
 - **i18n** : toutes les chaînes via catalogue (cli, gui, report, orchestrator), aucune en dur.
-- **Cache mémoire** des textes extraits pour recalcul instantané du compteur si plafond modifié.
+- **Cache mémoire** des textes extraits pour recalcul instantané du compteur si plafond **ou moteur de comptage** modifié (`OrchestratorResult.recompute_blocking()` / `.recompute_engine()`).
+- **Moteurs de comptage précis, jamais bloquants** : `resolve_engine()` ne lève jamais — un id inconnu ou indisponible retombe silencieusement sur `approx`.
 - **Sélection exacte** : plusieurs fichiers ne sont jamais remplacés par leur dossier parent ; les retraits persistent pendant la session.
 - **Parallélisation** : ThreadPoolExecutor (IO-bound) + queue thread-safe pour progression GUI.
 - **Code haute qualité** : ruff + mypy --strict + tests unitaires, d'acceptation et de recette.
@@ -130,8 +138,8 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 | Objectif | Mesure | Statut |
 |---|---|---|
 | Code haute qualité | `ruff check` + `ruff format --check` | ✅ |
-| Typage strict | `mypy --strict` sur 38 fichiers | ✅ |
-| Tests versionnés | 236 collectés : 198 réussis, 38 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
+| Typage strict | `mypy --strict` sur 44 fichiers | ✅ |
+| Tests versionnés | 295 collectés : 256 réussis, 39 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
 | Maintenabilité | Un extracteur = un fichier, registry auto, docstrings | ✅ |
 | User-friendly | GUI CustomTkinter, jauge couleur, recalcul sans ré-extraction | ✅ |
 | Configurable | JSON 3 niveaux + validate() + scan_config + sort + max_depth | ✅ |
@@ -191,29 +199,28 @@ Conventional Commits (sans scope obligatoire) :
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 10 — 0.1.1 beta)
+## 11. État actuel (Session 12 — 0.1.2 beta)
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source Python | 38 |
-| Modules de test | 23 |
-| Tests collectés depuis un clone frais | 236 |
+| Fichiers source Python | 44 |
+| Tests collectés depuis un clone frais | 295 |
 | ruff | ✅ |
 | mypy --strict | ✅ |
-| pytest | ✅ 198 passed, 38 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 256 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
-| Fichiers de test réels | ⚠️ 75 annoncés historiquement, non présents dans le clone Git |
-| Edge cases testés | ✅ 15 cas (corrompus, vides, chiffrés, malformés) |
-| Tests de blocage 128K | ✅ 28 tests (blocage, codes retour, plafond variable, marge variable) |
-| Tests Windows | ✅ 10 vérifications (CRLF, APPDATA, frozen, HKLM, spec, log, GUI, cp1252) |
-| Décisions archivées | 55 (D-001 à D-055) |
+| Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
+| Décisions archivées | 61 (D-001 à D-061) |
 | Extracteurs | 13 formats |
+| Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
 | i18n | FR + EN complets |
-| Guide utilisateur | ✅ docs/guide-utilisateur.md |
+| Guide utilisateur | ✅ docs/guide-utilisateur.md, captures d'écran réelles |
 | Jeu de test + recette | ✅ tests/recette/ |
-| Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer et retrait instantané |
+| Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer, retrait instantané, changement de moteur instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
-| Build Windows | ✅ PyInstaller **`--onefile`** (un seul .exe autoportant ~40.6 Mo, GUI + CLI), smoke tests OK |
+| Build Windows | ✅ PyInstaller **`--onefile`** (un seul .exe autoportant, GUI + CLI) |
+| Publication Windows | ✅ automatique sur les Releases GitHub (`.zip` + `.sha256`) à chaque Release publiée — voir §13 |
+| Testé sur documents réels | ✅ 65 fichiers synthétiques + 14 documents utilisateur variés, 0 erreur |
 | Régressions connues sur la suite versionnée | 0 |
 | Working tree | clean |
 
@@ -228,8 +235,8 @@ C:\Windows\Temp\Python313\python.exe
 
 ### Reste à faire
 
-- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 38 skips d'un clone frais
-- ⬜ Documenter l'emplacement de l'interpréteur Python 3.13 sur cette machine (au-delà de cette note dans AGENTS.md)
+- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 39 skips d'un clone frais
+- ⬜ Moteur de comptage Llama/HuggingFace `tokenizers` (évoqué comme prochaine option, pas retenu pour 0.1.2 : dépendance Rust supplémentaire)
 
 ## 12. Règles critiques
 
@@ -242,3 +249,53 @@ C:\Windows\Temp\Python313\python.exe
 7. **Tests** pour chaque extracteur + tests d'acceptation du CdC.
 8. **Mise à jour des journaux** à chaque session (décisions + avancement).
 9. **Mise à jour de AGENTS.md** si décision de stack ou d'architecture change.
+
+## 13. Procédure de release
+
+Checklist à suivre pour chaque nouvelle version (depuis 0.1.2). Tout se fait
+sur `main`, en local (pas de branche de release séparée à ce stade).
+
+1. **Vérifier que `main` est vert** : `ruff check`, `ruff format --check`,
+   `mypy --strict src/docfuse/`, `pytest tests/`, `python tests/recette/run_recette.py`.
+2. **Bump de version** : `pyproject.toml` (`version = "..."`) **et**
+   `src/docfuse/__init__.py` (`__version__ = "..."`) — les deux doivent être
+   identiques, aucun autre endroit ne doit contenir la version en dur
+   (`grep -rn "0\.1\.X" src/ tests/` doit ne rien trouver côté ancienne
+   version).
+3. **CHANGELOG.md** : renommer `## [Unreleased]` en `## [X.Y.Z] - AAAA-MM-JJ
+   — Beta`, compléter Ajouté/Modifié/Corrigé/Technique (compter les tests et
+   décisions à jour), ajouter le lien `[X.Y.Z]: .../releases/tag/vX.Y.Z` en
+   bas de fichier.
+4. **`docs/releases/vX.Y.Z.md`** : nouvelles notes de version (voir les
+   fichiers précédents pour le gabarit). Le nom de zip attendu est
+   `CorpusOne-X.Y.Z-beta-windows-x64.zip` (déterminé par le tag Git, voir
+   étape 6 — ne pas inventer un autre nom).
+5. **README.md** (sections FR **et** EN) : badge de version, tableau de
+   téléchargement (lien vers `vX.Y.Z`, nom de fichier `CorpusOne-X.Y.Z-beta-windows-x64.zip`),
+   lien vers les notes de version, badge de tests si le nombre a changé.
+6. **AGENTS.md** : section « État actuel », `docs/journal-avancement.md` :
+   nouvelle entrée de session, `docs/journal-decisions.md` : ADR des
+   décisions de la session si non déjà fait.
+7. **Commit + push** ces changements sur `main` (voir Git Safety Protocol —
+   jamais de force-push, jamais sans review du diff).
+8. **Tag + Release** :
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z --title "CorpusOne X.Y.Z beta" \
+     --notes-file docs/releases/vX.Y.Z.md
+   ```
+   Publier la Release déclenche automatiquement le job `build-windows` de
+   `.github/workflows/ci.yml` (`github.event_name == 'release'`), qui zippe
+   `dist/CorpusOne.exe`, calcule son SHA-256, et attache les deux fichiers à
+   la Release (`gh release upload ... --clobber`) — voir D-061 dans
+   `docs/journal-decisions.md`. Aucune étape manuelle d'upload.
+9. **Vérifier** : `gh run list --branch main --limit 1` jusqu'à
+   `completed`/`success`, puis `gh release view vX.Y.Z --json assets` pour
+   confirmer que le `.zip` et le `.sha256` sont bien attachés.
+
+**Publier une Release GitHub est une action publique et visible** (notifie
+les watchers du dépôt, apparaît dans l'onglet Releases). Un agent qui exécute
+cette procédure doit avoir une confirmation explicite de l'utilisateur avant
+l'étape 8 — les étapes 1 à 7 sont des modifications locales réversibles, pas
+l'étape 8.

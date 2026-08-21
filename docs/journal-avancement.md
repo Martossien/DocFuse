@@ -761,3 +761,124 @@ fenêtre GUI CustomTkinter visible à l'écran. Suite complète `199 passed, 38 
 - ⬜ Documenter l'emplacement de l'interpréteur Python 3.13 utilisé sur cette machine
   (`C:\Windows\Temp\Python313\python.exe`) dans une note de session si nécessaire.
 
+---
+
+## Session 12 — 21 août 2026
+
+Demande initiale : rendre le moteur de comptage de tokens configurable
+(approximation générique existante vs moteur précis d'un fournisseur),
+priorité Mistral. Étendue en cours de session à un deuxième moteur (OpenAI)
+et à l'automatisation de la publication Windows, sur demande explicite.
+
+### Moteur de comptage précis Mistral — ✅ Terminé
+
+- Nouveau package `core/tokenizers/` (registre, même pattern que le registre
+  d'extracteurs). `ApproxEngine` (défaut, comportement historique
+  inchangé) + `MistralEngine`.
+- **Découverte en cours d'implémentation** : le package `mistral-common`
+  tire `pydantic-extra-types[pycountry]`, et `pycountry` est LGPL-2.1 —
+  incompatible avec la politique zéro-copyleft du projet une fois figée
+  dans un `.exe` onefile (pas de liaison dynamique possible). Vérifié en
+  inspectant le wheel réel, pas supposé.
+- Solution retenue : dépendance unique `tiktoken` (MIT) + fichier de
+  vocabulaire Tekken vendoré (extrait de `mistral-common`, Apache-2.0,
+  19 Mo). Parité vérifiée à l'identique contre le vrai `Tekkenizer` sur
+  7 textes (ASCII, accents, japonais, code, emoji). Voir D-056/D-057.
+- `aggregate_tokens()` corrigé au passage : le total était recalculé depuis
+  la somme des octets (correct en mode approx, faux pour un vrai
+  tokenizer BPE) — devient la somme des comptes par fichier avec un moteur
+  précis.
+- `estimate_source_context()` optimisé pour les moteurs précis : le texte
+  du fichier n'est encodé qu'une fois pendant la convergence de l'en-tête
+  SOURCE (au lieu de jusqu'à 20 fois), voir D-058.
+
+### Bug GUI trouvé en testant la vraie fenêtre — ✅ Corrigé
+
+- `self.tokenizer_engine_var.get()` était lu depuis le thread d'arrière-plan
+  de l'analyse → `RuntimeError: main thread is not in main loop`. Trouvé en
+  lançant réellement `DocFuseGUI()` sur un display X (capture d'écran), pas
+  seulement en import/tests. Corrigé en suivant le pattern déjà utilisé pour
+  `recursive_var` (lu sur le thread principal avant de lancer le thread).
+- Second gap trouvé en re-testant : changer le menu de moteur **sans**
+  re-cliquer Analyser ne recalculait rien — le tableau restait figé sur les
+  chiffres de l'ancien moteur alors que le menu affichait déjà le nouveau.
+  Corrigé avec `OrchestratorResult.recompute_engine()` (même principe que
+  `recompute_blocking()` pour le plafond) + un `trace_add` sur la variable
+  Tk, vérifié par capture d'écran avant/après bascule.
+
+### Bug CI trouvé en vérifiant le build — ✅ Corrigé
+
+- En vérifiant que la CI construisait bien l'exe avec `tiktoken`, découverte
+  d'une régression silencieuse pré-existante (antérieure à cette session) :
+  `actions/upload-artifact` pointait encore vers `dist/CorpusOne/` (ancien
+  mode `--onedir`) alors que le projet est en `--onefile` depuis plusieurs
+  sessions. Chaque run affichait *« No files were found… No artifacts will
+  be uploaded »*, ignoré silencieusement (`if-no-files-found: warn` par
+  défaut). Le build PyInstaller lui-même a toujours réussi. Corrigé (chemin
+  + `if-no-files-found: error`), voir D-059.
+
+### Moteur de comptage précis OpenAI — ✅ Terminé
+
+- Deuxième moteur précis demandé comme « le plus facile pour la prochaine
+  version » : `tiktoken` étant déjà présent, l'encodage natif `o200k_base`
+  (GPT-4o/4.1/o-série) ne coûte qu'un fichier de vocabulaire (3,6 Mo)
+  vendoré, aucune nouvelle dépendance. Chargé depuis le fichier local,
+  jamais via `tiktoken.get_encoding()` (téléchargerait sinon depuis
+  `openaipublic.blob.core.windows.net`). Voir D-060.
+- Menu GUI et `--tokenizer-engine` détectent le nouveau moteur
+  automatiquement via le registre — aucun changement de code GUI requis.
+- Test de parité contre le vrai `tiktoken.get_encoding("o200k_base")`,
+  exécuté hors ligne en amorçant le cache de `tiktoken` avec le fichier
+  vendoré (`TIKTOKEN_CACHE_DIR` pointé vers un dossier temporaire) — pas
+  besoin d'ignorer ce test en CI standard, contrairement à celui de Mistral.
+
+### Publication automatique sur les Releases GitHub — ✅ Terminé
+
+- Jusqu'ici l'exe n'était accessible que via l'onglet Actions (connexion
+  requise, expire à 90 jours, peu découvrable — signalé par l'utilisateur
+  après ne pas l'avoir trouvé). Ajout d'une étape CI qui, uniquement quand
+  une Release est publiée, zippe l'exe, calcule son SHA-256, et attache les
+  deux fichiers à la Release via `gh release upload`. Voir D-061.
+- Procédure de release documentée dans `AGENTS.md` §13 (checklist complète,
+  du bump de version à la vérification post-publication), à la demande
+  explicite de l'utilisateur pour que ce soit répétable à chaque version.
+
+### Tests sur documents réels — ✅ Fait
+
+- L'utilisateur a explicitement autorisé l'usage de documents présents sur
+  la machine pour vérifier le fonctionnement. Deux corpus utilisés :
+  - 65 fichiers synthétiques (`~/Téléchargements/fichiers_test_.../`),
+    10 Ko à 2 Mo, DOCX/PDF/TXT avec marqueurs de contenu vérifiables.
+  - 14 documents utilisateur réels et variés (DOCX/PDF/MD/HTML/PPTX/ODT/
+    RTF/XLSX/CSV) pris dans `~/Téléchargements` et `~/Documents`.
+- Résultat : 0 erreur d'extraction sur les deux corpus, marqueurs de
+  contenu intacts à 100 %, comptes de tokens cohérents et différenciés par
+  moteur. Deux statuts particuliers (`peu_de_texte`, `images`) vérifiés un
+  par un pour confirmer qu'il s'agissait du comportement attendu et non
+  d'un bug d'extraction (un fichier `.odt` genuinement vide, une diapo
+  composée d'une seule image).
+
+### État après Session 12
+
+| Métrique | Valeur |
+|---|---|
+| Version | 0.1.2 beta |
+| ruff | ✅ |
+| mypy --strict | ✅ (44 fichiers) |
+| pytest | ✅ 256 passed, 39 skipped (clone frais) |
+| Recette | ✅ 7/7 PASS |
+| Moteurs de comptage | approx (défaut), mistral, openai |
+| Décisions archivées | 61 (D-001 à D-061) |
+| Working tree | clean |
+
+### Reste à faire
+
+- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa
+  génération pour supprimer les skips d'un clone frais.
+- ⬜ Moteur Llama/HuggingFace `tokenizers` évoqué pour une version future,
+  pas retenu pour 0.1.2 (dépendance Rust supplémentaire, hors scope
+  « facile »).
+- ⬜ Publier effectivement la Release `v0.1.2` (checklist AGENTS.md §13,
+  étape 8 — action publique, confirmation utilisateur requise avant
+  exécution).
+
