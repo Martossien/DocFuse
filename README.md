@@ -67,6 +67,14 @@ contrôle de plafond pour ne pas dépasser la fenêtre de contexte.
 - **Licence Apache 2.0**, dépendances compatibles uniquement
   (MIT/BSD/Apache/ISC/MPL/Python) — pas de GPL/AGPL.
 
+### Capture d'écran
+
+<p align="center">
+  <img src="docs/assets/screenshots/gui-tokenizer-mistral-result.png" width="640" alt="Fenêtre DocFuse après analyse : liste des fichiers avec tokens réels calculés par le moteur Mistral"/>
+</p>
+
+<p align="center"><sub>Analyse terminée avec le moteur de comptage précis (Mistral) — voir le <a href="docs/guide-utilisateur.md#4-le-compteur-de-contexte">guide utilisateur</a> pour le détail.</sub></p>
+
 ### Téléchargement (Windows)
 
 La dernière préversion est **[`v0.1.1 beta`](https://github.com/Martossien/DocFuse/releases/tag/v0.1.1)**.
@@ -330,6 +338,14 @@ context window.
 - **Full i18n**: French (default) and English.
 - **Apache 2.0** license, only compatible dependencies
   (MIT/BSD/Apache/ISC/MPL/Python) — no GPL/AGPL.
+
+### Screenshot
+
+<p align="center">
+  <img src="docs/assets/screenshots/gui-tokenizer-mistral-result.png" width="640" alt="DocFuse window after analysis: file list with real tokens computed by the Mistral engine"/>
+</p>
+
+<p align="center"><sub>Analysis done with the precise counting engine (Mistral) — see the <a href="docs/guide-utilisateur.md#4-le-compteur-de-contexte">user guide</a> (French) for details.</sub></p>
 
 ### Download (Windows)
 

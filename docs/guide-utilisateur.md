@@ -70,7 +70,14 @@ ou les plus volumineux.
 ci-dessus. Le menu déroulant « Précision du comptage » permet de choisir un moteur
 précis (**Mistral**) qui compte les tokens réels de ce modèle, calculé localement
 sans connexion réseau. Utile si vous visez précisément un modèle Mistral ; pour les
-autres IA, l'approximation reste un bon indicateur générique.
+autres IA, l'approximation reste un bon indicateur générique. Changer le menu
+recalcule **instantanément** le tableau et les totaux, sans relancer l'analyse.
+
+<p align="center">
+  <img src="assets/screenshots/gui-tokenizer-approx.png" width="31%" alt="Menu Précision du comptage sur Approximation générique, avant analyse"/>
+  <img src="assets/screenshots/gui-tokenizer-mistral-selected.png" width="31%" alt="Menu Précision du comptage bascule sur Précis (Mistral)"/>
+  <img src="assets/screenshots/gui-tokenizer-mistral-result.png" width="31%" alt="Tableau des fichiers avec les tokens réels calculés par Mistral"/>
+</p>
 
 ### 5. Générer le corpus
 
