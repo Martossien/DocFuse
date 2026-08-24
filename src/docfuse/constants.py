@@ -129,6 +129,38 @@ DEFAULT_TOKENIZER_ENGINE: str = "approx"
 disponible. Autres moteurs enregistrés dans core/tokenizers/registry.py."""
 
 # ──────────────────────────────────────────────────────────────────────────────
+# PDF : déduplication des en-têtes/pieds de page répétés (v0.1.3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+PDF_BOILERPLATE_MIN_PAGES: int = 4
+"""Nombre minimum de pages du PDF pour tenter une déduplication."""
+
+PDF_BOILERPLATE_MIN_OCCURRENCES: int = 3
+"""Une ligne d'en-tête/pied de page doit apparaître au moins ce nombre de fois."""
+
+PDF_BOILERPLATE_MIN_RATIO: float = 0.5
+"""... et sur au moins cette proportion des pages pour être jugée répétitive."""
+
+PDF_BOILERPLATE_MAX_LINE_LEN: int = 200
+"""Longueur maximale d'une ligne candidate (en-têtes/pieds de page sont courts)."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Markdown : images intégrées en base64 (v0.1.3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+MARKDOWN_BASE64_MIN_LEN: int = 100
+"""Longueur minimale d'un payload base64 pour être considéré comme une image
+intégrée à retirer (évite de matcher de courtes chaînes accidentelles)."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Détection de doublons de contenu entre fichiers (v0.1.3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+DUPLICATE_MIN_CHARS: int = 50
+"""Un fichier avec moins de caractères que ce seuil n'est jamais comparé pour
+déduplication (évite les faux positifs entre fichiers presque vides)."""
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Performance
 # ──────────────────────────────────────────────────────────────────────────────
 

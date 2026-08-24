@@ -8,6 +8,41 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [0.1.3] - 2026-08-24 — Beta
+
+### Ajouté
+
+- **Déduplication des en-têtes/pieds de page répétés (PDF)** : une ligne
+  strictement identique en début/fin de page, répétée sur plusieurs pages
+  d'un même PDF (ex. « Confidentiel — Usage interne », numéro de page),
+  n'est conservée qu'une fois. Toujours signalé dans l'en-tête SOURCE et le
+  rapport, jamais silencieux.
+- **Retrait des images base64 intégrées (Markdown)** : un `data:image/...
+  ;base64,...` collé dans un fichier `.md` (export Obsidian/Notion, capture
+  d'écran collée) est remplacé par une note — inutile en contexte texte,
+  coûteux en tokens.
+- **Détection de doublons de contenu entre fichiers** : deux fichiers
+  différents dont le texte extrait est strictement identique (copie,
+  sauvegarde, export dupliqué) ne sont comptés/inclus qu'une fois ; le
+  second pointe vers l'original au lieu de répéter le contenu.
+- **Alerte non bloquante sur les secrets potentiels** : détection
+  heuristique conservatrice (clé AWS, clé privée, jeton Slack/JWT, motif
+  `api_key=...`) avant que le corpus ne parte vers un chat LLM externe. Ne
+  modifie jamais le texte ; seul le type de secret et le numéro de ligne
+  sont rapportés, jamais la valeur trouvée.
+- Rapport MD : nouvelle section « Notes » regroupant ces quatre alertes de
+  transparence par fichier.
+
+### Technique
+
+- Nouveaux modules `core/duplicate_detector.py`, `core/secret_scanner.py` ;
+  logique PDF/Markdown dans `extractors/pdf.py` et `extractors/markdown.py`.
+- Aucune nouvelle dépendance (bibliothèque standard uniquement : `re`,
+  `hashlib`).
+- Voir D-062 à D-065 dans `docs/journal-decisions.md` pour le détail des
+  seuils et des choix (notamment pourquoi la compression sémantique de
+  contenu a été écartée).
+
 ## [0.1.2] - 2026-08-21 — Beta
 
 ### Ajouté
@@ -135,6 +170,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.1.3]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.1
 [0.1.1-beta]: https://github.com/Martossien/DocFuse/compare/166e595...main

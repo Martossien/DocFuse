@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 
 from docfuse.core.context_counter import TokenEstimate, estimate_tokens
+from docfuse.core.notes import ordered_notes
 from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -137,6 +138,9 @@ def _render_source_header(
 
     if file.encoding:
         lines.append(f"- encodage: {file.encoding}")
+
+    for note in ordered_notes(file):
+        lines.append(f"- {note}")
 
     lines.append("---")
     return "\n".join(lines)

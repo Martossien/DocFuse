@@ -30,8 +30,10 @@ def big_files_dir(tmp_path: Path) -> Path:
     """Crée 3 fichiers qui ensemble dépassent 128K tokens."""
     # 200K octets par fichier = ~50K tokens par fichier
     # 3 * 50K = 150K tokens > 128K → doit bloquer
-    for i in range(3):
-        (tmp_path / f"doc_{i}.txt").write_text("A" * 200_000, encoding="utf-8")
+    # Contenu distinct par fichier (D-064 : la déduplication de contenu
+    # identique entre fichiers ne doit pas fausser ce test de blocage).
+    for i, letter in enumerate("ABC"):
+        (tmp_path / f"doc_{i}.txt").write_text(letter * 200_000, encoding="utf-8")
     return tmp_path
 
 

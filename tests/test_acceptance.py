@@ -58,8 +58,10 @@ class TestFunctionalAcceptance:
 
     def test_multiple_files_total_blocked(self, tmp_path: Path) -> None:
         """Trois fichiers, aucun individuellement trop gros, mais total > plafond."""
-        for i in range(3):
-            text = "A" * 1000  # 250 tokens chacun, 287 avec marge
+        # Contenu distinct par fichier (D-064 : évite la déduplication de
+        # contenu identique entre fichiers, qui fausserait ce test).
+        for i, letter in enumerate("ABC"):
+            text = letter * 1000  # 250 tokens chacun, 287 avec marge
             (tmp_path / f"f{i}.txt").write_text(text, encoding="utf-8")
 
         # Total ~861 tokens avec marge, plafond 500 → bloqué par total
@@ -152,12 +154,12 @@ class TestLicenseCompliance:
 
                 # Vérifier qu'aucune licence interdite n'est présente
                 for forbidden in forbidden_licenses:
-                    assert forbidden not in license_str, (
-                        f"{pkg_name}: licence contient '{forbidden}' ({meta.get('License', '?')})"
-                    )
-                    assert forbidden not in classifiers, (
-                        f"{pkg_name}: classifier contient '{forbidden}'"
-                    )
+                    assert (
+                        forbidden not in license_str
+                    ), f"{pkg_name}: licence contient '{forbidden}' ({meta.get('License', '?')})"
+                    assert (
+                        forbidden not in classifiers
+                    ), f"{pkg_name}: classifier contient '{forbidden}'"
             except Exception:
                 # Si on ne trouve pas les métadonnées, on skip (pas bloquant en CI)
                 pass

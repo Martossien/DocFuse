@@ -199,20 +199,21 @@ Conventional Commits (sans scope obligatoire) :
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 12 — 0.1.2 beta)
+## 11. État actuel (Session 13 — 0.1.3 beta)
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source Python | 44 |
-| Tests collectés depuis un clone frais | 295 |
+| Fichiers source Python | 46 |
+| Tests collectés depuis un clone frais | 317 |
 | ruff | ✅ |
 | mypy --strict | ✅ |
-| pytest | ✅ 256 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 278 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 61 (D-001 à D-061) |
+| Décisions archivées | 65 (D-001 à D-065) |
 | Extracteurs | 13 formats |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
+| Optimisations/alertes de transparence | 4 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets (D-062 à D-065) |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md, captures d'écran réelles |
 | Jeu de test + recette | ✅ tests/recette/ |

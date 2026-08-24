@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docfuse"
-version = "0.1.2"
+version = "0.1.3"
 description = "Outil portable Windows d'assemblage de documents bureautiques vers un corpus unique (Markdown ou PDF) destiné aux LLM"
 readme = "README.md"
 license = { text = "Apache-2.0" }

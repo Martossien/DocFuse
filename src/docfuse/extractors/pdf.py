@@ -17,6 +17,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from docfuse.constants import (
+    PDF_BOILERPLATE_MAX_LINE_LEN,
+    PDF_BOILERPLATE_MIN_OCCURRENCES,
+    PDF_BOILERPLATE_MIN_PAGES,
+    PDF_BOILERPLATE_MIN_RATIO,
+)
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
 from docfuse.i18n import t
@@ -55,6 +61,13 @@ class PdfExtractor(Extractor):
             # 2. Extraction texte page-par-page avec pdfminer
             pages_text, chars_per_page, image_count, page_count = _extract_pages_pdfminer(path)
 
+            # 2b. Déduplication des en-têtes/pieds de page répétés sur chaque page.
+            # Recalcule chars_per_page à partir du texte dédupliqué : la densité de
+            # texte utile pour la détection de pauvreté (image_detector.py) doit
+            # refléter le contenu réel, pas le bruit répété.
+            pages_text, dedup_note = _dedupe_page_boilerplate(pages_text)
+            chars_per_page = [len(p.strip()) for p in pages_text]
+
             # 3. Construction du texte avec marqueurs de pages vides
             parts: list[str] = []
             for i, (text, char_count) in enumerate(
@@ -67,6 +80,10 @@ class PdfExtractor(Extractor):
 
             full_text = "\n\n".join(parts)
 
+            extra_metadata: dict[str, str] = {}
+            if dedup_note:
+                extra_metadata["pdf_dedup"] = dedup_note
+
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
@@ -78,6 +95,7 @@ class PdfExtractor(Extractor):
                 image_count=image_count,
                 page_count=page_count,
                 chars_per_page=chars_per_page,
+                extra_metadata=extra_metadata,
             )
         except Exception as exc:
             logger.exception("Erreur extraction PDF %s", path)
@@ -141,6 +159,80 @@ def _extract_pages_pdfminer(
         # pdfminer gère la mémoire page-par-page avec extract_pages()
 
     return pages_text, chars_per_page, total_images, page_count
+
+
+def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | None]:
+    """Retire les en-têtes/pieds de page répétés à l'identique sur plusieurs pages.
+
+    Un en-tête/pied de page PDF est extrait par pdfminer comme la première ou
+    la dernière ligne du texte de chaque page (les blocs de texte y sont
+    physiquement positionnés). On ne regarde donc que ces deux positions par
+    page — jamais le corps du texte — pour ne pas risquer de retirer un
+    paragraphe légitimement répété.
+
+    Une ligne candidate n'est retirée que si elle apparaît identique sur au
+    moins ``PDF_BOILERPLATE_MIN_OCCURRENCES`` pages ET sur au moins
+    ``PDF_BOILERPLATE_MIN_RATIO`` des pages du document — un simple "Page 1"
+    répété deux fois dans un document de 40 pages ne déclenche rien.
+
+    Toutes les occurrences sauf la première sont supprimées ; la première
+    reste visible une fois dans le corpus (CdC §8 — sans perte silencieuse :
+    le contenu répété disparaît du texte, mais son existence est signalée
+    dans l'en-tête SOURCE via la note retournée).
+
+    Returns:
+        Tuple (pages de texte mises à jour, note descriptive ou None si rien
+        n'a été dédupliqué).
+    """
+    page_count = len(pages_text)
+    if page_count < PDF_BOILERPLATE_MIN_PAGES:
+        return pages_text, None
+
+    pages_lines = [p.split("\n") for p in pages_text]
+
+    # Compter les occurrences des lignes candidates (première/dernière de chaque page).
+    occurrences: dict[str, int] = {}
+    for lines in pages_lines:
+        candidates = set()
+        if lines and lines[0].strip():
+            candidates.add(lines[0].strip())
+        if lines and lines[-1].strip():
+            candidates.add(lines[-1].strip())
+        for candidate in candidates:
+            if len(candidate) <= PDF_BOILERPLATE_MAX_LINE_LEN:
+                occurrences[candidate] = occurrences.get(candidate, 0) + 1
+
+    min_occurrences = max(
+        PDF_BOILERPLATE_MIN_OCCURRENCES, round(PDF_BOILERPLATE_MIN_RATIO * page_count)
+    )
+    boilerplate = {line for line, count in occurrences.items() if count >= min_occurrences}
+    if not boilerplate:
+        return pages_text, None
+
+    seen_once: set[str] = set()
+    chars_saved = 0
+    new_pages: list[str] = []
+    for lines in pages_lines:
+        kept_lines = []
+        for j, line in enumerate(lines):
+            stripped = line.strip()
+            is_edge = j == 0 or j == len(lines) - 1
+            if is_edge and stripped in boilerplate:
+                if stripped in seen_once:
+                    chars_saved += len(line)
+                    continue
+                seen_once.add(stripped)
+            kept_lines.append(line)
+        new_pages.append("\n".join(kept_lines))
+
+    total_occurrences = sum(occurrences[line] for line in boilerplate)
+    note = t(
+        "pdf.dedup_note",
+        count=len(boilerplate),
+        occurrences=total_occurrences,
+        chars=chars_saved,
+    )
+    return new_pages, note
 
 
 def _count_images_in_figure(figure: Any) -> int:

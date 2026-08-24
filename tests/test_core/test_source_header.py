@@ -12,7 +12,7 @@ from pathlib import Path
 from docfuse.core.tokenizers.base import TokenizerEngine, TokenizerEngineInfo
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
-from docfuse.output.source_header import estimate_source_context
+from docfuse.output.source_header import build_source_header, estimate_source_context
 
 
 class _CountingEngine(TokenizerEngine):
@@ -91,3 +91,23 @@ class TestEstimateSourceContextApproxUnchanged:
         estimate = estimate_source_context(f, margin=0.15, engine=None)
         assert estimate.tokens_estimated > 0
         assert estimate.bytes_utf8 > len(f.text.encode("utf-8"))
+
+
+class TestSourceHeaderExtraMetadata:
+    def test_header_renders_secret_alert(self) -> None:
+        f = _make_file("texte")
+        f.extra_metadata["secrets_detected"] = "clé AWS (ligne 2)"
+        header = build_source_header(f, margin=0.15)
+        assert "clé AWS (ligne 2)" in header
+
+    def test_header_renders_duplicate_note(self) -> None:
+        f = _make_file("texte")
+        f.extra_metadata["duplicate_of"] = "original.docx"
+        header = build_source_header(f, margin=0.15)
+        assert "original.docx" in header
+
+    def test_header_without_extra_metadata_unchanged(self) -> None:
+        f = _make_file("texte")
+        header = build_source_header(f, margin=0.15)
+        assert "doublon" not in header.lower()
+        assert "secret" not in header.lower()

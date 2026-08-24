@@ -127,5 +127,26 @@
   "gui.analysis_cancelled": "Analysis stopped",
   "gui.analysis_cancelled_detail": "The analysis was stopped. No partial corpus will be generated.",
   "gui.analysis_in_progress": "Inventory complete: extracting and estimating tokens…",
-  "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nBy default, DocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\nThis generic counter does not depend on any provider.\n\nYou can pick a precise counting engine (Mistral or OpenAI) under\n\"Counting precision\" for a real token count, computed locally\nwith no network connection.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o)."
+  "gui.help_context_text": "The context limit is the maximum amount of text the AI can process at once.\n\nBy default, DocFuse estimates the volume using the formula:\n  tokens = UTF-8 bytes / 4\n  with a safety margin of +15%.\nThis generic counter does not depend on any provider.\n\nYou can pick a precise counting engine (Mistral or OpenAI) under\n\"Counting precision\" for a real token count, computed locally\nwith no network connection.\n\nIf the total exceeds the limit, generation is blocked.\nYou can increase the limit if your AI allows it\n(e.g., 200,000 for Claude, 128,000 for GPT-4o).",
+
+  "report.notes": "Notes",
+
+  "pdf.dedup_note": "{count} repeated header/footer line(s) removed ({occurrences} occurrences), ~{chars} characters saved",
+
+  "markdown.base64_image_removed": "[embedded image removed from corpus — {chars} characters saved]",
+  "markdown.base64_note": "{count} base64-encoded image(s) removed, ~{chars} characters saved",
+
+  "duplicate.placeholder_text": "[Content identical to {original}, not repeated in this corpus — see that file]",
+
+  "secret.kind_aws_key": "AWS key",
+  "secret.kind_private_key": "private key",
+  "secret.kind_slack_token": "Slack token",
+  "secret.kind_jwt": "JWT token",
+  "secret.kind_generic_api_key": "API key/secret",
+  "secret.finding": "{kind} (line {line})",
+
+  "source_header.secrets_detected": "secret_alert",
+  "source_header.duplicate_of": "duplicate_of",
+  "source_header.markdown_base64_stripped": "base64_images_removed",
+  "source_header.pdf_dedup": "notes"
 }

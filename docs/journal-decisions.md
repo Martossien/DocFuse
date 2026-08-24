@@ -875,4 +875,104 @@ pas un simple push sur `main`), une étape supplémentaire zippe
 
 ---
 
-*Fin du journal des décisions — Session 12.*
+## Session 13 — 24 août 2026
+
+### D-062 : Déduplication des en-têtes/pieds de page répétés (PDF)
+
+**Décision** : `extractors/pdf.py::_dedupe_page_boilerplate()` ne regarde que
+la première et la dernière ligne de chaque page extraite par pdfminer (là où
+un en-tête/pied de page physiquement positionné apparaît), jamais le corps
+du texte. Une ligne n'est retirée que si elle est identique sur au moins
+`PDF_BOILERPLATE_MIN_OCCURRENCES` (3) pages **et** `PDF_BOILERPLATE_MIN_RATIO`
+(50 %) des pages, et fait moins de `PDF_BOILERPLATE_MAX_LINE_LEN` (200)
+caractères. `chars_per_page` (utilisé par `image_detector.py` pour la
+détection de pauvreté de texte) est recalculé sur le texte dédupliqué.
+
+**Rationale** :
+- Un PDF de plusieurs dizaines de pages avec un pied de page répété
+  ("Confidentiel", "Page X sur Y") le duplique une fois par page dans le
+  texte extrait — du bruit pur, aucune valeur informative, un vrai coût en
+  tokens.
+- Ne regarder que les extrémités de page limite le risque de retirer un
+  paragraphe légitimement répété dans le corps du texte.
+- Sans perte silencieuse (CdC §8) : la première occurrence reste dans le
+  corpus, et une note (`extra_metadata["pdf_dedup"]`) apparaît dans l'en-tête
+  SOURCE et le rapport, indiquant combien de lignes et d'occurrences ont été
+  dédupliquées.
+
+### D-063 : Retrait des images base64 intégrées dans les fichiers Markdown
+
+**Décision** : `extractors/markdown.py::_strip_base64_images()` détecte les
+data URI `data:image/...;base64,...` (payload ≥
+`MARKDOWN_BASE64_MIN_LEN` = 100 caractères) et remplace uniquement le
+payload par une note explicite ; la syntaxe Markdown environnante
+(`![alt](...)`) et l'`alt` sont conservés. Le nombre d'images retirées
+alimente `image_count` (réutilise l'alerte `images` déjà existante).
+
+**Rationale** :
+- En contexte texte, un LLM ne peut pas "voir" une image depuis du base64
+  brut — c'est juste une longue chaîne illisible qui coûte des tokens sans
+  rien apporter, contrairement à la compression sémantique (rejetée en
+  amont de cette session, car elle risquerait de retirer du contenu
+  réellement porteur de sens).
+- Cas fréquent avec des exports Obsidian/Notion ou des captures d'écran
+  collées directement dans une note.
+
+### D-064 : Détection de doublons de contenu entre fichiers
+
+**Décision** : nouveau module `core/duplicate_detector.py::detect_duplicates()`,
+appelé dans `orchestrator.py::run_analysis()` après la détermination du
+statut et avant le comptage de tokens. Hash SHA-256 du texte extrait
+(normalisé par `strip()`) de chaque fichier avec `status.is_extracted()` et
+au moins `DUPLICATE_MIN_CHARS` (50) caractères. Le premier fichier d'un
+groupe de doublons (ordre de tri de l'inventaire) reste l'original ; les
+suivants voient leur `text` remplacé par une courte note
+(`extra_metadata["duplicate_of"]`).
+
+**Rationale** :
+- Cas fréquent quand l'utilisateur sélectionne un dossier entier plutôt que
+  des fichiers un par un : copie dans deux dossiers, sauvegarde, export
+  dupliqué.
+- Remplacer le texte par une note (plutôt que garder un champ séparé) évite
+  toute logique spécifique en aval : le comptage de tokens, l'écriture du
+  corpus et l'en-tête SOURCE traitent un doublon exactement comme un
+  fichier normal, avec un texte très court.
+- A nécessité de corriger deux tests existants (`test_acceptance.py::
+  test_multiple_files_total_blocked`, `test_context_blocking.py::
+  big_files_dir`) qui utilisaient un contenu strictement identique sur
+  plusieurs fichiers comme raccourci pour obtenir une taille totale
+  déterministe — désormais dédupliqué par construction, donc plus assez
+  volumineux pour déclencher le blocage testé. Contenu rendu distinct par
+  fichier (`"A"`/`"B"`/`"C"` au lieu de `"A"` partout), l'intention du test
+  (plusieurs fichiers non bloquants individuellement, total bloquant) reste
+  inchangée.
+
+### D-065 : Alerte non bloquante sur les secrets potentiels
+
+**Décision** : nouveau module `core/secret_scanner.py::scan_for_secrets()`,
+appelé pour chaque fichier extrait dans `run_analysis()`. Motifs à haute
+confiance uniquement (clé AWS `AKIA...`, bloc `-----BEGIN ... PRIVATE
+KEY-----`, jeton Slack `xox[baprs]-...`, JWT `eyJ...\.…\.…`, assignation
+`api_key=`/`secret_key=`/`access_token=`/`client_secret=` suivie d'une
+valeur ≥ 16 caractères). Ne modifie jamais le texte, ne bloque jamais la
+génération — pose `extra_metadata["secrets_detected"]` avec le **type** de
+secret et le numéro de ligne, jamais la valeur trouvée.
+
+**Rationale** :
+- DocFuse prépare un corpus destiné à un chat LLM externe : un `.env`, une
+  clé API dans un fichier de config, une clé privée SSH glissés
+  involontairement dans la sélection partiraient tels quels vers un tiers.
+- Délibérément conservateur (peu de motifs, haute confiance) pour limiter
+  les faux positifs — pas de motif générique `password=...` (trop de
+  faux positifs sur de la documentation légitime qui mentionne le mot).
+- Ne jamais journaliser/afficher la valeur trouvée : le rapport lui-même
+  (MD/JSON, potentiellement committé par erreur) ne doit pas devenir un
+  second vecteur de fuite.
+- Surface v1 : en-tête SOURCE + rapport MD/JSON uniquement (pas de nouvelle
+  pastille GUI ni de nouveau `FileStatus` — aurait élargi la portée aux
+  couleurs/tri/sévérité déjà couplés à cette énumération). Amélioration
+  possible plus tard si le besoin se confirme.
+
+---
+
+*Fin du journal des décisions — Session 13.*

@@ -36,11 +36,13 @@ from docfuse.core.context_counter import (
     aggregate_tokens,
     check_limit,
 )
+from docfuse.core.duplicate_detector import detect_duplicates
 from docfuse.core.image_detector import determine_status
 from docfuse.core.inventory import collect_inputs
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
 from docfuse.core.report import generate_json_report, generate_markdown_report
+from docfuse.core.secret_scanner import scan_for_secrets
 from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.core.tokenizers.registry import resolve_engine
 from docfuse.i18n import format_number, t
@@ -343,6 +345,21 @@ def run_analysis(
                 sparse_page_chars=sparse_page_chars,
                 sparse_page_ratio=sparse_page_ratio,
             )
+
+    # 3b. Alerte secrets potentiels (non bloquant, ne modifie jamais le texte).
+    for f in files:
+        if not f.status.is_extracted():
+            continue
+        findings = scan_for_secrets(f.text)
+        if findings:
+            kinds = ", ".join(
+                t("secret.finding", kind=t(kind_key), line=line) for kind_key, line in findings
+            )
+            f.extra_metadata["secrets_detected"] = kinds
+
+    # 3c. Détection de doublons de contenu entre fichiers (avant comptage :
+    # le texte d'un doublon est remplacé par une note, donc compté correctement).
+    detect_duplicates(files)
 
     # 4. Compteur par fichier (en-têtes SOURCE comprises, CdC §8.2 §10.1)
     from docfuse.output.source_header import estimate_source_context

@@ -16,6 +16,7 @@ from pathlib import Path
 from docfuse import __version__
 from docfuse.constants import BYTES_PER_TOKEN, DEFAULT_TOKENIZER_ENGINE
 from docfuse.core.context_counter import TokenEstimate
+from docfuse.core.notes import ordered_notes
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -150,6 +151,18 @@ def generate_markdown_report(
         lines.append("|---|---|")
         for path, reason in ignored_files:
             lines.append(f"| {path.name} | {reason} |")
+        lines.append("")
+
+    # Notes de transparence (secrets potentiels, doublons, dédup PDF, images
+    # base64 retirées) — CdC §8, sans perte silencieuse.
+    notes_by_file = [(f, ordered_notes(f)) for f in files]
+    notes_by_file = [(f, notes) for f, notes in notes_by_file if notes]
+    if notes_by_file:
+        lines.append(f"## {t('report.notes')}")
+        lines.append("")
+        for f, notes in notes_by_file:
+            for note in notes:
+                lines.append(f"- **{f.relative_path}** : {note}")
         lines.append("")
 
     # Erreurs

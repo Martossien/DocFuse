@@ -882,3 +882,69 @@ et à l'automatisation de la publication Windows, sur demande explicite.
   étape 8 — action publique, confirmation utilisateur requise avant
   exécution).
 
+## Session 13 — 24 août 2026
+
+Demande initiale : quatre optimisations/alertes de transparence discutées en
+conversation (l'utilisateur jouant le rôle d'un utilisateur final), à
+implémenter dans l'ordre puis à publier en `0.1.3 beta`.
+
+### Quatre fonctionnalités — ✅ Terminées
+
+- **Déduplication en-têtes/pieds de page PDF** (`extractors/pdf.py`,
+  D-062) : ne regarde que première/dernière ligne de chaque page,
+  `chars_per_page` recalculé sur le texte dédupliqué.
+- **Retrait des images base64 intégrées Markdown** (`extractors/markdown.py`,
+  D-063) : payload remplacé par une note, `alt`/syntaxe conservés,
+  `image_count` incrémenté (réutilise l'alerte `images` existante).
+- **Détection de doublons de contenu entre fichiers** (nouveau
+  `core/duplicate_detector.py`, D-064) : hash SHA-256 du texte extrait,
+  texte du doublon remplacé par une note plutôt que gardé dans un champ
+  séparé (aucune logique spécifique en aval nécessaire).
+- **Alerte non bloquante sur les secrets potentiels** (nouveau
+  `core/secret_scanner.py`, D-065) : motifs à haute confiance uniquement
+  (clé AWS, clé privée, jeton Slack/JWT, `api_key=...`), jamais la valeur
+  trouvée journalisée/affichée — seulement le type et le numéro de ligne.
+- Toutes les notes remontent dans l'en-tête SOURCE (`extra_metadata` sur
+  `ExtractedFile`, déjà existant mais inutilisé jusqu'ici) et dans une
+  nouvelle section « Notes » du rapport MD.
+- Idée écartée en amont (compression sémantique du texte pour gagner des
+  tokens) : contredit le CdC §8 (« sans perte silencieuse »), remplacée par
+  des retraits de doublons **exacts** uniquement (jamais de reformulation).
+
+### Régression de tests trouvée et corrigée — ✅ Corrigé
+
+- Deux tests existants (`test_acceptance.py::test_multiple_files_total_blocked`,
+  `test_context_blocking.py::big_files_dir`) construisaient délibérément
+  plusieurs fichiers avec un contenu strictement identique comme raccourci
+  pour obtenir une taille totale déterministe. La nouvelle déduplication de
+  contenu (D-064) les dédupliquait, faisant chuter le total sous le plafond
+  testé — 4 tests en échec. Corrigé en rendant le contenu distinct par
+  fichier (`"A"`/`"B"`/`"C"` au lieu de `"A"` partout) : l'intention du test
+  (plusieurs fichiers non bloquants individuellement, total bloquant) reste
+  intacte.
+
+### État après Session 13
+
+| Métrique | Valeur |
+|---|---|
+| Version | 0.1.3 beta |
+| ruff | ✅ |
+| mypy --strict | ✅ (aucune nouvelle erreur sur les fichiers modifiés) |
+| pytest | ✅ 278 passed, 39 skipped (clone frais) |
+| Recette | ✅ 7/7 PASS |
+| Décisions archivées | 65 (D-001 à D-065) |
+| Working tree | clean après commit |
+
+### Reste à faire
+
+- ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa
+  génération pour supprimer les skips d'un clone frais.
+- ⬜ Moteur Llama/HuggingFace `tokenizers` évoqué pour une version future,
+  toujours pas retenu (dépendance Rust supplémentaire, hors scope
+  « facile »).
+- ⬜ Publier effectivement la Release `v0.1.3` (checklist AGENTS.md §13,
+  étape 8 — action publique, confirmation utilisateur requise avant
+  exécution).
+- ⬜ Détection de secrets volontairement conservatrice (peu de motifs) —
+  élargir si des faux négatifs sont signalés en usage réel.
+

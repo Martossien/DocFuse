@@ -350,6 +350,29 @@ Interdit de « nettoyer » trop agressivement (supprimer des lignes courtes, des
 
 Tout est normalisé **UTF-8** en interne et en sortie MD. Le PDF de sortie embarque une police Unicode (ex. DejaVu / Noto **déjà groupée**, licence SIL/OFL ou Apache — pas de police Windows liée à une restriction). Pas de dépendance à Arial.
 
+### 8.5 Optimisations de tokens et alertes de transparence (v0.1.3)
+
+Quatre mécanismes, tous **non silencieux** (une note dans l'en-tête SOURCE et
+le rapport signale systématiquement ce qui a été fait) :
+
+- **Déduplication des en-têtes/pieds de page PDF** : une ligne strictement
+  identique (première ou dernière ligne de page) répétée sur plusieurs pages
+  d'un même PDF n'est conservée qu'une fois. Seuils en conf
+  (`PDF_BOILERPLATE_MIN_PAGES/MIN_OCCURRENCES/MIN_RATIO`).
+- **Images base64 intégrées (Markdown)** : un `data:image/...;base64,...`
+  collé dans un fichier `.md` n'apporte aucune information à un LLM en
+  contexte texte (il ne peut pas "voir" l'image depuis le texte brut) —
+  le payload est remplacé par une note, l'`alt` est conservé.
+- **Doublons de contenu entre fichiers** : deux fichiers différents dont le
+  texte extrait est strictement identique (copie, sauvegarde, export
+  dupliqué) ne sont comptés/inclus qu'une fois ; le second pointe vers
+  l'original (`doublon_de`) au lieu de répéter le contenu.
+- **Alerte secrets potentiels** : détection heuristique conservatrice (clé
+  AWS, clé privée, jeton Slack/JWT, motif `api_key=...`) qui pose une
+  alerte non bloquante (`alerte_secret`) — le texte n'est **jamais**
+  modifié ni la valeur trouvée journalisée/affichée, seul le type et le
+  numéro de ligne le sont.
+
 ---
 
 ## 9. Images et pauvreté de texte (deux niveaux)

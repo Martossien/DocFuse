@@ -53,6 +53,32 @@ class TestRunAnalysis:
         assert all(event.status == "pending" for event in events[:2])
         assert all(event.current == 0 for event in events[:2])
 
+    def test_duplicate_content_deduplicated_and_flagged(self, tmp_path: Path) -> None:
+        # Noms triés alphabétiquement (tri par défaut) pour fixer sans
+        # ambiguïté lequel des deux est traité en premier et sert d'original.
+        text = "Contenu strictement identique repete pour depasser le seuil minimum requis."
+        (tmp_path / "1_original.txt").write_text(text, encoding="utf-8")
+        (tmp_path / "2_copie.txt").write_text(text, encoding="utf-8")
+
+        result = run_analysis(tmp_path, context_limit=128000)
+
+        by_name = {f.relative_path: f for f in result.files}
+        assert "duplicate_of" in by_name["2_copie.txt"].extra_metadata
+        assert by_name["2_copie.txt"].extra_metadata["duplicate_of"] == "1_original.txt"
+        assert text not in by_name["2_copie.txt"].text
+        assert "duplicate_of" not in by_name["1_original.txt"].extra_metadata
+
+    def test_secret_detected_flagged_without_blocking(self, tmp_path: Path) -> None:
+        (tmp_path / "config.txt").write_text(
+            "config:\nAWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n", encoding="utf-8"
+        )
+
+        result = run_analysis(tmp_path, context_limit=128000)
+
+        assert not result.is_blocked
+        by_name = {f.relative_path: f for f in result.files}
+        assert "secrets_detected" in by_name["config.txt"].extra_metadata
+
 
 class TestGenerateCorpus:
     def test_generate_markdown(self, tmp_workspace: Path) -> None:

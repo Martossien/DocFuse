@@ -8,10 +8,10 @@
 *Portable Windows tool that fuses documents into a single corpus for an LLM.*
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.2_beta-orange.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.3_beta-orange.svg)](./CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue.svg)](./pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#-compatibilité--compatibility)
-[![Tests](https://img.shields.io/badge/tests-256%20passed%20%7C%2039%20skipped-success.svg)](./tests)
+[![Tests](https://img.shields.io/badge/tests-278%20passed%20%7C%2039%20skipped-success.svg)](./tests)
 [![Type check](https://img.shields.io/badge/mypy--strict-passing-success.svg)](./pyproject.toml)
 [![Lint](https://img.shields.io/badge/ruff-passing-success.svg)](./pyproject.toml)
 [![No network](https://img.shields.io/badge/network-none-success.svg)](./tests/test_acceptance.py)
@@ -78,13 +78,13 @@ contrôle de plafond pour ne pas dépasser la fenêtre de contexte.
 
 ### Téléchargement (Windows)
 
-La dernière préversion est **[`v0.1.2 beta`](https://github.com/Martossien/DocFuse/releases/tag/v0.1.2)**
-([notes de version](./docs/releases/v0.1.2.md)).
+La dernière préversion est **[`v0.1.3 beta`](https://github.com/Martossien/DocFuse/releases/tag/v0.1.3)**
+([notes de version](./docs/releases/v0.1.3.md)).
 
 | Fichier | Lien |
 |---|---|
-| **Archive portable** (`CorpusOne.exe`) | [Télécharger .zip](https://github.com/Martossien/DocFuse/releases/download/v0.1.2/CorpusOne-0.1.2-beta-windows-x64.zip) |
-| **Empreinte SHA-256** | [Télécharger .sha256](https://github.com/Martossien/DocFuse/releases/download/v0.1.2/CorpusOne-0.1.2-beta-windows-x64.zip.sha256) |
+| **Archive portable** (`CorpusOne.exe`) | [Télécharger .zip](https://github.com/Martossien/DocFuse/releases/download/v0.1.3/CorpusOne-0.1.3-beta-windows-x64.zip) |
+| **Empreinte SHA-256** | [Télécharger .sha256](https://github.com/Martossien/DocFuse/releases/download/v0.1.3/CorpusOne-0.1.3-beta-windows-x64.zip.sha256) |
 
 Installation :
 
@@ -352,13 +352,13 @@ context window.
 
 ### Download (Windows)
 
-The latest pre-release is **[`v0.1.2 beta`](https://github.com/Martossien/DocFuse/releases/tag/v0.1.2)**
-([release notes](./docs/releases/v0.1.2.md), French).
+The latest pre-release is **[`v0.1.3 beta`](https://github.com/Martossien/DocFuse/releases/tag/v0.1.3)**
+([release notes](./docs/releases/v0.1.3.md), French).
 
 | File | Link |
 |---|---|
-| **Portable archive** (`CorpusOne.exe`) | [Download .zip](https://github.com/Martossien/DocFuse/releases/download/v0.1.2/CorpusOne-0.1.2-beta-windows-x64.zip) |
-| **SHA-256 checksum** | [Download .sha256](https://github.com/Martossien/DocFuse/releases/download/v0.1.2/CorpusOne-0.1.2-beta-windows-x64.zip.sha256) |
+| **Portable archive** (`CorpusOne.exe`) | [Download .zip](https://github.com/Martossien/DocFuse/releases/download/v0.1.3/CorpusOne-0.1.3-beta-windows-x64.zip) |
+| **SHA-256 checksum** | [Download .sha256](https://github.com/Martossien/DocFuse/releases/download/v0.1.3/CorpusOne-0.1.3-beta-windows-x64.zip.sha256) |
 
 Install:
 
