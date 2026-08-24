@@ -154,12 +154,12 @@ class TestLicenseCompliance:
 
                 # Vérifier qu'aucune licence interdite n'est présente
                 for forbidden in forbidden_licenses:
-                    assert (
-                        forbidden not in license_str
-                    ), f"{pkg_name}: licence contient '{forbidden}' ({meta.get('License', '?')})"
-                    assert (
-                        forbidden not in classifiers
-                    ), f"{pkg_name}: classifier contient '{forbidden}'"
+                    assert forbidden not in license_str, (
+                        f"{pkg_name}: licence contient '{forbidden}' ({meta.get('License', '?')})"
+                    )
+                    assert forbidden not in classifiers, (
+                        f"{pkg_name}: classifier contient '{forbidden}'"
+                    )
             except Exception:
                 # Si on ne trouve pas les métadonnées, on skip (pas bloquant en CI)
                 pass

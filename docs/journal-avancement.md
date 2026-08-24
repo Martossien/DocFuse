@@ -947,4 +947,11 @@ implémenter dans l'ordre puis à publier en `0.1.3 beta`.
   exécution).
 - ⬜ Détection de secrets volontairement conservatrice (peu de motifs) —
   élargir si des faux négatifs sont signalés en usage réel.
+- ⬜ **Trouvé en publiant la Release** : `ruff>=0.4.0` (sans borne haute)
+  dans `pyproject.toml` laisse dériver la version installée en CI
+  (0.8.0 en local vs 0.16.4 en CI au moment de cette session) — la CI a
+  une opinion de formatage différente sur un bloc `assert` multi-lignes,
+  ce qui a fait échouer `ruff format --check` sur la Release `v0.1.3`
+  initiale (corrigé dans la foulée, tag/Release recréés). Envisager de
+  pinner une plage de version plus stricte pour éviter la récidive.
 
