@@ -8,6 +8,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [Non publié]
+
+### Corrigé
+
+- **GUI : fenêtre maximisée au démarrage sous Windows** — retour utilisateur
+  sur v0.1.5 : les 3 boutons du bas (Générer, Rapport, Annuler) restaient
+  masqués une fois des fichiers chargés, nécessitant un redimensionnement
+  manuel. Plutôt que deviner une nouvelle hauteur fixe, la fenêtre utilise
+  désormais tout l'espace écran disponible sous Windows.
+
 ## [0.1.5] - 2026-08-29 — Beta
 
 ### Corrigé

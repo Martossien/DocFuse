@@ -1376,3 +1376,32 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   sécurité déjà en place si problème (`safe_extract()` isole tout échec
   au fichier concerné, jamais un crash global).
 
+### v0.1.5 publiée, retour Windows réel, tests LLM en conditions réelles (D-095)
+
+- Release v0.1.5 publiée à la demande explicite de l'utilisateur (« pour
+  que je teste sous Windows »). Procédure standard (§13 AGENTS.md) suivie :
+  bump version, CHANGELOG, notes de release, README FR/EN, tag + Release,
+  vérification des 4 assets attachés par CI (`CorpusOne`/`CorpusOne-OCR`
+  zips + sha256).
+- Retour utilisateur sur Windows réel : fonctionne globalement, sauf les 3
+  boutons du bas (Générer/Rapport/Annuler) toujours masqués une fois des
+  fichiers chargés — l'utilisateur a lui-même correctement diagnostiqué la
+  piste (la liste de fichiers qui grandit pousse le reste de l'interface).
+  Non reproduit malgré un test ciblé (59 fichiers réels chargés dans la
+  GUI, screenshot à l'appui) — au lieu d'un nouveau pari de hauteur en
+  pixels, la fenêtre démarre maximisée sous Windows (D-095), Linux/macOS
+  inchangés.
+- **Test en conditions réelles avec un vrai LLM local** (llama-server,
+  Qwen3.6-35B, 256k de contexte, lancé par l'utilisateur via son propre
+  script) : deux corpus générés par DocFuse (25 fichiers synthétiques avec
+  codes de suivi uniques, puis 60 fichiers réels mixtes de l'utilisateur,
+  ~95k tokens) envoyés au LLM avec la consigne de lister tous les fichiers
+  sources vus. Résultat vérifié programmatiquement contre la vérité terrain
+  dans les deux cas : **0 fichier manqué, 0 hallucination, ordre et codes
+  corrects à 100 %**. Le format actuel du corpus (en-têtes `## SOURCE:` par
+  fichier) fonctionne donc de façon fiable à cette échelle, sans qu'un
+  sommaire/table des matières en tête de fichier soit nécessaire pour ce
+  modèle — l'idée reste examinée avec l'utilisateur comme amélioration
+  défensive possible (utile contre une troncature silencieuse par un outil
+  tiers), pas comme correctif d'un bug DocFuse constaté.
+

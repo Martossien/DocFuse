@@ -77,8 +77,33 @@ class DocFuseGUI:
         # `pack(side=...)` ne fait jamais passer les boutons à la ligne : un
         # débordement horizontal les pousse simplement hors de la zone
         # visible plutôt que de les redimensionner. Marge généreuse.
-        self.root.geometry("1050x720")
-        self.root.minsize(900, 600)
+        # D-095 : confirmé par l'utilisateur sur machine Windows réelle (v0.1.5)
+        # que les 3 boutons du bas restent masqués une fois des fichiers
+        # chargés — cause supplémentaire identifiée : D-091 a ajouté une 5e
+        # ligne à `options_frame` (case « Exporter les images intégrées »),
+        # qui n'existait pas quand la hauteur 720 a été choisie en D-090 ;
+        # hauteur augmentée d'autant (+40 px) pour compenser. Mais reproduit
+        # même en chargeant 59 fichiers réels dans cette session (Linux,
+        # `file_rows_frame` bien confiné dans le `CTkScrollableFrame`
+        # attendu, boutons toujours visibles) — non reproduit ici malgré un
+        # test ciblé, très probablement une histoire de mise à l'échelle
+        # DPI/police Windows qui agrandit chaque ligne au-delà de ce qui
+        # tient sur l'écran réel de l'utilisateur. Plutôt que deviner une
+        # nouvelle valeur de pixels, la fenêtre démarre maximisée sous
+        # Windows (voir plus bas) : utilise tout l'espace écran disponible
+        # au lieu d'un pari sur une hauteur fixe.
+        self.root.geometry("1050x760")
+        self.root.minsize(900, 640)
+        if sys.platform == "win32":
+            # D-095 : `state("zoomed")` est l'idiome Tk standard pour démarrer
+            # maximisé sous Windows — jamais utilisé ici (comportement
+            # inchangé) pour ne pas modifier l'expérience Linux/macOS déjà
+            # vérifiée. `try/except` : ne doit jamais empêcher le lancement
+            # de la GUI si l'appel échoue pour une raison quelconque.
+            try:
+                self.root.state("zoomed")
+            except Exception:
+                logger.warning("Impossible de démarrer la fenêtre maximisée", exc_info=True)
 
         self.initial_directory = initial_directory
         self.input_selection: InputSelection | None = None

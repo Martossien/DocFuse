@@ -1749,6 +1749,43 @@ de licence dédiés (`test_gpl_doc_tools_not_dependencies` — `antiword`/
 stricts propres, recette 7/7 (96 extensions, +4 pour `.doc`/`.xls`/`.ppt`/
 `.msg`).
 
+### D-095 : GUI — fenêtre maximisée sous Windows (boutons du bas toujours masqués)
+
+**Décision** : la fenêtre démarre maximisée sous Windows
+(`self.root.state("zoomed")`, dans un `try/except` qui ne doit jamais
+empêcher le lancement de la GUI) plutôt que d'essayer de deviner une
+nouvelle hauteur fixe en pixels. Hauteur par défaut aussi augmentée de
+720 à 760 (minsize 600 → 640) pour compenser la 5e ligne d'options ajoutée
+par D-091 (case « Exporter les images intégrées »), absente quand la
+hauteur 720 avait été choisie en D-090.
+
+**Rationale** :
+- Retour utilisateur sur machine Windows réelle (v0.1.5) : les 3 boutons du
+  bas (Générer, Rapport, Annuler) restent masqués une fois des fichiers
+  chargés — précision de l'utilisateur : « il faut que j'agrandisse pour
+  avoir les boutons », c'est-à-dire qu'ils redimensionnent manuellement la
+  fenêtre pour les voir.
+- Non reproduit dans cette session malgré un test ciblé et honnête :
+  fenêtre relancée avec 59 fichiers réels chargés et la liste peuplée
+  (`_populate_file_list()` appelé directement, pas seulement une fenêtre
+  vide) — `file_rows_frame` reste correctement confiné dans le
+  `CTkScrollableFrame` prévu à cet effet, les 3 boutons restent visibles.
+  Cause la plus probable : mise à l'échelle DPI/police Windows qui
+  agrandit chaque ligne au-delà de ce que le rendu Linux de cette session
+  peut reproduire (même famille de cause que D-090 — jamais vérifiable
+  sans machine Windows réelle).
+- Plutôt que d'itérer sur des paris de hauteur en pixels (comme D-090 puis
+  la première moitié de ce correctif), la fenêtre utilise tout l'espace
+  écran disponible sous Windows — élimine la question "est-ce assez de
+  pixels ?" quelle que soit la résolution/mise à l'échelle réelle de
+  l'utilisateur. C'est exactement ce que l'utilisateur fait déjà
+  manuellement. Comportement Linux/macOS inchangé (`sys.platform ==
+  "win32"` uniquement) — pas de risque de régression sur le rendu déjà
+  vérifié dans cette session.
+- Honnêteté : comme D-090, ce correctif n'a pas pu être vérifié comme
+  reproduisant exactement le symptôme réel — à confirmer par
+  l'utilisateur.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

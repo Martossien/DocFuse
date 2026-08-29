@@ -210,7 +210,7 @@ Conventional Commits (sans scope obligatoire) :
 | pytest | ✅ 471 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 94 (D-001 à D-094) |
+| Décisions archivées | 95 (D-001 à D-095) |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
 | Extracteurs | 16 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093), +DOC/XLS/PPT/MSG (D-094) |
