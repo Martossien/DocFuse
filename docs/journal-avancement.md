@@ -1431,3 +1431,18 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   reproductions, 499 tests verts, ruff/mypy stricts, recette 7/7, DnD
   vérifié actif en direct sur l'affichage de cette session.
 
+### Audit qualité — lot 2 « encodage / ftfy » (D-097) — ✅ Corrigé
+
+- Troisième passe sur la configuration ftfy (après les deux de D-093) :
+  4 options cosmétiques de plus désactivées (`unescape_html` réécrivait
+  `&amp;` dans un JSON sain avant même `json.loads`). Leçon consolidée :
+  une bibliothèque « qui répare » embarque par défaut un paquet de
+  normalisations qu'il faut désactiver une à une, en vérifiant chaque fois
+  sur des fichiers réels.
+- Chemin rapide ASCII output-identique : 2,39 s → 0 ms sur 200 000 lignes
+  de code (mesuré). Détection « presque UTF-8 » pour un fichier coupé au
+  milieu d'un caractère (jusqu'ici : tout le fichier en `Ã©`, puis
+  « réparé » et signalé mojibake — doublement trompeur). HTML sans
+  charset déclaré : fin des devinettes `johab`/`windows-1250`.
+- 8 tests, 507 verts, ruff/mypy stricts, recette 7/7.
+

@@ -42,6 +42,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     ignorés dans le rapport. Markdown CRLF sans fins de ligne mélangées.
     Plafond mémoire OCR vérifié avant rendu (risque de crash OOM).
     Erreurs de génération affichées dans l'interface.
+- **Audit qualité, lot 2 — encodage** (D-097) : la réparation de mojibake
+  ne touche plus qu'à la corruption d'encodage (entités HTML `&amp;`,
+  codes ANSI des logs et texte NFD ne sont plus réécrits) ; un fichier
+  UTF-8 coupé au milieu d'un caractère n'est plus basculé entièrement en
+  cp1252 ; une page HTML sans charset déclaré n'est plus « devinée » en
+  encodage exotique. Fichiers ASCII (code, logs, CSV) : réparation
+  court-circuitée, 2,4 s économisées sur 200 000 lignes.
 
 ## [0.1.5] - 2026-08-29 — Beta
 

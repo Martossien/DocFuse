@@ -101,8 +101,16 @@ class HtmlExtractor(Extractor):
             # latin (cyrillique, grec, hébreu...). `UnicodeDammit(is_html=True)`
             # sait lire cette déclaration ; on ne garde `detect_encoding()`
             # qu'en dernier repli si Dammit échoue à produire du texte.
-            dammit = UnicodeDammit(raw, is_html=True)
-            if dammit.unicode_markup is not None:
+            # D-097 : sans charset déclaré, Dammit consultait le devineur
+            # statistique AVANT d'essayer UTF-8/cp1252 — une page cp1252
+            # sans `<meta charset>` ressortait en `johab` (balise fermante
+            # mangée), une page française en `windows-1250` (à/è/ù faux).
+            # La déclaration reste prioritaire (D-073) ; en son absence, la
+            # détection générique (UTF-8 strict → cp1252 plausible → …) est
+            # plus fiable que la devinette.
+            dammit = UnicodeDammit(raw, is_html=True, user_encodings=["utf-8"])
+            declared = getattr(dammit, "declared_html_encoding", None)
+            if declared and dammit.unicode_markup is not None:
                 html = dammit.unicode_markup
                 encoding = dammit.original_encoding or "utf-8"
             else:

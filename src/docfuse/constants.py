@@ -309,6 +309,11 @@ ENCODING_PLAUSIBILITY_SAMPLE_CHARS: int = 100_000
 """Nombre de caractères analysés pour le test de plausibilité — coût borné
 même sur un gros fichier."""
 
+ENCODING_MAX_UTF8_REPLACEMENT_RATIO: float = 0.001
+"""D-097 : un fichier dont le décodage UTF-8 tolérant ne produit pas plus
+de cette proportion de U+FFFD (0,1 %) est considéré UTF-8 (séquence
+tronquée en fin de fichier, octet égaré) plutôt que basculé en cp1252."""
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Garde-fou "bombe zip" pour les formats conteneurs ZIP (D-093)
 # ──────────────────────────────────────────────────────────────────────────────

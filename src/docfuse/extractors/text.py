@@ -13,6 +13,7 @@ from pathlib import Path
 from docfuse.constants import (
     CODE_EXTENSIONS,
     ENCODING_MAX_CONTROL_RATIO,
+    ENCODING_MAX_UTF8_REPLACEMENT_RATIO,
     ENCODING_PLAUSIBILITY_SAMPLE_CHARS,
 )
 from docfuse.core.registry import register
@@ -29,24 +30,36 @@ _TEXT_LIKE_EXTENSIONS: frozenset[str] = frozenset({".txt", ".text", ".log"}) | C
 
 
 def _looks_plausible(text: str) -> bool:
-    """D-093 : un décodage cp1252 réussit presque toujours (cet encodage
-    mappe presque tous les octets), même sur un fichier qui n'est PAS
-    réellement cp1252 (ex: UTF-8 avec une séquence multi-octets tronquée en
-    fin de fichier, qui fait juste échouer le test UTF-8 strict). Sans ce
-    garde-fou, un tel fichier tombait directement sur un cp1252 mal choisi
-    au lieu de retomber sur charset-normalizer.
+    """Garde-fou après un décodage cp1252 réussi (D-093, précisé D-097).
 
-    Heuristique : ratio de caractères de contrôle Unicode (catégorie `Cc`,
-    hors `\\t\\n\\r`) — un décodage dans le mauvais encodage produit souvent
-    des caractères de contrôle imprévus au milieu du texte. Échantillonné
-    sur `ENCODING_PLAUSIBILITY_SAMPLE_CHARS` pour un coût borné même sur un
-    gros fichier.
+    Ce que ce ratio détecte réellement : des octets de contrôle ASCII bruts
+    (NUL, etc.) en rafale — typiquement un fichier binaire ou de l'UTF-16
+    sans BOM, que cp1252 « décode » sans erreur. Ce qu'il ne détecte PAS
+    (docstring D-093 trop optimiste) : un vrai texte UTF-8 pris pour du
+    cp1252 — cp1252 lève sur ses 5 octets indéfinis et ne produit jamais de
+    caractère de contrôle pour les autres octets hauts ; ce cas est traité
+    en amont par `_decode_nearly_utf8`.
+
+    Échantillonné sur `ENCODING_PLAUSIBILITY_SAMPLE_CHARS` pour un coût
+    borné même sur un gros fichier.
     """
     sample = text[:ENCODING_PLAUSIBILITY_SAMPLE_CHARS]
     if not sample:
         return True
     control_count = sum(1 for c in sample if c not in "\t\n\r" and unicodedata.category(c) == "Cc")
     return (control_count / len(sample)) <= ENCODING_MAX_CONTROL_RATIO
+
+
+def _is_nearly_utf8(data: bytes) -> bool:
+    """Vrai si `data` est de l'UTF-8 à une fraction négligeable d'octets
+    invalides près (`ENCODING_MAX_UTF8_REPLACEMENT_RATIO`), D-097."""
+    decoded = data.decode("utf-8", errors="replace")
+    if not decoded:
+        return False
+    replacements = decoded.count("�")
+    if replacements == 0:
+        return True
+    return replacements / len(decoded) <= ENCODING_MAX_UTF8_REPLACEMENT_RATIO
 
 
 def detect_encoding(data: bytes) -> tuple[str, bytes]:
@@ -77,6 +90,16 @@ def detect_encoding(data: bytes) -> tuple[str, bytes]:
         return "utf-8", data
     except UnicodeDecodeError:
         pass
+
+    # 2b. UTF-8 « presque » valide (D-097) : une seule séquence multi-octets
+    # tronquée (fin de fichier coupée, log tourné au milieu d'un caractère)
+    # faisait échouer le test strict, puis cp1252 « réussissait » et TOUT le
+    # fichier sortait en `Ã©` — ensuite « réparé » par ftfy et signalé comme
+    # mojibake : doublement trompeur (mauvais encodage rapporté, caractère
+    # tronqué survivant en `Ã`). Si le décodage tolérant ne produit qu'une
+    # part négligeable de U+FFFD, c'est de l'UTF-8.
+    if _is_nearly_utf8(data):
+        return "utf-8", data
 
     # 3. cp1252 (Windows Latin-1 étendu — très fréquent sous Windows)
     # Essayer cp1252 AVANT charset-normalizer car ce dernier peut
@@ -126,14 +149,35 @@ def repair_mojibake(text: str) -> str:
     des virgules chinoises pleine chasse `，`, une ponctuation correcte
     pour cette langue, en virgules ASCII).
     """
+    # D-097 : chemin rapide, sortie identique. `ftfy` coûte ~10 µs par
+    # ligne quel que soit le contenu (2,4 s mesurées sur 200 000 lignes de
+    # code ASCII) — payé par tout `.py/.log/.json/.csv/.md`. Avec la
+    # configuration ci-dessous, seules restent des heuristiques agissant sur
+    # des caractères non-ASCII (mojibake, C1, substituts) : sur du texte
+    # purement ASCII, rien ne peut changer — on rend le texte tel quel
+    # (garde `isascii()` mesurée à ~20 ms sur le même fichier).
+    if text.isascii():
+        return text
     try:
         import ftfy
 
+        # D-097 : 4 options par défaut de plus désactivées, trouvées en
+        # conditions réelles après D-093 : `unescape_html` décodait les
+        # entités (`&amp;` → `&`) ligne par ligne — un JSON/Markdown sain
+        # était réécrit AVANT `json.loads`, et de façon incohérente dans un
+        # même fichier ; `remove_terminal_escapes` et `remove_control_chars`
+        # retiraient les codes ANSI (ESC) d'un `.log` ; `normalization="NFC"`
+        # réécrivait du texte NFD légitime. Aucune n'est une réparation de
+        # corruption d'encodage — l'unique mission de cette fonction.
         config = ftfy.TextFixerConfig(
             uncurl_quotes=False,
             fix_latin_ligatures=False,
             fix_line_breaks=False,
             fix_character_width=False,
+            unescape_html=False,
+            remove_terminal_escapes=False,
+            remove_control_chars=False,
+            normalization=None,
         )
         return ftfy.fix_text(text, config=config)
     except Exception:

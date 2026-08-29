@@ -204,14 +204,14 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 537 |
+| Tests collectés depuis un clone frais | 545 |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 499 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 507 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 96 (D-001 à D-096) |
-| Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lots 2-4 (encodage, perf mesurée, maintenabilité) en cours — plan dans `.claude/plans/` de la session |
+| Décisions archivées | 97 (D-001 à D-097) |
+| Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lot 2 livré (D-097 : ftfy restreint à la corruption d'encodage, chemin rapide ASCII, presque-UTF-8, HTML sans charset) ; lots 3-4 (perf mesurée, maintenabilité) en cours |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
 | Extracteurs | 16 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093), +DOC/XLS/PPT/MSG (D-094) |

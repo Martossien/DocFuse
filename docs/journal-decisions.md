@@ -1911,6 +1911,52 @@ locale, (c) code copié-collé qui a divergé.
 **Vérification** : 499 tests (28 nouveaux), ruff/mypy --strict propres,
 recette 7/7 ; les 23 reproductions rejouées contre le code corrigé.
 
+### D-097 : audit qualité — lot 2, encodage et réparation mojibake
+
+**Décisions** (tests dans `tests/test_regressions_d097.py`) :
+- **ftfy, 4 options cosmétiques de plus désactivées** — suite de D-093
+  (qui en avait déjà écarté 4), trouvées en reproduisant l'audit :
+  `unescape_html="auto"` décodait les entités (`&amp;` → `&`) ligne par
+  ligne, donc un JSON sain était réécrit *avant* `json.loads` et de façon
+  incohérente dans un même fichier (une ligne contenant `<` désactive
+  l'option pour la suite) ; `remove_terminal_escapes` et
+  `remove_control_chars` retiraient les codes ANSI (ESC) d'un `.log` ;
+  `normalization="NFC"` réécrivait du texte NFD légitime. Ne restent que
+  la famille `fix_encoding` (`decode_inconsistent_utf8`, `fix_c1_controls`,
+  `replace_lossy_sequences`) et `fix_surrogates` — l'unique mission de la
+  fonction est la corruption d'encodage, rien d'autre.
+- **Chemin rapide ASCII, sortie identique** : avec cette configuration,
+  aucune heuristique restante n'agit sur de l'ASCII pur →
+  `if text.isascii(): return text`. Mesuré : 2,39 s → 0 ms sur 200 000
+  lignes de code ASCII (identité d'objet), 0,37 s sur 900 k caractères
+  français non-ASCII (contenu inchangé). Payé auparavant par tout
+  `.py/.log/.json/.csv/.md`.
+- **UTF-8 « presque » valide** (`_is_nearly_utf8`, seuil
+  `ENCODING_MAX_UTF8_REPLACEMENT_RATIO` = 0,1 %) : une seule séquence
+  multi-octets tronquée (fichier coupé, log tourné au milieu d'un
+  caractère) faisait échouer le test UTF-8 strict ; cp1252 « réussissait »
+  alors et TOUT le fichier sortait en `Ã©`, puis ftfy le « réparait » et le
+  signalait comme mojibake — doublement trompeur (mauvais encodage
+  rapporté, caractère tronqué survivant). Désormais : UTF-8 avec un U+FFFD
+  local.
+- **`_looks_plausible` : docstring corrigée**. Elle promettait de détecter
+  « un UTF-8 tronqué pris pour du cp1252 » — impossible : cp1252 lève sur
+  ses 5 octets indéfinis et ne produit jamais de caractère de contrôle
+  pour les autres octets hauts. Ce que le ratio détecte réellement : des
+  octets de contrôle ASCII bruts en rafale (binaire, UTF-16 sans BOM). Le
+  cas promis est maintenant traité par `_is_nearly_utf8`. Le garde-fou est
+  conservé pour ce qu'il fait vraiment.
+- **HTML sans charset déclaré** : `UnicodeDammit` consultait le devineur
+  statistique avant d'essayer UTF-8/cp1252 — une page cp1252 sans
+  `<meta charset>` ressortait en `johab` (balise fermante mangée), une page
+  française en `windows-1250` (à/è/ù faux). La déclaration reste
+  prioritaire (D-073) ; en son absence, `detect_encoding()` (UTF-8 strict →
+  presque-UTF-8 → cp1252 plausible → charset-normalizer) remplace la
+  devinette.
+
+**Vérification** : 507 tests (8 nouveaux), ruff/mypy --strict propres,
+recette 7/7.
+
 ---
 
 *Fin du journal des décisions — Session 14.*
