@@ -42,6 +42,11 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".mhtml": "mhtml",
     ".mht": "mhtml",
     ".epub": "epub",
+    ".msg": "msg",
+    # Legacy Office binaire (Word/Excel/PowerPoint 97-2003, D-094)
+    ".doc": "legacy_office",
+    ".xls": "legacy_office",
+    ".ppt": "legacy_office",
 }
 
 # Fichiers de développement traités comme texte brut (pas de parsing

@@ -1335,3 +1335,44 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   ~/Téléchargements (1413 fichiers réels) avec toutes les nouvelles
   fonctionnalités actives simultanément.
 
+### Support `.doc`/`.xls`/`.ppt`/`.msg` — révision de la conclusion D-093 (D-094) — ✅ Corrigé
+
+- L'utilisateur a refusé la piste de contournement proposée (LibreOffice
+  headless, trop lourd — 300-500 Mo, hors budget) et a explicitement
+  demandé de chercher plus loin, avec un budget clair : +100 Mo max,
+  pas de ralentissement du traitement.
+- Recherche web dédiée (pas seulement les connaissances déjà en mémoire) :
+  a trouvé `office_oxide` (Rust, MIT/Apache-2.0, ~1,3 Mo/plateforme,
+  supporte aussi `.xls`/`.ppt` en plus de `.doc` — l'utilisateur a
+  explicitement demandé si d'autres formats étaient couverts) et
+  `python-oxmsg` (MIT, même auteur que python-docx/python-pptx) pour
+  `.msg` — deux bibliothèques absentes de l'analyse initiale D-093, qui
+  s'appuyait sur des candidats plus anciens et mal licenciés
+  (`antiword`/`wv`, confirmés GPL par la recherche).
+- **Avant d'écrire une ligne de code d'extracteur** : licences vérifiées
+  sur PyPI (métadonnées + classifiers), puis les deux bibliothèques
+  installées et testées directement sur les vrais fichiers de
+  l'utilisateur trouvés dans ~/Téléchargements
+  (`plan_formation_codage_ia_v2.4_BETA.doc` → 82 722 caractères propres,
+  `EXOS BASES.xls` → plusieurs feuilles correctes, `Téhou Suite réunion
+  Sylvie.msg` → sujet/expéditeur/destinataires/date/corps tous corrects)
+  — avant même de proposer l'implémentation à l'utilisateur.
+- `.ppt` : l'utilisateur n'en avait pas de réel, testé sur un fichier
+  généré via LibreOffice (disponible sur cette machine de dev, utilisé
+  uniquement comme générateur de fixture ponctuel — jamais comme
+  dépendance runtime du projet, contrairement à la piste refusée).
+- Fixtures `.doc`/`.xls`/`.ppt` générées de la même façon et committées
+  (convention déjà en place, `tests/fixtures/generate_fixtures.py`) ;
+  pas de fixture `.msg` (aucun outil disponible pour en écrire un) — testé
+  via un double de `Message` à la place, le parsing OLE2 réel étant déjà
+  vérifié manuellement sur le fichier de l'utilisateur.
+- Garde-fous de licence dédiés (`test_gpl_doc_tools_not_dependencies`),
+  12 nouveaux tests, 471 passed / 39 skipped, ruff/mypy --strict propres,
+  recette 7/7 (96 extensions, +4).
+- Limite honnêtement documentée : `office_oxide` est un binaire natif
+  compilé (Rust), son empaquetage PyInstaller Windows n'a pas pu être
+  vérifié dans cette session (pas d'environnement Windows/Wine
+  disponible) — à confirmer au prochain build de release, filet de
+  sécurité déjà en place si problème (`safe_extract()` isole tout échec
+  au fichier concerné, jamais un crash global).
+

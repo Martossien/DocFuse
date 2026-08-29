@@ -60,6 +60,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Garde-fou "bombe zip"** sur tous les formats conteneurs ZIP
   (DOCX/PPTX/XLSX/ODF/EPUB) : un fichier au taux de compression anormal
   est rejeté avant tout parsing, par sécurité.
+- **Support des formats Office legacy binaires** : `.doc`, `.xls`, `.ppt`
+  (Word/Excel/PowerPoint 97-2003) et `.msg` (email Outlook) — aucun
+  binaire externe, aucune installation requise sur la machine.
 
 ## [0.1.4] - 2026-08-29 — Beta
 

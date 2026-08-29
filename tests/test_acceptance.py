@@ -118,6 +118,18 @@ class TestLicenseCompliance:
         assert "extract-msg" not in content
         assert "extract_msg" not in content
 
+    def test_gpl_doc_tools_not_dependencies(self) -> None:
+        """`antiword`, `wv`/`wvware` et `doctotext` (candidats évidents pour
+        lire le .doc binaire legacy) sont tous en GPL — vérifié sur PyPI/
+        Wikipedia avant d'adopter `office_oxide` (MIT/Apache-2.0, D-094)
+        pour `extractors/legacy_office.py`. Garde-fou contre une
+        réintroduction par mégarde."""
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        content = pyproject.read_text(encoding="utf-8").lower()
+
+        for pkg in ("antiword", "wvware", "doctotext", "textract"):
+            assert pkg not in content, f"Dépendance interdite (GPL) : {pkg}"
+
     def test_mistral_common_not_a_dependency(self) -> None:
         """Le paquet `mistral-common` tire `pydantic-extra-types[pycountry]`,
         et `pycountry` est LGPL-2.1 (voir core/tokenizers/mistral.py). Le
@@ -161,6 +173,9 @@ class TestLicenseCompliance:
             "pillow",  # encodage PNG des pages rastérisées avant OCR
             "ftfy",  # réparation du mojibake (extractors/text.py)
             "wcwidth",  # dep de ftfy
+            "office_oxide",  # .doc/.xls/.ppt legacy (extractors/legacy_office.py, D-094)
+            "python-oxmsg",  # .msg Outlook (extractors/msg.py, D-094)
+            "click",  # dep de python-oxmsg
         ]
 
         for pkg_name in runtime_deps:

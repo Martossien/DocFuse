@@ -1672,6 +1672,83 @@ propres, recette 7/7 (92 extensions listées, +1 pour `.epub`). Re-testé sur
 ~/Documents + ~/Téléchargements (1413 fichiers réels) avec toutes les
 nouvelles fonctionnalités actives simultanément.
 
+### D-094 : support `.doc`/`.xls`/`.ppt`/`.msg` — révision de la conclusion D-093
+
+**Contexte** : D-093 concluait qu'aucun chemin propre, léger et conforme
+licence n'existait pour `.doc`/`.msg` (`extract-msg` GPL, `olefile` seul
+insuffisant), basé sur les bibliothèques déjà connues (`antiword`, `wv` —
+confirmées GPL par une recherche web dédiée). L'utilisateur a explicitement
+demandé de rechercher plus loin, avec un budget clair (+100 Mo max, pas de
+ralentissement du traitement) — recherche complémentaire qui a trouvé deux
+bibliothèques ne figurant pas dans l'analyse initiale.
+
+**Décision** :
+1. **`.doc`/`.xls`/`.ppt`** (Word/Excel/PowerPoint 97-2003 binaires) via
+   `office_oxide` (Rust/PyO3, double licence MIT/Apache-2.0, ~1,3 Mo par
+   plateforme, auto-suffisant — aucun binaire externe, aucune JVM). Nouvel
+   `extractors/legacy_office.py`, une seule classe enregistrée pour les
+   trois extensions (API `extract_text()` identique quel que soit le
+   format).
+2. **`.msg`** (email Outlook) via `python-oxmsg` (MIT, même auteur que
+   python-docx/python-pptx — Steve Canny —, dépendances `click` BSD-3 +
+   `olefile` BSD déjà vétées + `typing_extensions`). Nouvel
+   `extractors/msg.py`, réutilise `extractors/eml.py::_render_body()`
+   (préférence texte, repli HTML→texte) plutôt que de dupliquer cette
+   logique.
+
+**Vérification avant adoption** (jamais de dépendance ajoutée sur la seule
+foi d'une description marketing) :
+- Licences vérifiées sur PyPI (métadonnées + classifiers) pour les deux
+  paquets et leurs dépendances transitives — toutes MIT/Apache-2.0/BSD-3,
+  aucune GPL/AGPL/LGPL.
+- **Testé directement sur les fichiers réels de l'utilisateur** avant toute
+  ligne de code d'extracteur : `plan_formation_codage_ia_v2.4_BETA.doc`
+  (82 722 caractères extraits, accents et tableaux corrects),
+  `EXOS BASES.xls` (plusieurs feuilles, nombres/texte corrects),
+  `Téhou Suite réunion Sylvie.msg` (sujet/expéditeur/destinataires/date/
+  corps tous corrects). `.ppt` testé sur un fichier de test synthétique
+  (l'utilisateur n'en avait pas) généré via LibreOffice, disponible sur
+  cette machine de dev — utilisé uniquement comme outil de génération de
+  fixture ponctuel, jamais comme dépendance runtime du projet.
+- Gestion d'erreur vérifiée : fichier manquant/corrompu → exception propre
+  et catchable des deux côtés (`OfficeOxideError`, `FileNotFoundError`/
+  `ValueError`), jamais de plantage ni de blocage — mappé sur
+  `error.corrupt_file` (même principe que D-092).
+
+**Fixtures de test** : `sample.doc`/`sample.xls`/`sample.ppt` générés via
+LibreOffice (disponible sur cette machine) à partir des fixtures
+`.docx`/`.xlsx`/`.pptx` déjà commitées, suivant exactement la convention
+déjà en place (`tests/fixtures/generate_fixtures.py`). Pas de fixture
+`.msg` committée — contrairement aux autres formats, il n'existe aucune
+bibliothèque disponible ici pour EN ÉCRIRE un (`python-oxmsg` est
+lecture seule, Outlook n'est pas disponible) ; la logique de
+correspondance `Message → ExtractedFile` est testée via un double de
+`Message` (`unittest`/`monkeypatch`), le parsing OLE2/MS-OXMSG lui-même
+étant la responsabilité de `python-oxmsg`, déjà vérifié manuellement sur
+un fichier réel.
+
+**Point non vérifié, transparence assumée** : `office_oxide` est une
+extension Rust compilée (binaire natif par plateforme) — contrairement à
+`ftfy`/`python-oxmsg` (Python pur), son empaquetage par PyInstaller en
+onefile Windows n'a pas pu être testé dans cette session (pas
+d'environnement Windows/Wine disponible). Le spec PyInstaller
+(`CorpusOne.spec`) n'a pas été modifié : `hiddenimports=
+collect_submodules("docfuse.extractors")` couvre déjà `legacy_office.py`/
+`msg.py`, et les dépendances compilées existantes du projet
+(`pypdfium2`, `lxml`, `pillow`) n'ont jamais nécessité d'entrée
+spécifique dans ce spec — hypothèse raisonnable que `office_oxide` suivra
+le même chemin, à confirmer au prochain build de release. Filet de
+sécurité déjà en place si l'hypothèse est fausse : un échec d'import
+serait capté par `Extractor.safe_extract()` (garantie déjà existante,
+`try/except Exception` généralisé) et isolé au fichier concerné, jamais un
+crash de l'application entière.
+
+**Vérification** : 12 nouveaux tests (6 legacy_office, 6 msg), garde-fous
+de licence dédiés (`test_gpl_doc_tools_not_dependencies` — `antiword`/
+`wvware`/`doctotext`/`textract` bannis), 471 tests passent, ruff/mypy
+stricts propres, recette 7/7 (96 extensions, +4 pour `.doc`/`.xls`/`.ppt`/
+`.msg`).
+
 ---
 
 *Fin du journal des décisions — Session 14.*

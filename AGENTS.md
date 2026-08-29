@@ -204,16 +204,16 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 497 |
+| Tests collectés depuis un clone frais | 509 |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 458 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 471 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 93 (D-001 à D-093) |
+| Décisions archivées | 94 (D-001 à D-094) |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
-| Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF) |
-| Extracteurs | 14 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093) |
+| Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
+| Extracteurs | 16 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093), +DOC/XLS/PPT/MSG (D-094) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
 | OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |
 | OCR images intégrées DOCX/PPTX/XLSX/ODT/ODP | Optionnel (même moteur `core/ocr/`), automatique sans réglage (D-091, étendu D-093). Export image + tag `[[IMAGE: ...]]` en option désactivée par défaut (CLI `--extract-images`, GUI, config JSON) — écrit `<sortie>_images/`. `.ods`/EML/MHTML hors périmètre. |
@@ -243,8 +243,8 @@ C:\Windows\Temp\Python313\python.exe
 
 - ⬜ Rendre le jeu `tests/samples_real/` reproductible ou documenter sa génération pour supprimer les 39 skips d'un clone frais
 - ⬜ Moteur de comptage Llama/HuggingFace `tokenizers` (évoqué comme prochaine option, pas retenu pour 0.1.2 : dépendance Rust supplémentaire)
-- ⬜ Support `.doc` (Word 97-2003 binaire) / `.msg` (Outlook) — analysé (D-093), non retenu : `extract-msg` est GPL, `olefile` (BSD) ne fournit que l'accès aux flux OLE2 bruts, aucune logique d'extraction de texte prête à l'emploi et conforme licence. `.msg` (spec MS-OXMSG) plus tractable que `.doc` (piece table Word) si le besoin se présente réellement.
-- ⬜ Position d'image `.ods` (XLSX exclu pour la même raison, hors scope D-093 — feuilles de calcul, images rarement porteuses de contenu)
+- ⬜ Position d'image `.ods` (XLSX exclu pour la même raison, hors scope D-093/D-094 — feuilles de calcul, images rarement porteuses de contenu)
+- ⬜ Vérifier au prochain build Windows que PyInstaller embarque correctement le binaire natif `office_oxide` (extension Rust) — jamais testé en conditions réelles dans cette session (pas d'environnement Windows/Wine disponible ici). Filet de sécurité déjà en place : un échec d'import serait capté par `Extractor.safe_extract()` et isolé au fichier concerné (`.doc`/`.xls`/`.ppt`), pas un crash de l'application.
 - ⬜ OCR/export d'images pour EML/MHTML (pièces jointes/images inline) — pas demandé, hors scope D-093
 
 ## 12. Règles critiques
