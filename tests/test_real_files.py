@@ -506,7 +506,7 @@ class TestCorpusGeneration:
 
         result = run_analysis(SAMPLES_DIR, context_limit=999999)  # Plafond très haut
         output = tmp_path / "corpus.md"
-        success = generate_corpus(result, output, 999999, 0.15)
+        success = generate_corpus(result, output)
         assert success
         assert output.exists()
         content = output.read_text("utf-8")
@@ -535,7 +535,7 @@ class TestCorpusGeneration:
 
         result = run_analysis(SAMPLES_DIR, context_limit=999999)
         output = tmp_path / "corpus.pdf"
-        success = generate_corpus(result, output, 999999, 0.15)
+        success = generate_corpus(result, output)
         assert success
         assert output.exists()
         assert output.stat().st_size > 1000  # Le PDF ne doit pas être vide

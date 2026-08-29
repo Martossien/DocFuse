@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from docfuse import __version__
+from docfuse.constants import VERBATIM_EXTENSIONS
 from docfuse.core.orchestrator import OrchestratorResult
 from docfuse.i18n import format_number, t
 from docfuse.output.source_header import adaptive_backticks, build_source_header
@@ -70,11 +71,13 @@ def write_markdown_corpus(
         lines.append(header)
         lines.append("")
 
-        # BUG FIX: Les fichiers Markdown (.md, .markdown) sont inclus "tel quel"
-        # (CdC §7.3) — pas d'encapsulation dans des backticks.
-        # Pour les autres formats qui contiennent des ``` dans leur texte,
-        # on utilise des backticks adaptatifs (inspiré de files-to-prompt).
-        if f.file_type in ("markdown", "text", "csv_tsv", "xml_json", "eml", "mhtml"):
+        # Les formats texte (Markdown, texte brut, CSV, XML/JSON, e-mails)
+        # sont inclus tels quels (CdC §7.3). Les autres formats qui
+        # contiennent des ``` sont encapsulés dans des backticks adaptatifs.
+        # D-099 : la condition comparait `file_type` à des noms de famille
+        # ("markdown", "text"…) alors que M-08 y met l'extension ("md",
+        # "txt") — un .md contenant des ``` était encapsulé malgré le CdC.
+        if f.extension in VERBATIM_EXTENSIONS:
             lines.append(f.text)
         elif "```" in f.text:
             bt = adaptive_backticks(f.text)

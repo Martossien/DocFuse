@@ -162,7 +162,7 @@ IGNORE_PATTERNS: list[str] = [
     "corpus.pdf",
     "corpusone_report.json",
     "corpusone_report.md",
-    "*_rapport.md",  # I-05: Rapports générés par DocFuse
+    "*_rapport.md",  # I-05: Rapports générés par DocFuse (REPORT_SUFFIX)
     "*_rapport.json",
     "*.min.js",  # D-077 : bundle tiers minifié, jamais du code source à lire
     "*.min.css",
@@ -206,6 +206,63 @@ DEFAULT_EXTRACT_EMBEDDED_IMAGES: bool = False
 """Export des images intégrées DOCX/PPTX en fichiers séparés (D-091) —
 désactivé par défaut : c'est la seule fonctionnalité de DocFuse qui écrit des
 fichiers en plus du corpus/rapport."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sorties : noms partagés CLI/GUI (D-099, voir output/paths.py)
+# ──────────────────────────────────────────────────────────────────────────────
+
+OUTPUT_DIR_NAME: str = "CorpusOne_output"
+"""Dossier de sortie par défaut, créé dans la source sélectionnée (I-13)."""
+
+REPORT_SUFFIX: str = "_rapport"
+"""Suffixe des rapports écrits à côté du corpus (`corpus_rapport.md/.json`).
+Doit rester cohérent avec les motifs `*_rapport.*` de IGNORE_PATTERNS."""
+
+CORPUS_EXTENSIONS: dict[str, str] = {"md": ".md", "pdf": ".pdf"}
+"""Format de sortie → extension du corpus."""
+
+VERBATIM_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        "md",
+        "markdown",
+        "txt",
+        "text",
+        "log",
+        "csv",
+        "tsv",
+        "xml",
+        "json",
+        "yaml",
+        "yml",
+        "ini",
+        "cfg",
+        "eml",
+        "mhtml",
+        "mht",
+    }
+)
+"""Extensions dont le texte est inclus tel quel dans le corpus Markdown (CdC
+§7.3), jamais encapsulé dans des backticks même s'il contient des ```. Les
+autres formats (documents bureautiques, PDF, HTML, code) sont encapsulés
+dans des backticks adaptatifs quand leur texte contient des ```."""
+
+CSV_FIELD_SIZE_LIMIT: int = 2**31 - 1
+"""Taille maximale d'un champ CSV (D-096 : 131 072 par défaut faisait planter
+tout fichier à long champ). `sys.maxsize` lève `OverflowError` sous Windows
+(C long 32 bits) — valeur portable, 2 Go par champ suffisent largement."""
+
+UNUSUAL_CONTEXT_LIMIT: int = 1_000_000
+"""Au-delà de ce plafond, un avertissement « valeur inhabituelle » est émis
+(CdC §10.3, M-11)."""
+
+HEADER_ESTIMATE_MAX_ITERATIONS: int = 20
+"""Nombre maximal d'itérations pour faire converger l'en-tête SOURCE (qui
+contient sa propre estimation de tokens) — voir output/source_header.py."""
+
+SECRETS_NOTE_MAX_LINES_PER_KIND: int = 10
+"""Nombre maximal de numéros de ligne cités par type de secret dans la note
+de transparence (D-099 : un journal de 40 000 lignes de jetons produisait
+une note de 1,5 Mo, soit 29 % des tokens du fichier)."""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Seuils de détection scans / pauvreté de texte (CdC §9.2, §12)
@@ -369,6 +426,16 @@ STATUS_COLORS: dict[str, str] = {
     "ignored": "#9ca3af",  # gris
     "error": "#dc2626",  # rouge
 }
+
+PENDING_COLOR: str = "#9ca3af"
+"""Gris des lignes « en attente » et des statuts inconnus dans la table GUI."""
+
+GAUGE_COLORS: dict[str, str] = {"ok": "#22c55e", "warning": "#f97316", "blocked": "#ef4444"}
+"""Jauge de contexte (I-11) : vert sous GAUGE_WARNING_RATIO, orange jusqu'au
+plafond, rouge au-delà."""
+
+GAUGE_WARNING_RATIO: float = 0.8
+"""Fraction du plafond à partir de laquelle la jauge passe à l'orange."""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Regex pour le tri naturel (file2 avant file10)

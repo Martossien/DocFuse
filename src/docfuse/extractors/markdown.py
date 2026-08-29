@@ -10,8 +10,8 @@ from pathlib import Path
 
 from docfuse.constants import MARKDOWN_BASE64_MIN_LEN
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import decode_text
+from docfuse.extractors.base import Extractor, error_result, file_type_for
+from docfuse.extractors.text import decode_text_with_note
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -54,8 +54,6 @@ def _strip_base64_images(text: str) -> tuple[str, int, int]:
 class MarkdownExtractor(Extractor):
     """Extracteur pour les fichiers Markdown (tel quel)."""
 
-    file_type = "markdown"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() in (".md", ".markdown")
@@ -66,12 +64,9 @@ class MarkdownExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text, mojibake_repaired = decode_text(raw)
+            encoding, text, extra_metadata = decode_text_with_note(raw)
 
             text, image_count, chars_saved = _strip_base64_images(text)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
             if image_count > 0:
                 extra_metadata["markdown_base64_stripped"] = t(
                     "markdown.base64_note", count=image_count, chars=chars_saved
@@ -80,8 +75,8 @@ class MarkdownExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -90,4 +85,4 @@ class MarkdownExtractor(Extractor):
                 extra_metadata=extra_metadata,
             )
         except Exception as exc:
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)

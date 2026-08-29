@@ -34,7 +34,9 @@ class ExtractedFile:
         path: Chemin absolu du fichier source.
         relative_path: Chemin relatif au dossier d'entrée (pour l'en-tête SOURCE).
         extension: Extension en minuscules sans le point (ex: "pdf", "docx").
-        file_type: Type libre du format (ex: "docx", "pdf", "html").
+        file_type: Type affiché/rapporté — l'extension normalisée, via
+            `extractors.base.file_type_for()` (D-099 : une seule politique,
+            résultat READY ou ERREUR).
         size_bytes: Taille du fichier en octets.
         text: Texte extrait, normalisé UTF-8. Peut être vide si le fichier
             est un scan ou si l'extraction a échoué.
@@ -100,4 +102,5 @@ class ExtractedFile:
             "encoding": self.encoding,
             "chars_per_page": self.chars_per_page,
             "extra_metadata": self.extra_metadata,
+            "embedded_images_count": len(self.embedded_images),
         }

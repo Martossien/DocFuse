@@ -18,9 +18,52 @@ from dataclasses import dataclass
 from docfuse.constants import OCR_LANG, OCR_MAX_CONCURRENCY
 from docfuse.core.ocr.base import OcrEngine
 from docfuse.core.ocr.registry import ocr_with_slot
-from docfuse.models.extraction_result import EmbeddedImage
+from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 
 _FORBIDDEN_CHARS_RE = re.compile(r'[\\/:*?"<>|]')
+
+
+def dedupe_image_filenames(files: list[ExtractedFile]) -> int:
+    """Renomme les images exportées dont le nom est déjà pris par un fichier
+    précédent, et met à jour le marqueur `[[IMAGE: …]]` correspondant dans le
+    texte (D-099).
+
+    Le nom dérive du chemin relatif, unique dans un dossier — mais une
+    sélection explicite de fichiers homonymes venant de dossiers différents
+    (`A/rapport.docx` + `B/rapport.docx`) produit les mêmes noms, et
+    l'écriture silencieuse écrasait la première image par la seconde.
+
+    Returns:
+        Nombre d'images renommées.
+    """
+    seen: set[str] = set()
+    renamed = 0
+    for file in files:
+        if not file.embedded_images:
+            continue
+        images: list[EmbeddedImage] = []
+        for image in file.embedded_images:
+            name = image.filename
+            if name in seen:
+                new_name = _next_free_name(name, seen)
+                file.text = file.text.replace(f"[[IMAGE: {name}]]", f"[[IMAGE: {new_name}]]")
+                file.text = file.text.replace(f"[[IMAGE: {name} —", f"[[IMAGE: {new_name} —")
+                image = EmbeddedImage(filename=new_name, data=image.data)
+                renamed += 1
+            seen.add(image.filename)
+            images.append(image)
+        file.embedded_images = images
+    return renamed
+
+
+def _next_free_name(name: str, taken: set[str]) -> str:
+    stem, dot, ext = name.rpartition(".")
+    counter = 2
+    while True:
+        candidate = f"{stem}_{counter}.{ext}" if dot else f"{name}_{counter}"
+        if candidate not in taken:
+            return candidate
+        counter += 1
 
 
 def sanitize_filename_component(value: str) -> str:

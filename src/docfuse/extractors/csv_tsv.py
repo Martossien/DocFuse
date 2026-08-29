@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import csv
 import io
-import sys
 from pathlib import Path
 
+from docfuse.constants import CSV_FIELD_SIZE_LIMIT
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import decode_text
-from docfuse.i18n import t
+from docfuse.extractors.base import Extractor, error_result, file_type_for
+from docfuse.extractors.text import decode_text_with_note
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -21,14 +20,12 @@ from docfuse.models.file_status import FileStatus
 # faisait échouer entièrement un CSV dont une seule cellule contient un long
 # texte ou un JSON (exports de bases, logs applicatifs). Réglage global au
 # processus, sûr sous le pool de threads (positionné une fois à l'import).
-csv.field_size_limit(sys.maxsize)
+csv.field_size_limit(CSV_FIELD_SIZE_LIMIT)
 
 
 @register(".csv", ".tsv")
 class CsvTsvExtractor(Extractor):
     """Extracteur pour les fichiers CSV et TSV."""
-
-    file_type = "csv_tsv"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -40,10 +37,7 @@ class CsvTsvExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text_raw, mojibake_repaired = decode_text(raw)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
+            encoding, text_raw, extra_metadata = decode_text_with_note(raw)
 
             delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
             # M-05: Détecter si le CSV utilise ; (fréquent en français)
@@ -61,8 +55,8 @@ class CsvTsvExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -70,4 +64,4 @@ class CsvTsvExtractor(Extractor):
                 extra_metadata=extra_metadata,
             )
         except Exception as exc:
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)

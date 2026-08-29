@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
+from docfuse.extractors.base import Extractor, container_guard, error_result, file_type_for
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 class EpubExtractor(Extractor):
     """Extracteur EPUB via zipfile/ElementTree/BeautifulSoup."""
 
-    file_type = "epub"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() == ".epub"
@@ -43,17 +41,10 @@ class EpubExtractor(Extractor):
         cls, path: Path, relative_path: str, _extract_images: bool = False
     ) -> ExtractedFile:
         try:
-            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
-            if is_zip_bomb(path):
-                return ExtractedFile(
-                    path=path,
-                    relative_path=relative_path,
-                    extension="epub",
-                    file_type=cls.file_type,
-                    size_bytes=path.stat().st_size,
-                    status=FileStatus.ERROR,
-                    error_message=t("error.zip_bomb_suspected"),
-                )
+            # D-093 : garde-fou « bombe zip » partagé entre conteneurs (D-099).
+            guard = container_guard(path, relative_path, check_ole=False)
+            if guard is not None:
+                return guard
 
             with zipfile.ZipFile(str(path)) as zf:
                 names = set(zf.namelist())
@@ -65,8 +56,8 @@ class EpubExtractor(Extractor):
                     return ExtractedFile(
                         path=path,
                         relative_path=relative_path,
-                        extension="epub",
-                        file_type=cls.file_type,
+                        extension=file_type_for(path),
+                        file_type=file_type_for(path),
                         size_bytes=path.stat().st_size,
                         status=FileStatus.ERROR,
                         error_message=t("error.encrypted_epub"),
@@ -77,8 +68,8 @@ class EpubExtractor(Extractor):
                     return ExtractedFile(
                         path=path,
                         relative_path=relative_path,
-                        extension="epub",
-                        file_type=cls.file_type,
+                        extension=file_type_for(path),
+                        file_type=file_type_for(path),
                         size_bytes=path.stat().st_size,
                         status=FileStatus.ERROR,
                         error_message=f"{t('error.corrupt_file')} : container.xml/OPF introuvable",
@@ -121,8 +112,8 @@ class EpubExtractor(Extractor):
                 return ExtractedFile(
                     path=path,
                     relative_path=relative_path,
-                    extension="epub",
-                    file_type=cls.file_type,
+                    extension=file_type_for(path),
+                    file_type=file_type_for(path),
                     size_bytes=path.stat().st_size,
                     text=full_text,
                     status=FileStatus.READY,
@@ -131,7 +122,7 @@ class EpubExtractor(Extractor):
                 )
         except Exception as exc:
             logger.exception("Erreur extraction EPUB %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _resolve_spine_item(opf_dir: str, href: str, names: set[str]) -> str | None:

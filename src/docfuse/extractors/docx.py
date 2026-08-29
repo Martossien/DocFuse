@@ -15,8 +15,7 @@ from typing import Any
 from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted, is_zip_bomb
-from docfuse.i18n import t
+from docfuse.extractors.base import Extractor, container_guard, error_result, file_type_for
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -27,8 +26,6 @@ logger = logging.getLogger(__name__)
 class DocxExtractor(Extractor):
     """Extracteur DOCX via python-docx + détection media dans le ZIP."""
 
-    file_type = "docx"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() == ".docx"
@@ -36,32 +33,11 @@ class DocxExtractor(Extractor):
     @classmethod
     def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         try:
-            # D-089 : un .docx protégé par mot de passe à l'ouverture est un
-            # conteneur OLE2, plus un ZIP — sans cette détection, python-docx
-            # échoue avec un `PackageNotFoundError` bas niveau qui ne dit
-            # jamais à l'utilisateur que le fichier est protégé.
-            if is_ole_encrypted(path):
-                return ExtractedFile(
-                    path=path,
-                    relative_path=relative_path,
-                    extension="docx",
-                    file_type=cls.file_type,
-                    size_bytes=path.stat().st_size,
-                    status=FileStatus.ERROR,
-                    error_message=t("error.encrypted_office"),
-                )
-
-            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
-            if is_zip_bomb(path):
-                return ExtractedFile(
-                    path=path,
-                    relative_path=relative_path,
-                    extension="docx",
-                    file_type=cls.file_type,
-                    size_bytes=path.stat().st_size,
-                    status=FileStatus.ERROR,
-                    error_message=t("error.zip_bomb_suspected"),
-                )
+            # D-089/D-093 : fichier protégé par mot de passe (conteneur OLE2)
+            # ou « bombe zip » — garde partagée entre conteneurs (D-099).
+            guard = container_guard(path, relative_path)
+            if guard is not None:
+                return guard
 
             from docx import Document
             from docx.table import Table
@@ -133,8 +109,8 @@ class DocxExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="docx",
-                file_type=cls.file_type,
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=text,
                 status=FileStatus.READY,
@@ -143,7 +119,7 @@ class DocxExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction DOCX %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _flatten_paragraph_text(p_element: object) -> str:

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.extractors.text import decode_text
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 @register(".eml")
 class EmlExtractor(Extractor):
     """Extracteur EML (email) via stdlib email module."""
-
-    file_type = "eml"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -53,15 +51,15 @@ class EmlExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="eml",
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=full_text,
                 status=FileStatus.READY,
             )
         except Exception as exc:
             logger.exception("Erreur extraction EML %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _render_message(msg: Any, is_nested: bool) -> list[str]:

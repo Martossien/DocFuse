@@ -13,32 +13,36 @@ import json
 import logging
 from pathlib import Path
 
+from docfuse.constants import DEFAULT_LANG
+
 logger = logging.getLogger(__name__)
 
 _CATALOGS: dict[str, dict[str, str]] = {}
-_CURRENT_LANG: str = "fr"
+_CURRENT_LANG: str = DEFAULT_LANG
 
 
 def _load_catalog(lang: str) -> dict[str, str]:
-    """Charge un catalogue de langue depuis le fichier JSON."""
+    """Charge un catalogue de langue depuis le fichier JSON.
+
+    D-099 : un catalogue absent ou illisible est mis en cache vide — avant,
+    chaque appel à `t()` dans une langue inconnue (`--lang de`) retentait
+    la lecture du disque et journalisait le même avertissement.
+    """
     if lang in _CATALOGS:
         return _CATALOGS[lang]
 
-    catalog_dir = Path(__file__).resolve().parent / "i18n"
-    catalog_file = catalog_dir / f"{lang}.json"
-
+    catalog_file = Path(__file__).resolve().parent / "i18n" / f"{lang}.json"
+    catalog: dict[str, str] = {}
     if not catalog_file.exists():
         logger.warning("Catalogue i18n introuvable : %s", catalog_file)
-        return {}
-
-    try:
-        data = json.loads(catalog_file.read_text(encoding="utf-8"))
-        catalog = {k: str(v) for k, v in data.items()}
-        _CATALOGS[lang] = catalog
-        return catalog
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Erreur chargement i18n %s : %s", catalog_file, exc)
-        return {}
+    else:
+        try:
+            data = json.loads(catalog_file.read_text(encoding="utf-8"))
+            catalog = {k: str(v) for k, v in data.items()}
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Erreur chargement i18n %s : %s", catalog_file, exc)
+    _CATALOGS[lang] = catalog
+    return catalog
 
 
 def set_language(lang: str) -> None:
@@ -50,8 +54,9 @@ def set_language(lang: str) -> None:
 def t(key: str, **kwargs: object) -> str:
     """Traduit une clé dans la langue active.
 
-    Si la clé n'existe pas, retourne la clé elle-même.
-    Supporte les placeholders {name}.
+    Une clé absente de la langue active est cherchée dans `DEFAULT_LANG`
+    (catalogue de référence, complet), puis renvoyée telle quelle. Supporte
+    les placeholders {name}.
 
     Args:
         key: Clé de traduction.
@@ -60,8 +65,11 @@ def t(key: str, **kwargs: object) -> str:
     Returns:
         Chaîne traduite.
     """
-    catalog = _load_catalog(_CURRENT_LANG)
-    text = catalog.get(key, key)
+    text = _load_catalog(_CURRENT_LANG).get(key)
+    if text is None and _CURRENT_LANG != DEFAULT_LANG:
+        text = _load_catalog(DEFAULT_LANG).get(key)
+    if text is None:
+        text = key
 
     # Substitution des placeholders
     if kwargs:

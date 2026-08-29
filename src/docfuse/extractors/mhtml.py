@@ -15,7 +15,7 @@ from email.parser import BytesParser
 from pathlib import Path
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.extractors.eml import part_text
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 @register(".mhtml", ".mht")
 class MhtmlExtractor(Extractor):
     """Extracteur MHTML/MHT — parse le MIME multipart et extrait le HTML."""
-
-    file_type = "mhtml"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -61,8 +59,8 @@ class MhtmlExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=full_text,
                 status=FileStatus.READY,
@@ -70,7 +68,7 @@ class MhtmlExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction MHTML %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _html_to_text(html: str) -> str:

@@ -18,7 +18,10 @@ class ProgressEvent:
 
     Attributes:
         file_path: Chemin relatif du fichier en cours.
-        current: Index du fichier courant (1-based).
+        current: Nombre de fichiers terminés, cet événement compris (D-099 :
+            un compteur monotone — l'ancien index d'inventaire faisait
+            reculer la barre quand les extractions parallèles finissaient
+            dans le désordre). 0 pour un événement « pending ».
         total: Nombre total de fichiers à traiter.
         status: Statut du fichier ("ready", "images", "low_text", etc.).
         message: Message optionnel (erreur, warning).

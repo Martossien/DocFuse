@@ -14,9 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import detect_encoding, repair_mojibake
-from docfuse.i18n import t
+from docfuse.extractors.base import Extractor, error_result, file_type_for
+from docfuse.extractors.text import detect_encoding, mojibake_metadata, repair_mojibake
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -76,8 +75,6 @@ def preformatted_text(tag: Any) -> str:
 @register(".html", ".htm")
 class HtmlExtractor(Extractor):
     """Extracteur HTML avec BeautifulSoup4 — parcours séquentiel du DOM sans duplication."""
-
-    file_type = "html"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -144,15 +141,13 @@ class HtmlExtractor(Extractor):
             image_count = image_counter["count"]
 
             full_text = "\n\n".join(parts)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
+            extra_metadata = mojibake_metadata(mojibake_repaired)
 
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=full_text,
                 status=FileStatus.READY,
@@ -162,7 +157,7 @@ class HtmlExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction HTML %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) -> None:

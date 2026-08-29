@@ -68,6 +68,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     corpus (cache) ; la saisie du plafond ne reconstruit plus la table à
     chaque frappe. Inventaire parcouru une seule fois par source.
 
+### Modifié
+
+- **Audit qualité, lot 4 — maintenabilité** (D-099) : code dupliqué
+  factorisé (gardes des formats conteneurs, note d'encodage, écriture des
+  rapports, chemins de sortie), ce qui a révélé et corrigé :
+  - un fichier Markdown contenant des ``` était encapsulé dans des
+    backticks (contraire au CdC : les formats texte sont inclus tels quels) ;
+  - le « type » d'un fichier dans le rapport différait selon que son
+    extraction avait réussi (`odt`) ou échoué (`odf`) ;
+  - CLI : un fichier seul en entrée écrivait `corpus.md` dans le dossier
+    courant au lieu de `CorpusOne_output/` à côté du fichier, comme la GUI ;
+    `--output notes.txt` créait un dossier `notes.txt/` (refusé avec un
+    message) ; `--input` manquant renvoie le code 1, plus le code 2 réservé
+    au blocage ;
+  - GUI : le bouton « Générer corpus.md » suit enfin le choix PDF ; le
+    plafond saisi est lu de la même façon par le blocage, le compteur et
+    le résumé ; la barre de progression ne recule plus.
+  - Images exportées : deux documents homonymes ne s'écrasent plus.
+  - Note « secrets potentiels » plafonnée à 10 lignes par type.
+
 ## [0.1.5] - 2026-08-29 — Beta
 
 ### Corrigé

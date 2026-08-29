@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -32,8 +32,6 @@ _RESULT_GROUP_START = re.compile(r"\{\\result\b")
 @register(".rtf")
 class RtfExtractor(Extractor):
     """Extracteur RTF via striprtf."""
-
-    file_type = "rtf"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -64,8 +62,8 @@ class RtfExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="rtf",
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -73,7 +71,7 @@ class RtfExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction RTF %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _extract_ole_fallback_texts(rtf_text: str) -> list[str]:

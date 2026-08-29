@@ -193,7 +193,7 @@ class TestWriters:
         (tmp_path / "a<b>.txt").write_text("Ligne 1\nLigne 2\n", encoding="utf-8")
         result = run_analysis(tmp_path, context_limit=128000)
 
-        assert generate_corpus(result, tmp_path / "corpus.pdf", 128000, 0.15)
+        assert generate_corpus(result, tmp_path / "corpus.pdf")
         assert (tmp_path / "corpus.pdf").stat().st_size > 0
 
     def test_markdown_crlf_mode_has_no_bare_lf(self, tmp_path: Path) -> None:

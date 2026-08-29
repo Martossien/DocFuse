@@ -2029,4 +2029,91 @@ recette 7/7, corpus ~/Documents identique byte à byte, 111 = 111 images.
 
 ---
 
+### D-099 : audit qualité — lot 4, maintenabilité et cohérence
+
+**Contexte** : dernier lot de l'audit. Les auditeurs avaient relevé du code
+copié-collé qui avait divergé (classe (c) du constat général) : garde
+conteneur ×5, note mojibake ×6, écriture des rapports ×3 avec deux appels à
+neuf arguments, chemins de sortie différents entre CLI et GUI, littéraux
+magiques (`"CorpusOne_output"`, `"_rapport"`, `1_000_000`, couleurs, `20`,
+`12`). En factorisant, trois vrais bugs sont apparus — c'est l'intérêt d'un
+lot « maintenabilité » : la duplication cache des divergences.
+
+**Décisions** (tests dans `tests/test_regressions_d099.py`) :
+- **Politique unique `file_type`** = `extractors.base.file_type_for(path)`
+  (extension normalisée). Avant, un résultat READY portait l'extension
+  (`odt`, `yaml`) et un résultat ERREUR le nom de famille de l'extracteur
+  (`odf`, `xml_json`) : le même fichier changeait de type dans le rapport
+  selon l'issue. **Bug révélé** : `markdown_writer` comparait `file_type`
+  à `("markdown", "text", "csv_tsv", …)` — mort depuis M-08 (`md` ≠
+  `markdown`), donc un `.md` contenant des ``` était encapsulé dans des
+  backticks malgré le CdC §7.3. Remplacé par `VERBATIM_EXTENSIONS`
+  (constante documentée) sur `extension`. L'attribut de classe
+  `Extractor.file_type` disparaît ; `error_result(path, relative_path,
+  exc)` perd son argument.
+- **`base.py`** : `container_guard(path, relative_path, check_ole=True)`
+  (OLE chiffré + bombe zip) remplace ~22 lignes copiées dans docx/pptx/
+  xlsx/odf/epub ; `error_result_message()` remplace les huit littéraux
+  `ExtractedFile(... status=ERROR ...)`.
+- **`text.py`** : `decode_text_with_note()` / `mojibake_metadata()` —
+  la note de transparence n'est construite qu'à un endroit.
+- **`core/report.py::write_report_pair(result, base_path)`** : écrit
+  toujours `.md` ET `.json`, plafond/marge/moteur lus sur le résultat
+  (une seule source de vérité), crée le dossier cible. Remplace trois
+  copies (CLI, GUI, orchestrateur). `generate_corpus(result, output_path)`
+  perd ses paramètres `context_limit`/`margin` en doublon de `result.*`.
+- **`output/paths.py`** : `corpus_extension()`, `default_corpus_path()`,
+  `report_base_path()` + constantes `OUTPUT_DIR_NAME`, `REPORT_SUFFIX`,
+  `CORPUS_EXTENSIONS`. **Divergence corrigée** : pour un fichier seul en
+  entrée, la CLI écrivait `corpus.md` dans le dossier courant, la GUI dans
+  `<dossier du fichier>/CorpusOne_output/` — même règle désormais.
+- **GUI, fonctions pures testables** (même esprit que `sort_file_pairs`) :
+  `parse_context_limit()` (**bug révélé** : blocage, compteur et résumé
+  pouvaient lire trois plafonds différents selon la validité de la
+  saisie), `gauge_color()`, `build_summary_lines()` (réutilise
+  `result.block_reason` au lieu de le reconstruire) ; `_set_phase(idle|
+  analyzing|done)` centralise six sites de `configure(state=…)` ;
+  `_refresh_from_result()` centralise quatre séquences table/compteur/
+  résumé/bouton ; trace sur `format_var` (le bouton « Générer corpus.md »
+  ne suivait pas le choix PDF).
+- **CLI** : `--input` manquant → code 1 (avant : `parser.error()` → code 2,
+  réservé au blocage plafond) ; `--output notes.txt` → message clair et
+  code 1 (avant : création d'un dossier `notes.txt/`).
+- **Orchestrateur** : `OrchestratorResult.cancelled` + retour immédiat
+  après annulation (les étapes 3 à 6 tournaient sur un résultat jeté) ;
+  `ProgressEvent.current` = nombre de fichiers terminés (compteur
+  monotone — l'index d'inventaire faisait reculer la barre) ; note
+  « secrets potentiels » groupée par type et plafonnée
+  (`SECRETS_NOTE_MAX_LINES_PER_KIND` = 10 : un journal de 40 000 jetons
+  produisait une note de 1,5 Mo, 29 % des tokens du fichier) ;
+  `dedupe_image_filenames()` renomme les images exportées homonymes
+  (`A/rapport.docx` + `B/rapport.docx`) **et** leur tag dans le texte —
+  avant, la seconde écrasait la première en silence.
+- **Divers** : `to_dict()` expose `embedded_images_count` ; `i18n` met en
+  cache un catalogue absent (un avertissement, pas un par appel) et
+  retombe sur `DEFAULT_LANG` pour une clé manquante ; 10 clés i18n mortes
+  retirées (FR et EN restent alignés) ; `_walk_figure()` fusionne les deux
+  parcours symétriques du PDF ; `chars_per_page` retiré du tuple de
+  `_extract_pages_pdfminer` (recalculé et jamais lu) ;
+  `HEADER_ESTIMATE_MAX_ITERATIONS`, `MAX_TRAVERSAL_DEPTH`,
+  `UNUSUAL_CONTEXT_LIMIT`, `GAUGE_COLORS`, `PENDING_COLOR` remplacent les
+  littéraux.
+
+**Rejeté / reporté** (« Reste à faire ») : mise à jour en place des
+lignes de la table GUI, génération dans un thread worker, faux positifs
+du scanner de secrets sur des identifiants de code, sniff d'un `.doc` qui
+est en réalité du RTF/HTML — intrusifs ou non reproduits, hors audit.
+
+**Vérification** : 532 tests (19 nouveaux), ruff/mypy --strict propres,
+recette 7/7 ; GUI relancée sur l'écran réel (glisser-déposer actif, trois
+phases de boutons cohérentes, bouton « Générer » suivant le choix PDF).
+Fin de chantier de l'audit (D-096 à D-099) : `run_analysis` sur
+~/Documents + ~/Téléchargements avec OCR et export d'images — **1 417
+fichiers** (1 413 au run D-094, 4 fichiers ajoutés depuis), 1 210 READY,
+116 images, 89 peu de texte, **2 erreurs** (les deux JSON `wan22_*`
+corrompus connus depuis D-092, 3 à l'époque), 1 207 ignorés, 2 581 images
+exportées, corpus de 114 Mo avec 1 415 blocs SOURCE (= 1 417 − 2), 399 s.
+
+---
+
 *Fin du journal des décisions — Session 14.*

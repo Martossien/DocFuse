@@ -12,6 +12,7 @@ import json
 import math
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from docfuse import __version__
 from docfuse.constants import BYTES_PER_TOKEN, DEFAULT_TOKENIZER_ENGINE
@@ -20,6 +21,40 @@ from docfuse.core.notes import ordered_notes
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
+
+if TYPE_CHECKING:
+    from docfuse.core.orchestrator import OrchestratorResult
+
+
+def write_report_pair(result: OrchestratorResult, base_path: Path) -> tuple[Path, Path]:
+    """Écrit le rapport Markdown ET le rapport JSON d'un résultat d'analyse.
+
+    Le Markdown va dans `base_path` avec le suffixe `.md`, le JSON avec le
+    suffixe `.json` — quel que soit le suffixe reçu (D-096 : `rapport.json`
+    choisi dans la GUI écrasait le Markdown). Plafond, marge, totaux et
+    moteur viennent du résultat lui-même : une seule source de vérité.
+    D-099 : remplace trois copies (CLI, GUI, orchestrateur) de deux appels à
+    neuf arguments chacun.
+
+    Returns:
+        Tuple (chemin du Markdown, chemin du JSON) écrits.
+    """
+    markdown_path = base_path.with_suffix(".md")
+    json_path = base_path.with_suffix(".json")
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    common = (
+        result.files,
+        result.ignored,
+        result.context_limit,
+        result.margin,
+        result.total.tokens_estimated,
+        result.total.tokens_with_margin,
+    )
+    generate_markdown_report(
+        *common, markdown_path, estimates=result.estimates, engine_id=result.engine_id
+    )
+    generate_json_report(*common, json_path, estimates=result.estimates, engine_id=result.engine_id)
+    return markdown_path, json_path
 
 
 def _check_aligned(files: list[ExtractedFile], estimates: list[TokenEstimate] | None) -> None:

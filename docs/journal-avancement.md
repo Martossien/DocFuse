@@ -1391,9 +1391,9 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   GUI, screenshot à l'appui) — au lieu d'un nouveau pari de hauteur en
   pixels, la fenêtre démarre maximisée sous Windows (D-095), Linux/macOS
   inchangés.
-- **Test en conditions réelles avec un vrai LLM local** (llama-server,
-  Qwen3.6-35B, 256k de contexte, lancé par l'utilisateur via son propre
-  script) : deux corpus générés par DocFuse (25 fichiers synthétiques avec
+- **Test en conditions réelles avec un vrai LLM local** (modèle open-source
+  servi par llama-server, 256k de contexte, lancé par l'utilisateur sur sa
+  machine) : deux corpus générés par DocFuse (25 fichiers synthétiques avec
   codes de suivi uniques, puis 60 fichiers réels mixtes de l'utilisateur,
   ~95k tokens) envoyés au LLM avec la consigne de lister tous les fichiers
   sources vus. Résultat vérifié programmatiquement contre la vérité terrain
@@ -1404,15 +1404,14 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   modèle — l'idée reste examinée avec l'utilisateur comme amélioration
   défensive possible (utile contre une troncature silencieuse par un outil
   tiers), pas comme correctif d'un bug DocFuse constaté.
-- Suite : l'utilisateur a rejoué 7 prompts de diagnostic dans l'outil de
-  son travail (« IAka ») et chez la LLM locale sur le même `corpus.md`.
-  Verdict net : l'outil tiers admet lui-même travailler par extraits
+- Suite : l'utilisateur a rejoué 7 prompts de diagnostic dans un assistant
+  d'entreprise tiers et chez la LLM locale sur le même `corpus.md`.
+  Verdict net : l'assistant tiers admet lui-même travailler par extraits
   (RAG), invente des réponses (« Page 1 / 1 » en fin de document, mauvais
   fichier pour une citation), compte 0 fichier ; la LLM locale répond
-  7/7 mot pour mot. Fichier de comparaison
-  `reponses_llm_locale_arbitrage.txt` produit pour la remontée IT. Le
-  sommaire en tête de corpus est abandonné : il serait soumis au même
-  découpage RAG.
+  7/7 mot pour mot. Un fichier de comparaison a été produit pour la
+  remontée au service informatique. Le sommaire en tête de corpus est
+  abandonné : il serait soumis au même découpage RAG.
 
 ### Audit qualité/bugs/perf — lot 1 « contenu perdu / plantage » (D-096) — ✅ Corrigé
 
@@ -1467,4 +1466,23 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   seul fichier porte tout le chemin critique — il faut paralléliser à
   l'intérieur du fichier, en verrouillant l'ordre de sortie par des tests.
 - 6 tests, 513 verts, ruff/mypy stricts, recette 7/7.
+
+### Audit qualité — lot 4 « maintenabilité / cohérence » (D-099) — ✅ Livré
+
+- Factorisations : `container_guard` (×5 copies), `error_result_message`
+  (×8), `decode_text_with_note` (×6), `write_report_pair` (×3, deux appels
+  à neuf arguments chacun), `output/paths.py` partagé CLI/GUI, constantes
+  pour tous les littéraux magiques, helpers GUI purs (`parse_context_limit`,
+  `gauge_color`, `build_summary_lines`, `_set_phase`, `_refresh_from_result`).
+- Trois bugs révélés par la factorisation elle-même : condition morte du
+  writer Markdown (un `.md` avec ``` encapsulé contre le CdC), `file_type`
+  divergent READY/ERREUR, CLI et GUI n'écrivant pas au même endroit pour un
+  fichier seul. Plus : `--input` manquant sortait avec le code réservé au
+  blocage, `--output notes.txt` créait un dossier, le bouton Générer ignorait
+  le choix PDF, la barre de progression reculait, deux documents homonymes
+  écrasaient mutuellement leurs images exportées.
+- Leçon : une passe « maintenabilité » n'est pas cosmétique — chaque copie
+  divergente était un bug latent, invisible tant que le code était dupliqué.
+- 19 tests, 532 verts, ruff/mypy stricts, recette 7/7 ; GUI vérifiée sur
+  écran réel (glisser-déposer actif, phases, bouton PDF).
 

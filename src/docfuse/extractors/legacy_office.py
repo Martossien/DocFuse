@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -32,8 +32,6 @@ _LEGACY_EXTENSIONS: frozenset[str] = frozenset({".doc", ".xls", ".ppt"})
 class LegacyOfficeExtractor(Extractor):
     """Extracteur Word/Excel/PowerPoint 97-2003 (binaire) via office_oxide."""
 
-    file_type = "legacy_office"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() in _LEGACY_EXTENSIONS
@@ -42,7 +40,6 @@ class LegacyOfficeExtractor(Extractor):
     def extract(
         cls, path: Path, relative_path: str, _extract_images: bool = False
     ) -> ExtractedFile:
-        ext = path.suffix.lower().lstrip(".")
         try:
             from office_oxide import OfficeOxideError, extract_text
 
@@ -55,8 +52,8 @@ class LegacyOfficeExtractor(Extractor):
                 return ExtractedFile(
                     path=path,
                     relative_path=relative_path,
-                    extension=ext,
-                    file_type=ext,
+                    extension=file_type_for(path),
+                    file_type=file_type_for(path),
                     size_bytes=path.stat().st_size,
                     status=FileStatus.ERROR,
                     error_message=f"{t('error.corrupt_file')} : {exc}",
@@ -65,12 +62,12 @@ class LegacyOfficeExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=ext,
-                file_type=ext,
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=text,
                 status=FileStatus.READY,
             )
         except Exception as exc:
             logger.exception("Erreur extraction Office legacy %s", path)
-            return error_result(path, relative_path, ext, exc)
+            return error_result(path, relative_path, exc)

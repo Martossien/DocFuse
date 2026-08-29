@@ -44,7 +44,7 @@ from docfuse.constants import (
 from docfuse.core.ocr.base import OcrEngine
 from docfuse.core.ocr.registry import ocr_with_slot, resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -78,8 +78,6 @@ class PageKind(StrEnum):
 class PdfExtractor(Extractor):
     """Extracteur PDF via pdfminer.six + pypdf, avec OCR optionnel des pages scannées."""
 
-    file_type = "pdf"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() == ".pdf"
@@ -95,16 +93,16 @@ class PdfExtractor(Extractor):
                 return ExtractedFile(
                     path=path,
                     relative_path=relative_path,
-                    extension="pdf",
-                    file_type=cls.file_type,
+                    extension=file_type_for(path),
+                    file_type=file_type_for(path),
                     size_bytes=path.stat().st_size,
                     status=FileStatus.ERROR,
                     error_message=t("error.encrypted_pdf"),
                 )
 
             # 2. Extraction texte page-par-page avec pdfminer
-            pages_text, chars_per_page, image_count, page_count, image_count_per_page = (
-                _extract_pages_pdfminer(path)
+            pages_text, image_count, page_count, image_count_per_page = _extract_pages_pdfminer(
+                path
             )
 
             # 2b. Déduplication des en-têtes/pieds de page répétés sur chaque page.
@@ -141,8 +139,8 @@ class PdfExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="pdf",
-                file_type=cls.file_type,
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=full_text,
                 status=FileStatus.READY,
@@ -153,7 +151,7 @@ class PdfExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction PDF %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _check_encrypted(path: Path) -> bool:
@@ -184,9 +182,7 @@ def _check_encrypted(path: Path) -> bool:
         return False
 
 
-def _extract_pages_pdfminer(
-    path: Path,
-) -> tuple[list[str], list[int], int, int, list[int]]:
+def _extract_pages_pdfminer(path: Path) -> tuple[list[str], int, int, list[int]]:
     """Extrait le texte et les images page par page via pdfminer.six.
 
     ``LAParams(all_texts=True)`` : sans ce réglage, pdfminer ne regroupe pas
@@ -199,14 +195,15 @@ def _extract_pages_pdfminer(
     de texte natif silencieusement ignorés sur certaines pages.
 
     Returns:
-        Tuple (textes par page, caractères par page, nombre d'images total,
-        nombre de pages, nombre d'images par page).
+        Tuple (textes par page, nombre d'images total, nombre de pages,
+        nombre d'images par page). Les caractères par page sont recalculés
+        par l'appelant après déduplication/OCR (D-099 : l'ancienne valeur
+        renvoyée ici était écrasée sans jamais être lue).
     """
     from pdfminer.high_level import extract_pages
     from pdfminer.layout import LAParams, LTFigure, LTImage, LTTextContainer
 
     pages_text: list[str] = []
-    chars_per_page: list[int] = []
     image_count_per_page: list[int] = []
     total_images = 0
     page_count = 0
@@ -230,19 +227,19 @@ def _extract_pages_pdfminer(
             # Figures (contiennent souvent des images ET/OU du texte imbriqué
             # via un Form XObject — voir le docstring de la fonction)
             if isinstance(element, LTFigure):
-                page_images += _count_images_in_figure(element)
-                page_text_parts.extend(_extract_text_in_figure(element))
+                figure_images, figure_text = _walk_figure(element)
+                page_images += figure_images
+                page_text_parts.extend(figure_text)
 
         total_images += page_images
         image_count_per_page.append(page_images)
         page_text = "\n".join(page_text_parts)
         pages_text.append(page_text)
-        chars_per_page.append(len(page_text.strip()))
 
         # Libération mémoire (inspiré de MarkItDown PdfConverter:566)
         # pdfminer gère la mémoire page-par-page avec extract_pages()
 
-    return pages_text, chars_per_page, total_images, page_count, image_count_per_page
+    return pages_text, total_images, page_count, image_count_per_page
 
 
 def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | None]:
@@ -319,38 +316,29 @@ def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | No
     return new_pages, note
 
 
-def _count_images_in_figure(figure: Any) -> int:
-    """M-02: Compte les images dans un LTFigure (récursion profonde sur les sous-figures)."""
-    from pdfminer.layout import LTFigure, LTImage
+def _walk_figure(figure: Any) -> tuple[int, list[str]]:
+    """Images et texte imbriqués dans un LTFigure, en un seul parcours
+    récursif (D-099 : fusion de deux parcours symétriques, M-02 + D-068).
 
-    def _count_recursive(element: Any) -> int:
-        count = 0
-        for child in element:
-            if isinstance(child, LTImage):
-                count += 1
-            if isinstance(child, LTFigure):
-                count += _count_recursive(child)
-        return count
+    Le texte n'est regroupé en `LTTextContainer` que grâce à
+    `LAParams(all_texts=True)` — voir `_extract_pages_pdfminer`.
+    """
+    from pdfminer.layout import LTFigure, LTImage, LTTextContainer
 
-    return _count_recursive(figure)
-
-
-def _extract_text_in_figure(figure: Any) -> list[str]:
-    """Texte imbriqué dans un LTFigure (récursion profonde, symétrique de
-    `_count_images_in_figure`). Voir le docstring de `_extract_pages_pdfminer`
-    (D-068) : nécessite `LAParams(all_texts=True)` pour que ce texte soit
-    déjà regroupé en `LTTextContainer` plutôt qu'en `LTChar` épars."""
-    from pdfminer.layout import LTFigure, LTTextContainer
-
+    images = 0
     parts: list[str] = []
     for child in figure:
-        if isinstance(child, LTTextContainer):
+        if isinstance(child, LTImage):
+            images += 1
+        elif isinstance(child, LTTextContainer):
             text = child.get_text()
             if text.strip():
                 parts.append(text.strip())
         elif isinstance(child, LTFigure):
-            parts.extend(_extract_text_in_figure(child))
-    return parts
+            child_images, child_parts = _walk_figure(child)
+            images += child_images
+            parts.extend(child_parts)
+    return images, parts
 
 
 def _has_garbage_text(text: str) -> bool:

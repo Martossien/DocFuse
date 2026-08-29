@@ -86,6 +86,7 @@ src/docfuse/
 │   └── mhtml.py           # .mhtml/.mht MIME multipart → texte
 ├── output/
 │   ├── markdown_writer.py  # corpus .md + CRLF support
+│   ├── paths.py            # chemins de sortie partagés CLI/GUI (D-099)
 │   ├── pdf_writer.py       # ReportLab + DejaVu Sans + en-tête page
 │   └── source_header.py   # en-tête SOURCE + backticks adaptatifs
 └── models/
@@ -203,15 +204,15 @@ Conventional Commits (sans scope obligatoire) :
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source Python | 56 |
-| Tests collectés depuis un clone frais | 551 |
+| Fichiers source Python | 57 |
+| Tests collectés depuis un clone frais | 570 |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 513 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 532 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 98 (D-001 à D-098) |
-| Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lot 2 livré (D-097 : ftfy restreint à la corruption d'encodage, chemin rapide ASCII, presque-UTF-8, HTML sans charset) ; lot 3 livré (D-098 : OCR des images intégrées parallélisé dans le fichier, sémaphore Tesseract global, XLSX/DOCX/PDF sans re-lecture — 28,4 s → 10,6 s sur ~/Documents, corpus identique byte à byte) ; lot 4 (maintenabilité) en cours |
+| Décisions archivées | 99 (D-001 à D-099) |
+| Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lot 2 livré (D-097 : ftfy restreint à la corruption d'encodage, chemin rapide ASCII, presque-UTF-8, HTML sans charset) ; lot 3 livré (D-098 : OCR des images intégrées parallélisé dans le fichier, sémaphore Tesseract global, XLSX/DOCX/PDF sans re-lecture — 28,4 s → 10,6 s sur ~/Documents, corpus identique byte à byte) ; lot 4 livré (D-099 : gardes/notes/rapports/chemins factorisés, politique `file_type` unique, helpers GUI purs — trois bugs révélés par la factorisation dont un `.md` encapsulé contre le CdC). Audit clos. |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
 | Extracteurs | 16 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093), +DOC/XLS/PPT/MSG (D-094) |
@@ -247,6 +248,9 @@ C:\Windows\Temp\Python313\python.exe
 - ⬜ Position d'image `.ods` (XLSX exclu pour la même raison, hors scope D-093/D-094 — feuilles de calcul, images rarement porteuses de contenu)
 - ⬜ Vérifier au prochain build Windows que PyInstaller embarque correctement le binaire natif `office_oxide` (extension Rust) — jamais testé en conditions réelles dans cette session (pas d'environnement Windows/Wine disponible ici). Filet de sécurité déjà en place : un échec d'import serait capté par `Extractor.safe_extract()` et isolé au fichier concerné (`.doc`/`.xls`/`.ppt`), pas un crash de l'application.
 - ⬜ OCR/export d'images pour EML/MHTML (pièces jointes/images inline) — pas demandé, hors scope D-093
+- ⬜ GUI : mise à jour en place des lignes de la table (aujourd'hui reconstruite à chaque recalcul — 7 widgets par fichier, lent au-delà de quelques centaines de fichiers) et génération du corpus dans un thread worker (le clic « Générer » gèle la fenêtre sur un gros corpus PDF). Reportés de l'audit D-096..D-099 : intrusifs, hors « sans dégradation »
+- ⬜ Scanner de secrets : faux positifs possibles sur des identifiants de code (`api_key = settings.API_KEY`) — signalé par lecture lors de l'audit, non reproduit sur du code réel ; à confirmer avant de toucher aux regex
+- ⬜ Sniff d'un `.doc` qui est en réalité du RTF ou du HTML (générateurs qui mentent sur l'extension) — signalé par lecture, non reproduit
 
 ## 12. Règles critiques
 

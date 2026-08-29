@@ -25,11 +25,13 @@ from docfuse.constants import (
     DEFAULT_RECURSIVE,
     DEFAULT_TOKENIZER_ENGINE,
     LARGE_FILE_THRESHOLD,
+    MAX_TRAVERSAL_DEPTH,
     MAX_WORKERS,
     SCAN_MIN_CHARS_FILE,
     SCAN_MIN_CHARS_PER_PAGE,
     SCAN_SPARSE_PAGE_CHARS,
     SCAN_SPARSE_PAGE_RATIO,
+    SECRETS_NOTE_MAX_LINES_PER_KIND,
 )
 from docfuse.core.context_counter import (
     TokenEstimate,
@@ -37,18 +39,21 @@ from docfuse.core.context_counter import (
     check_limit,
 )
 from docfuse.core.duplicate_detector import detect_duplicates
+from docfuse.core.embedded_images import dedupe_image_filenames
 from docfuse.core.image_detector import determine_status
 from docfuse.core.inventory import collect_inputs
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
-from docfuse.core.report import generate_json_report, generate_markdown_report
+from docfuse.core.report import write_report_pair
 from docfuse.core.secret_scanner import scan_for_secrets
 from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.core.tokenizers.registry import resolve_engine
+from docfuse.extractors.base import file_type_for
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 from docfuse.models.input_selection import InputSelection, path_key
+from docfuse.output.paths import report_base_path
 
 # Supprimer les warnings bruyants de pypdf/pdfminer en mode normal
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -68,6 +73,8 @@ class OrchestratorResult:
         blocking_files: Fichiers qui dépassent le plafond individuellement.
         is_blocked: True si la génération est bloquée (fichier OU total).
         block_reason: Raison du blocage si is_blocked.
+        cancelled: True si l'analyse a été interrompue par l'utilisateur
+            (D-099) — le résultat est alors vide et ne doit pas être utilisé.
     """
 
     def __init__(
@@ -79,6 +86,8 @@ class OrchestratorResult:
         context_limit: int,
         margin: float = DEFAULT_MARGIN,
         engine: TokenizerEngine | None = None,
+        *,
+        cancelled: bool = False,
     ) -> None:
         self.files = files
         self.ignored = ignored
@@ -87,6 +96,7 @@ class OrchestratorResult:
         self.context_limit = context_limit
         self.margin = margin
         self.engine = engine
+        self.cancelled = cancelled
         self._base_statuses = [file.status for file in files]
         # D-098 : estimations déjà calculées, par moteur — un aller-retour
         # de menu (approx → Mistral → approx) ne re-tokenise plus tout.
@@ -264,7 +274,7 @@ def run_analysis(
     extensions: frozenset[str] | None = None,
     scan_config: ScanConfig | None = None,
     sort: str = "name",
-    max_depth: int = 12,
+    max_depth: int = MAX_TRAVERSAL_DEPTH,
     tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE,
     extract_embedded_images: bool = False,
 ) -> OrchestratorResult:
@@ -355,8 +365,8 @@ def run_analysis(
             result = ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size if path.exists() else 0,
                 status=FileStatus.IGNORED,
                 error_message=t("error.no_extractor", ext=path.suffix),
@@ -364,17 +374,6 @@ def run_analysis(
         else:
             result = extractor_cls.safe_extract(
                 path, relative_path, extract_images=extract_embedded_images
-            )
-
-        if emitter:
-            emitter.emit(
-                ProgressEvent(
-                    file_path=relative_path,
-                    current=idx + 1,
-                    total=total_files,
-                    status=result.status.value,
-                    message=result.error_message,
-                )
             )
 
         return idx, result
@@ -391,9 +390,30 @@ def run_analysis(
                 break
             idx, result = future.result()
             results_map[idx] = result
+            if emitter:
+                # D-099 : `current` = nombre de fichiers terminés (monotone),
+                # pas l'index d'inventaire — les extractions finissent dans
+                # le désordre et la barre reculait.
+                emitter.emit(
+                    ProgressEvent(
+                        file_path=result.relative_path,
+                        current=len(results_map),
+                        total=total_files,
+                        status=result.status.value,
+                        message=result.error_message,
+                    )
+                )
+
+    if emitter and emitter.is_cancelled:
+        # D-099 : résultat jeté par l'appelant de toute façon — inutile de
+        # scanner, dédupliquer et compter ce qui a été extrait avant l'arrêt.
+        logger.info("Analyse annulée après %d fichier(s)", len(results_map))
+        return OrchestratorResult(
+            [], ignored, [], TokenEstimate(0, 0, 0), context_limit, margin, engine, cancelled=True
+        )
 
     # Remettre dans l'ordre original (tri par inventaire)
-    files = [results_map[i] for i in range(total_files) if i in results_map]
+    files = [results_map[i] for i in range(total_files)]
 
     # 3. Détermination du statut (images / low_text) avec seuils de config (C-08)
     for f in files:
@@ -414,14 +434,18 @@ def run_analysis(
             continue
         findings = scan_for_secrets(f.text)
         if findings:
-            kinds = ", ".join(
-                t("secret.finding", kind=t(kind_key), line=line) for kind_key, line in findings
-            )
-            f.extra_metadata["secrets_detected"] = kinds
+            f.extra_metadata["secrets_detected"] = _secrets_note(findings)
 
     # 3c. Détection de doublons de contenu entre fichiers (avant comptage :
     # le texte d'un doublon est remplacé par une note, donc compté correctement).
     detect_duplicates(files)
+
+    # 3d. Deux documents homonymes (`rapport.docx` dans deux sous-dossiers)
+    # produisent les mêmes noms d'images exportées : renommage avant comptage,
+    # tag et fichier restent cohérents (D-099).
+    renamed = dedupe_image_filenames(files)
+    if renamed:
+        logger.warning("%d image(s) intégrée(s) renommée(s) pour éviter une collision", renamed)
 
     # 4. Compteur par fichier (en-têtes SOURCE comprises, CdC §8.2 §10.1)
     from docfuse.output.source_header import estimate_source_context
@@ -459,37 +483,53 @@ def run_analysis(
     return orchestrator_result
 
 
-def generate_corpus(
-    result: OrchestratorResult,
-    output_path: Path,
-    context_limit: int = DEFAULT_CONTEXT_LIMIT,
-    margin: float = DEFAULT_MARGIN,
-) -> bool:
+def _secrets_note(findings: list[tuple[str, int]]) -> str:
+    """Note « secrets potentiels » groupée par type, numéros de ligne
+    plafonnés (D-099). Avant : une entrée par occurrence — un journal
+    contenant 40 000 jetons produisait une note de 1,5 Mo, comptée dans
+    les tokens de l'en-tête SOURCE."""
+    by_kind: dict[str, list[int]] = {}
+    for kind_key, line in findings:
+        by_kind.setdefault(kind_key, []).append(line)
+
+    parts: list[str] = []
+    for kind_key, lines in by_kind.items():
+        shown = lines[:SECRETS_NOTE_MAX_LINES_PER_KIND]
+        note = t("secret.finding_lines", kind=t(kind_key), lines=", ".join(str(n) for n in shown))
+        if len(lines) > len(shown):
+            note += " " + t("secret.finding_more", count=len(lines) - len(shown))
+        parts.append(note)
+    return "; ".join(parts)
+
+
+def generate_corpus(result: OrchestratorResult, output_path: Path) -> bool:
     """Génère le corpus final (Markdown ou PDF) + rapport.
+
+    Plafond et marge sont ceux du résultat (`result.context_limit`,
+    `result.margin`) — D-099 : les anciens paramètres en doublon pouvaient
+    diverger de ce qui avait réellement servi au blocage.
 
     Args:
         result: Résultat de l'analyse.
         output_path: Chemin du fichier de sortie.
-        context_limit: Plafond de contexte.
-        margin: Marge appliquée.
 
     Returns:
         True si le corpus a été généré, False si bloqué.
     """
     if result.is_blocked:
         logger.warning("Génération bloquée : %s", result.block_reason)
-        _write_report_only(result, output_path, context_limit, margin)
+        write_report_pair(result, report_base_path(output_path))
         return False
 
     ext = output_path.suffix.lower()
     if ext == ".md":
         from docfuse.output.markdown_writer import write_markdown_corpus
 
-        write_markdown_corpus(result, output_path, margin)
+        write_markdown_corpus(result, output_path, result.margin)
     elif ext == ".pdf":
         from docfuse.output.pdf_writer import write_pdf_corpus
 
-        write_pdf_corpus(result, output_path, margin)
+        write_pdf_corpus(result, output_path, result.margin)
     else:
         raise ValueError(f"Format de sortie non supporté : {ext}")
 
@@ -499,39 +539,6 @@ def generate_corpus(
     if images_written:
         logger.info("%d image(s) intégrée(s) exportée(s) à côté de %s", images_written, output_path)
 
-    _write_report_only(result, output_path, context_limit, margin)
+    write_report_pair(result, report_base_path(output_path))
     logger.info("Corpus généré : %s", output_path)
     return True
-
-
-def _write_report_only(
-    result: OrchestratorResult,
-    output_path: Path,
-    context_limit: int,
-    margin: float,
-) -> None:
-    """Écrit les rapports MD et JSON à côté de la sortie."""
-    report_md = output_path.with_name(output_path.stem + "_rapport.md")
-    report_json = output_path.with_name(output_path.stem + "_rapport.json")
-    generate_markdown_report(
-        result.files,
-        result.ignored,
-        context_limit,
-        margin,
-        result.total.tokens_estimated,
-        result.total.tokens_with_margin,
-        report_md,
-        estimates=result.estimates,
-        engine_id=result.engine_id,
-    )
-    generate_json_report(
-        result.files,
-        result.ignored,
-        context_limit,
-        margin,
-        result.total.tokens_estimated,
-        result.total.tokens_with_margin,
-        report_json,
-        estimates=result.estimates,
-        engine_id=result.engine_id,
-    )

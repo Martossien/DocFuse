@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 
+from docfuse.constants import HEADER_ESTIMATE_MAX_ITERATIONS
 from docfuse.core.context_counter import TokenEstimate, estimate_tokens
 from docfuse.core.notes import ordered_notes
 from docfuse.core.tokenizers.base import TokenizerEngine
@@ -65,7 +66,7 @@ def estimate_source_context(
 
     Avec le moteur "approx" (défaut), ce point fixe est calculé en ré-encodant
     le texte complet à chaque itération — gratuit pour un simple ceil(octets/4).
-    Avec un moteur précis (ex: Mistral), ré-encoder tout le texte jusqu'à 20 fois
+    Avec un moteur précis (ex: Mistral), ré-encoder tout le texte à chaque itération
     serait coûteux sur un gros corpus. On encode alors `file.text` une seule
     fois, et seul le court en-tête (qui varie d'une itération à l'autre) est
     ré-encodé. Effet de bord accepté : à la frontière en-tête/texte, le BPE
@@ -76,7 +77,7 @@ def estimate_source_context(
 
     if engine is None or engine.info.id == "approx":
         estimate = estimate_tokens(file.text, margin, engine)
-        for _ in range(20):
+        for _ in range(HEADER_ESTIMATE_MAX_ITERATIONS):
             header = _render_source_header(
                 file,
                 estimate.tokens_estimated,
@@ -92,7 +93,7 @@ def estimate_source_context(
     text_bytes = len(file.text.encode("utf-8"))
     tokens_estimated = text_tokens
     tokens_with_margin = math.ceil(tokens_estimated * (1.0 + margin))
-    for _ in range(20):
+    for _ in range(HEADER_ESTIMATE_MAX_ITERATIONS):
         header = _render_source_header(file, tokens_estimated, tokens_with_margin)
         new_tokens_estimated = engine.count_tokens(f"{header}\n\n") + text_tokens
         new_tokens_with_margin = math.ceil(new_tokens_estimated * (1.0 + margin))

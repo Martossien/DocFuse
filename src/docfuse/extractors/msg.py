@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.extractors.eml import _render_body
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 @register(".msg")
 class MsgExtractor(Extractor):
     """Extracteur MSG (email Outlook) via python-oxmsg."""
-
-    file_type = "msg"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -46,15 +44,15 @@ class MsgExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="msg",
-                file_type=cls.file_type,
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size,
                 text=text,
                 status=FileStatus.READY,
             )
         except Exception as exc:
             logger.exception("Erreur extraction MSG %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _normalize_header(value: str) -> str:

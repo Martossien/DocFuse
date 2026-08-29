@@ -18,10 +18,24 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from docfuse.constants import ZIP_BOMB_MAX_RATIO, ZIP_BOMB_MIN_UNCOMPRESSED_BYTES
+from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
+
+
+def file_type_for(path: Path) -> str:
+    """Type affiché et rapporté pour un fichier : son extension en minuscules,
+    sans le point (`odt`, `json`, `py`…).
+
+    D-099 : politique unique. Avant, un résultat READY portait l'extension
+    (`odt`, `yaml`) et un résultat ERREUR le nom de famille de l'extracteur
+    (`odf`, `xml_json`) — le même fichier changeait de « type » dans le
+    rapport selon l'issue de son extraction, et un test sur `file_type`
+    dans le writer Markdown était mort depuis M-08.
+    """
+    return path.suffix.lower().lstrip(".")
 
 
 _OLE_CFBF_MAGIC = bytes((0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1))
@@ -78,27 +92,42 @@ def is_zip_bomb(path: Path) -> bool:
     return (total_uncompressed / total_compressed) > ZIP_BOMB_MAX_RATIO
 
 
-def error_result(
-    path: Path,
-    relative_path: str,
-    file_type: str,
-    exc: Exception,
-) -> ExtractedFile:
-    """Construit un ExtractedFile d'erreur — factorisation des 13 extracteurs.
-
-    Au lieu de dupliquer le bloc try/except dans chaque extracteur,
-    chaque extracteur peut lever une exception qui sera attrapée par
-    ``safe_extract`` ou utiliser cette helper directement.
-    """
+def error_result_message(path: Path, relative_path: str, message: str) -> ExtractedFile:
+    """Résultat ERREUR avec un message déjà traduit (D-099 : remplace huit
+    littéraux `ExtractedFile(... status=ERROR ...)` copiés dans les
+    extracteurs)."""
     return ExtractedFile(
         path=path,
         relative_path=relative_path,
-        extension=path.suffix.lower().lstrip("."),
-        file_type=file_type,
+        extension=file_type_for(path),
+        file_type=file_type_for(path),
         size_bytes=path.stat().st_size if path.exists() else 0,
         status=FileStatus.ERROR,
-        error_message=f"{type(exc).__name__}: {exc}",
+        error_message=message,
     )
+
+
+def error_result(path: Path, relative_path: str, exc: Exception) -> ExtractedFile:
+    """Résultat ERREUR construit depuis une exception — factorisation du bloc
+    `except` de tous les extracteurs (`safe_extract` l'utilise aussi)."""
+    return error_result_message(path, relative_path, f"{type(exc).__name__}: {exc}")
+
+
+def container_guard(
+    path: Path, relative_path: str, *, check_ole: bool = True
+) -> ExtractedFile | None:
+    """Gardes communes aux formats conteneurs ZIP (DOCX/PPTX/XLSX/ODF/EPUB).
+
+    Renvoie un résultat ERREUR explicite si le fichier est un conteneur
+    Office chiffré par mot de passe (D-089, `check_ole`) ou une « bombe
+    zip » suspecte (D-093) ; `None` sinon — l'extracteur continue.
+    D-099 : remplace le même bloc de ~22 lignes copié dans cinq extracteurs.
+    """
+    if check_ole and is_ole_encrypted(path):
+        return error_result_message(path, relative_path, t("error.encrypted_office"))
+    if is_zip_bomb(path):
+        return error_result_message(path, relative_path, t("error.zip_bomb_suspected"))
+    return None
 
 
 class Extractor(ABC):
@@ -109,10 +138,9 @@ class Extractor(ABC):
     2. Implémente ``accepts()`` et ``extract()``.
     3. ``extract()`` ne doit JAMAIS lever d'exception — capturer et retourner
        un ExtractedFile avec ``status=FileStatus.ERROR``.
-    """
 
-    file_type: str = "unknown"
-    """Type de format pour les métadonnées (ex: "pdf", "docx")."""
+    Le `file_type` d'un résultat est toujours `file_type_for(path)` (D-099).
+    """
 
     @classmethod
     @abstractmethod
@@ -145,10 +173,8 @@ class Extractor(ABC):
         try:
             result = cls.extract(path, relative_path, extract_images)
             if result.status is FileStatus.ERROR and not result.error_message:
-                from docfuse.i18n import t as _t
-
-                result.error_message = _t("error.unknown")
+                result.error_message = t("error.unknown")
             return result
         except Exception as exc:
             logger.exception("Erreur non capturée dans %s pour %s", cls.__name__, path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)

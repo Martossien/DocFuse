@@ -11,8 +11,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import decode_text
+from docfuse.extractors.base import Extractor, error_result, file_type_for
+from docfuse.extractors.text import decode_text, decode_text_with_note, mojibake_metadata
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -21,8 +21,6 @@ from docfuse.models.file_status import FileStatus
 @register(".json")
 class JsonExtractor(Extractor):
     """Extracteur JSON (pretty-print)."""
-
-    file_type = "xml_json"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -38,18 +36,15 @@ class JsonExtractor(Extractor):
             # json.loads() — un JSON syntaxiquement corrompu par un
             # double-encodage UTF-8 en amont peut ainsi redevenir du JSON
             # valide au lieu de finir systématiquement en ERROR (D-092).
-            encoding, text_raw, mojibake_repaired = decode_text(raw)
+            encoding, text_raw, extra_metadata = decode_text_with_note(raw)
             obj = json.loads(text_raw)
             text = json.dumps(obj, indent=2, ensure_ascii=False)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="json",
-                file_type="json",  # M-08
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -67,14 +62,14 @@ class JsonExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="json",
-                file_type="json",
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size if path.exists() else 0,
                 status=FileStatus.ERROR,
                 error_message=f"{t('error.corrupt_file')} : {exc}",
             )
         except Exception as exc:
-            return error_result(path, relative_path, "json", exc)
+            return error_result(path, relative_path, exc)
 
 
 _XML_DECLARED_ENCODING_RE = re.compile(rb'^\s*<\?xml[^>]*encoding=["\']([A-Za-z0-9._-]+)["\']')
@@ -103,8 +98,6 @@ def _decode_xml(raw: bytes) -> tuple[str, str, bool]:
 class XmlExtractor(Extractor):
     """Extracteur XML (pretty-print)."""
 
-    file_type = "xml_json"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() == ".xml"
@@ -115,7 +108,7 @@ class XmlExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text_raw, mojibake_repaired = _decode_xml(raw)
+            encoding, text_raw, xml_repaired = _decode_xml(raw)
             # Migration: minidom déprécié → ElementTree.indent (Python 3.9+)
             # D-096 : `insert_comments=True` — le pretty-print supprimait
             # tous les commentaires (`<!-- ... -->`), qui portent souvent la
@@ -124,15 +117,13 @@ class XmlExtractor(Extractor):
             root_el = ET.fromstring(text_raw, parser=parser)
             ET.indent(root_el, space="  ")
             text = ET.tostring(root_el, encoding="unicode")
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
+            extra_metadata = mojibake_metadata(xml_repaired)
 
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="xml",
-                file_type="xml",  # M-08
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -145,21 +136,19 @@ class XmlExtractor(Extractor):
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension="xml",
-                file_type="xml",
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=path.stat().st_size if path.exists() else 0,
                 status=FileStatus.ERROR,
                 error_message=f"{t('error.corrupt_file')} : {exc}",
             )
         except Exception as exc:
-            return error_result(path, relative_path, "xml", exc)
+            return error_result(path, relative_path, exc)
 
 
 @register(".yaml", ".yml", ".ini", ".cfg")
 class YamlIniExtractor(Extractor):
     """Extracteur YAML/INI (tel quel, ce sont déjà du texte lisible)."""
-
-    file_type = "xml_json"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -171,16 +160,13 @@ class YamlIniExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text, mojibake_repaired = decode_text(raw)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
+            encoding, text, extra_metadata = decode_text_with_note(raw)
 
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),  # M-08: "yaml" / "ini" etc.
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -188,4 +174,4 @@ class YamlIniExtractor(Extractor):
                 extra_metadata=extra_metadata,
             )
         except Exception as exc:
-            return error_result(path, relative_path, path.suffix.lower().lstrip("."), exc)
+            return error_result(path, relative_path, exc)

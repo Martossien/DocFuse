@@ -1,12 +1,9 @@
 {
   "app.title": "CorpusOne — Assemble documents for an AI",
-  "app.subtitle": "Document assembly for an LLM",
-  "app.version": "Version {version}",
 
   "gui.drop_zone": "Drop a folder or files here, or",
   "gui.choose_folder": "Add a folder…",
   "gui.choose_files": "Add files…",
-  "gui.change_folder": "Change",
   "gui.clear_selection": "Clear",
   "gui.supported_documents": "Supported documents",
   "gui.all_files": "All files",
@@ -28,7 +25,6 @@
   "gui.generate": "Generate {filename}",
   "gui.report": "Report",
   "gui.stop": "Stop",
-  "gui.margin": "+15% margin (cannot be unchecked)",
   "gui.tokenizer_engine": "Counting precision",
 
   "tokenizer.approx": "Generic approximation (fast)",
@@ -54,7 +50,6 @@
   "counter.estimated": "Estimated",
   "counter.with_margin": "With +15% margin",
   "counter.limit": "Limit",
-  "counter.jauge": "Gauge",
 
   "summary.ok": "{count} files ready. The corpus should fit within {limit} tokens (margin included).",
   "summary.images": "{count} documents contain images: their visual content will not be read (no OCR). You can continue.",
@@ -82,8 +77,9 @@
   "cli.lang": "Language (fr, en, ...)",
   "cli.config": "Config JSON path",
   "cli.list_formats": "List supported extensions and exit",
-  "cli.version": "Version",
   "cli.verbose": "Verbose mode (stderr)",
+  "cli.input_missing": "No input: --input <file or folder> is required",
+  "cli.output_bad_extension": "Unsupported output extension: {path} (expected .md or .pdf, or a folder)",
 
   "report.title": "DocFuse / CorpusOne Report",
   "report.version": "Version",
@@ -97,8 +93,6 @@
   "report.files_ignored": "Files ignored",
   "report.errors": "Errors",
 
-  "exit.success": "Corpus generated (image warnings possible)",
-  "exit.error": "Technical error",
   "exit.blocked": "Context limit blocked",
   "exit.no_files": "No supported files",
   "exit.not_writable": "Output / folder not writable",
@@ -107,7 +101,6 @@
   "error.encrypted_pdf": "Password-protected PDF (encrypted)",
   "error.encrypted_office": "File password-protected on open (encrypted)",
   "error.corrupt_file": "Corrupt file",
-  "error.permission": "Permission denied",
   "error.unknown": "Unknown error",
   "error.zip_bomb_suspected": "Suspicious file (abnormal compression ratio), extraction refused for safety",
   "error.encrypted_epub": "Protected EPUB file (DRM), cannot be read",
@@ -151,7 +144,8 @@
   "secret.kind_slack_token": "Slack token",
   "secret.kind_jwt": "JWT token",
   "secret.kind_generic_api_key": "API key/secret",
-  "secret.finding": "{kind} (line {line})",
+  "secret.finding_lines": "{kind} (line {lines})",
+  "secret.finding_more": "and {count} more line(s)",
 
   "source_header.secrets_detected": "secret_alert",
   "source_header.duplicate_of": "duplicate_of",

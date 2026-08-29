@@ -30,13 +30,23 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.config import Config, load_config
-from docfuse.constants import ALL_EXTENSIONS, DEFAULT_TOKENIZER_ENGINE, STATUS_COLORS
+from docfuse.constants import (
+    ALL_EXTENSIONS,
+    DEFAULT_TOKENIZER_ENGINE,
+    GAUGE_COLORS,
+    GAUGE_WARNING_RATIO,
+    PENDING_COLOR,
+    STATUS_COLORS,
+)
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
+from docfuse.core.report import write_report_pair
 from docfuse.core.tokenizers.registry import list_engines
+from docfuse.extractors.base import file_type_for
 from docfuse.i18n import format_number, set_language, t
 from docfuse.models.file_status import FileStatus
 from docfuse.models.input_selection import InputSelection
+from docfuse.output.paths import corpus_extension, default_corpus_path
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +211,8 @@ class DocFuseGUI:
             options_frame.grid_columnconfigure(column, weight=1)
 
         self.format_var = ctk.StringVar(value=self.config.format)
+        # D-099 : le bouton « Générer corpus.md » ne suivait pas le choix PDF.
+        self.format_var.trace_add("write", self._on_format_changed)
         ctk.CTkLabel(options_frame, text=t("gui.output_format")).grid(
             row=0, column=0, padx=10, pady=(10, 5), sticky="w"
         )
@@ -352,7 +364,7 @@ class DocFuseGUI:
         self.limit_label.grid(row=0, column=2, padx=12, pady=10)
 
         # I-11: jauge couleur vert/orange/rouge
-        self.progress_bar = ctk.CTkProgressBar(counter_frame, progress_color="#22c55e")
+        self.progress_bar = ctk.CTkProgressBar(counter_frame, progress_color=gauge_color(0.0))
         self.progress_bar.set(0)
         self.progress_bar.grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 10), sticky="ew")
 
@@ -368,7 +380,7 @@ class DocFuseGUI:
 
         self.generate_button = ctk.CTkButton(
             bottom_frame,
-            text=t("gui.generate", filename="corpus.md"),
+            text=self._generate_button_text(),
             command=self._generate,
             state="disabled",
         )
@@ -387,6 +399,41 @@ class DocFuseGUI:
             fg_color="#ef4444",
         )
         self.stop_button.pack(side="right", padx=10, pady=10)
+
+    def _generate_button_text(self) -> str:
+        return t("gui.generate", filename=f"corpus{corpus_extension(self.format_var.get())}")
+
+    def _on_format_changed(self, *_args: str) -> None:
+        button = getattr(self, "generate_button", None)
+        if button is not None:
+            button.configure(text=self._generate_button_text())
+
+    def _can_generate(self) -> bool:
+        return self.result is not None and bool(self.result.files) and not self.result.is_blocked
+
+    def _set_phase(self, phase: str) -> None:
+        """État des boutons selon la phase : `idle` (pas de résultat),
+        `analyzing` (thread en cours), `done` (résultat affiché) — D-099 : un
+        seul endroit au lieu de six sites de `configure(state=...)`."""
+        analyzing = phase == "analyzing"
+        done = phase == "done"
+        self.choose_button.configure(state=_state(not analyzing))
+        self.choose_files_button.configure(state=_state(not analyzing))
+        self.clear_button.configure(
+            state=_state(not analyzing and self.input_selection is not None)
+        )
+        self.analyze_button.configure(state=_state(not analyzing))
+        self.stop_button.configure(state=_state(analyzing))
+        self.report_button.configure(state=_state(done))
+        self.generate_button.configure(state=_state(done and self._can_generate()))
+
+    def _refresh_from_result(self) -> None:
+        """Ré-affiche table, compteur, résumé et boutons depuis `self.result`
+        (après un recalcul de plafond, de moteur ou un retrait de fichier)."""
+        self._populate_file_list()
+        self._update_counter()
+        self._update_summary()
+        self._set_phase("done")
 
     def _show_context_help(self) -> None:
         """Affiche une fenêtre d'aide sur le plafond de contexte."""
@@ -447,9 +494,7 @@ class DocFuseGUI:
         self.input_selection = None
         self.result = None
         self.path_label.configure(text=t("gui.drop_zone"))
-        self.clear_button.configure(state="disabled")
-        self.generate_button.configure(state="disabled")
-        self.report_button.configure(state="disabled")
+        self._set_phase("idle")
         self.summary_label.configure(text="")
         self.analysis_status_label.configure(text="")
         self.analysis_progress.set(0)
@@ -545,13 +590,7 @@ class DocFuseGUI:
         self.emitter = ProgressEmitter()
         self.result = None
         self._analysis_error = None
-        self.choose_button.configure(state="disabled")
-        self.choose_files_button.configure(state="disabled")
-        self.clear_button.configure(state="disabled")
-        self.analyze_button.configure(state="disabled")
-        self.generate_button.configure(state="disabled")
-        self.report_button.configure(state="disabled")
-        self.stop_button.configure(state="normal")
+        self._set_phase("analyzing")
         self.analysis_progress.set(0)
         self.analysis_status_label.configure(text=t("gui.analyze") + "...")
         self.summary_label.configure(text=t("gui.analysis_in_progress"))
@@ -620,7 +659,7 @@ class DocFuseGUI:
                 status = FileStatus(event.status)
                 status_label.configure(
                     text=status.label(),
-                    text_color=STATUS_COLORS.get(status.value, "#9ca3af"),
+                    text_color=STATUS_COLORS.get(status.value, PENDING_COLOR),
                 )
             except ValueError:
                 status_label.configure(text=event.status)
@@ -638,14 +677,14 @@ class DocFuseGUI:
         ctk.CTkLabel(row, text=event.file_path, anchor="w", wraplength=280).grid(
             row=0, column=0, padx=8, sticky="w"
         )
-        file_type = Path(event.file_path).suffix.lower().lstrip(".") or "—"
+        file_type = file_type_for(Path(event.file_path)) or "—"
         ctk.CTkLabel(row, text=file_type, anchor="w").grid(row=0, column=1, padx=8, sticky="w")
         ctk.CTkLabel(row, text="—", anchor="w").grid(row=0, column=2, padx=8, sticky="w")
         ctk.CTkLabel(row, text="—", anchor="w").grid(row=0, column=3, padx=8, sticky="w")
         status_label = ctk.CTkLabel(
             row,
             text=t("status.pending"),
-            text_color="#9ca3af",
+            text_color=PENDING_COLOR,
             anchor="w",
         )
         status_label.grid(row=0, column=4, padx=8, sticky="w")
@@ -653,20 +692,16 @@ class DocFuseGUI:
 
     def _analysis_complete(self) -> None:
         """Appelé quand l'analyse est terminée."""
-        self.choose_button.configure(state="normal")
-        self.choose_files_button.configure(state="normal")
-        self.clear_button.configure(state="normal" if self.input_selection else "disabled")
-        self.analyze_button.configure(state="normal")
-        self.stop_button.configure(state="disabled")
-
-        if self.emitter.is_cancelled:
+        if self.emitter.is_cancelled or (self.result is not None and self.result.cancelled):
             self.result = None
+            self._set_phase("idle")
             self.analysis_progress.set(0)
             self.analysis_status_label.configure(text=t("gui.analysis_cancelled"))
             self.summary_label.configure(text=t("gui.analysis_cancelled_detail"))
             return
 
         if self.result is None:
+            self._set_phase("idle")
             self.analysis_progress.set(0)
             self.analysis_status_label.configure(text=t("gui.analysis_failed"))
             self.summary_label.configure(
@@ -679,28 +714,13 @@ class DocFuseGUI:
         self.result.recompute_blocking(self._get_current_limit())
         self.analysis_progress.set(1.0)
         self.analysis_status_label.configure(text=t("gui.analysis_done"))
-
-        self._populate_file_list()
-        self._update_counter()
-
-        # Résumé
-        self._update_summary()
-
-        # Bouton générer
-        if self.result.is_blocked or not self.result.files:
-            self.generate_button.configure(state="disabled")
-        else:
-            self.generate_button.configure(state="normal")
-
-        self.report_button.configure(state="normal")
+        self._refresh_from_result()
 
     def _get_current_limit(self) -> int:
-        """Récupère la valeur du plafond éditée par l'utilisateur (I-09)."""
-        try:
-            value = int(self.context_var.get())
-            return value if value > 0 else self.config.context_limit
-        except ValueError:
-            return self.config.context_limit
+        """Plafond saisi par l'utilisateur (I-09), ou celui de la config si la
+        saisie est vide/invalide — même règle partout (D-099 : le blocage,
+        le compteur et le résumé pouvaient lire trois valeurs différentes)."""
+        return parse_context_limit(self.context_var.get(), self.config.context_limit)
 
     def _on_context_limit_changed(self, *_args: str) -> None:
         """Recalcule le blocage sans ré-extraire, après une courte pause de
@@ -719,19 +739,8 @@ class DocFuseGUI:
         self._limit_after_id = None
         if self.result is None:
             return
-        try:
-            context_limit = int(self.context_var.get())
-        except ValueError:
-            return
-        if context_limit <= 0:
-            return
-
-        self.result.recompute_blocking(context_limit)
-        self._populate_file_list()
-        self._update_counter()
-        self._update_summary()
-        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
-        self.generate_button.configure(state=state)
+        self.result.recompute_blocking(self._get_current_limit())
+        self._refresh_from_result()
 
     def _on_tokenizer_engine_changed(self, *_args: str) -> None:
         """Recalcule instantanément les tokens avec le nouveau moteur, sans ré-extraire.
@@ -747,18 +756,15 @@ class DocFuseGUI:
             self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
         )
         self.result.recompute_engine(tokenizer_engine)
-        self._populate_file_list()
-        self._update_counter()
-        self._update_summary()
-        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
-        self.generate_button.configure(state=state)
+        self._refresh_from_result()
 
     def _update_counter(self) -> None:
-        """Met à jour le bandeau compteur avec la valeur éditée du plafond."""
+        """Met à jour le bandeau compteur avec le plafond en vigueur dans le
+        résultat (celui qui a servi au blocage)."""
         if not self.result:
             return
 
-        context_limit = self._get_current_limit()
+        context_limit = self.result.context_limit
 
         self.estimated_label.configure(
             text=f"{t('counter.estimated')}: {format_number(self.result.total.tokens_estimated)}"
@@ -769,15 +775,9 @@ class DocFuseGUI:
         self.limit_label.configure(text=f"{t('counter.limit')}: {format_number(context_limit)}")
 
         # I-11: jauge couleur vert/orange/rouge
-        progress = self.result.total.tokens_with_margin / context_limit if context_limit > 0 else 0
-        self.progress_bar.set(min(progress, 1.0))
-
-        if progress >= 1.0:
-            self.progress_bar.configure(progress_color="#ef4444")  # rouge
-        elif progress >= 0.8:
-            self.progress_bar.configure(progress_color="#f97316")  # orange
-        else:
-            self.progress_bar.configure(progress_color="#22c55e")  # vert
+        ratio = self.result.total.tokens_with_margin / context_limit if context_limit > 0 else 0.0
+        self.progress_bar.set(min(ratio, 1.0))
+        self.progress_bar.configure(progress_color=gauge_color(ratio))
 
     def _sort_by(self, key: str) -> None:
         """Trie la liste des fichiers par colonne (D-090). Un second clic sur
@@ -862,81 +862,32 @@ class DocFuseGUI:
 
         self.input_selection = self.input_selection.exclude(path)
         self._update_selection_label()
-        self._populate_file_list()
-        self._update_counter()
-        self._update_summary()
-        state = "normal" if self.result.files and not self.result.is_blocked else "disabled"
-        self.generate_button.configure(state=state)
+        self._refresh_from_result()
 
     def _update_summary(self) -> None:
         """Met à jour le texte de résumé (I-21: conforme au CdC §6.1)."""
         if not self.result:
             return
-
-        images_count = self.result.count_base_status(FileStatus.IMAGES)
-        low_text_count = self.result.count_base_status(FileStatus.LOW_TEXT)
-        ready_count = self.result.count_base_status(FileStatus.READY)
-        context_limit = self._get_current_limit()
-
-        parts: list[str] = []
-
-        if ready_count > 0 and not self.result.is_blocked:
-            parts.append(t("summary.ok", count=ready_count, limit=format_number(context_limit)))
-
-        if images_count > 0:
-            parts.append(t("summary.images", count=images_count))
-
-        if low_text_count > 0:
-            parts.append(t("summary.low_text", count=low_text_count))
-
-        # I-21: message de blocage conforme au CdC
-        if self.result.is_blocked:
-            if self.result.blocking_files:
-                worst = self.result.blocking_files[0]
-                worst_idx = self.result.files.index(worst)
-                worst_tokens = self.result.estimates[worst_idx].tokens_with_margin
-                parts.append(
-                    t(
-                        "summary.blocked_file",
-                        file=worst.relative_path,
-                        tokens=format_number(worst_tokens),
-                        limit=format_number(context_limit),
-                    )
-                )
-            elif self.result.block_reason:
-                parts.append(
-                    t(
-                        "summary.blocked_total",
-                        total=format_number(self.result.total.tokens_with_margin),
-                        limit=format_number(context_limit),
-                    )
-                )
-
-        self.summary_label.configure(text="\n".join(parts))
+        self.summary_label.configure(text="\n".join(build_summary_lines(self.result)))
 
     def _generate(self) -> None:
         """Génère le corpus dans CorpusOne_output/ (I-13)."""
         if not self.result or self.input_selection is None:
             return
 
-        ext = ".md" if self.format_var.get() == "md" else ".pdf"
-        # I-13: sortie dans CorpusOne_output/
-        output_dir = self.input_selection.output_directory / "CorpusOne_output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"corpus{ext}"
-
-        context_limit = self._get_current_limit()
+        output_path = default_corpus_path(self.input_selection, self.format_var.get())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # I-08: recalcul du plafond sans ré-extraction (cache mémoire)
         # Source unique de vérité : OrchestratorResult.recompute_blocking()
-        self.result.recompute_blocking(context_limit)
+        self.result.recompute_blocking(self._get_current_limit())
 
         # D-096 : une exception ici (corpus.md verrouillé par un éditeur
         # sous Windows, dossier en lecture seule, erreur ReportLab) partait
         # dans `report_callback_exception` de Tk → stderr, inexistant dans
         # l'exe fenêtré : le clic semblait ne rien faire.
         try:
-            success = generate_corpus(self.result, output_path, context_limit, self.config.margin)
+            success = generate_corpus(self.result, output_path)
         except Exception as exc:
             logger.exception("Échec de la génération du corpus")
             self.summary_label.configure(text=t("gui.generation_failed_detail", error=str(exc)))
@@ -945,7 +896,7 @@ class DocFuseGUI:
             self.summary_label.configure(text=t("gui.corpus_generated", path=str(output_path)))
             # I-12: ouvrir le dossier à la fin si demandé
             if self.open_folder_var.get():
-                _open_folder(output_dir)
+                _open_folder(output_path.parent)
         else:
             self._update_summary()
 
@@ -962,39 +913,11 @@ class DocFuseGUI:
             initialfile="rapport.md",
         )
         if filepath:
-            from docfuse.core.report import generate_json_report, generate_markdown_report
-
-            rp = Path(filepath)
-            context_limit = self._get_current_limit()
-            # D-096 : si l'utilisateur choisit `rapport.json`, l'ancien code
-            # écrivait le Markdown dans rapport.json puis l'écrasait avec le
-            # JSON (`with_suffix(".json")` = même chemin) — le rapport
-            # Markdown était perdu. Le Markdown va toujours dans `.md`.
-            md_rp = rp.with_suffix(".md")
-            json_rp = rp.with_suffix(".json")
+            self.result.recompute_blocking(self._get_current_limit())
+            # D-096 : `rapport.json` choisi ici écrasait le Markdown ;
+            # `write_report_pair` écrit toujours `.md` ET `.json`.
             try:
-                generate_markdown_report(
-                    self.result.files,
-                    self.result.ignored,
-                    context_limit,
-                    self.config.margin,
-                    self.result.total.tokens_estimated,
-                    self.result.total.tokens_with_margin,
-                    md_rp,
-                    estimates=self.result.estimates,
-                    engine_id=self.result.engine_id,
-                )
-                generate_json_report(
-                    self.result.files,
-                    self.result.ignored,
-                    context_limit,
-                    self.config.margin,
-                    self.result.total.tokens_estimated,
-                    self.result.total.tokens_with_margin,
-                    json_rp,
-                    estimates=self.result.estimates,
-                    engine_id=self.result.engine_id,
-                )
+                md_rp, _json_rp = write_report_pair(self.result, Path(filepath))
             except Exception as exc:
                 logger.exception("Échec de l'export du rapport")
                 self.summary_label.configure(text=t("gui.generation_failed_detail", error=str(exc)))
@@ -1009,6 +932,51 @@ class DocFuseGUI:
     def run(self) -> None:
         """Lance la boucle principale."""
         self.root.mainloop()
+
+
+def _state(enabled: bool) -> str:
+    return "normal" if enabled else "disabled"
+
+
+def parse_context_limit(raw: str, fallback: int) -> int:
+    """Plafond saisi dans le champ texte : entier strictement positif, sinon
+    `fallback` (D-099, fonction pure testable sans fenêtre)."""
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
+
+
+def gauge_color(ratio: float) -> str:
+    """Couleur de la jauge de contexte (I-11) pour un ratio tokens/plafond."""
+    if ratio >= 1.0:
+        return GAUGE_COLORS["blocked"]
+    if ratio >= GAUGE_WARNING_RATIO:
+        return GAUGE_COLORS["warning"]
+    return GAUGE_COLORS["ok"]
+
+
+def build_summary_lines(result: OrchestratorResult) -> list[str]:
+    """Lignes du résumé sous le compteur (I-21, CdC §6.1) — fonction pure.
+
+    Le message de blocage est celui calculé par `recompute_blocking()`
+    (D-099 : la GUI le reconstruisait à part, avec un plafond qui pouvait
+    différer de celui du blocage).
+    """
+    lines: list[str] = []
+    ready_count = result.count_base_status(FileStatus.READY)
+    if ready_count > 0 and not result.is_blocked:
+        lines.append(t("summary.ok", count=ready_count, limit=format_number(result.context_limit)))
+    images_count = result.count_base_status(FileStatus.IMAGES)
+    if images_count > 0:
+        lines.append(t("summary.images", count=images_count))
+    low_text_count = result.count_base_status(FileStatus.LOW_TEXT)
+    if low_text_count > 0:
+        lines.append(t("summary.low_text", count=low_text_count))
+    if result.is_blocked and result.block_reason:
+        lines.append(result.block_reason)
+    return lines
 
 
 def _sort_key_for_column(pair: tuple[Any, Any], column: str) -> Any:

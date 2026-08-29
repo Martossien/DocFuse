@@ -15,9 +15,8 @@ from typing import Any
 from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
+from docfuse.extractors.base import Extractor, container_guard, error_result, file_type_for
 from docfuse.extractors.html import tag_text
-from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -28,8 +27,6 @@ logger = logging.getLogger(__name__)
 class OdfExtractor(Extractor):
     """Extracteur OpenDocument (ODT/ODS/ODP) via ZIP/XML."""
 
-    file_type = "odf"
-
     @classmethod
     def accepts(cls, path: Path) -> bool:
         return path.suffix.lower() in (".odt", ".ods", ".odp")
@@ -37,17 +34,10 @@ class OdfExtractor(Extractor):
     @classmethod
     def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         try:
-            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
-            if is_zip_bomb(path):
-                return ExtractedFile(
-                    path=path,
-                    relative_path=relative_path,
-                    extension=path.suffix.lower().lstrip("."),
-                    file_type=path.suffix.lower().lstrip("."),
-                    size_bytes=path.stat().st_size,
-                    status=FileStatus.ERROR,
-                    error_message=t("error.zip_bomb_suspected"),
-                )
+            # D-093 : garde-fou « bombe zip » partagé entre conteneurs (D-099).
+            guard = container_guard(path, relative_path, check_ole=False)
+            if guard is not None:
+                return guard
 
             from bs4 import BeautifulSoup
 
@@ -65,8 +55,8 @@ class OdfExtractor(Extractor):
                     return ExtractedFile(
                         path=path,
                         relative_path=relative_path,
-                        extension=path.suffix.lower().lstrip("."),
-                        file_type=path.suffix.lower().lstrip("."),
+                        extension=file_type_for(path),
+                        file_type=file_type_for(path),
                         size_bytes=path.stat().st_size,
                         text="",
                         status=FileStatus.ERROR,
@@ -124,8 +114,8 @@ class OdfExtractor(Extractor):
                 return ExtractedFile(
                     path=path,
                     relative_path=relative_path,
-                    extension=path.suffix.lower().lstrip("."),
-                    file_type=path.suffix.lower().lstrip("."),  # M-08: "odt" / "ods" / "odp"
+                    extension=file_type_for(path),
+                    file_type=file_type_for(path),
                     size_bytes=path.stat().st_size,
                     text=full_text,
                     status=FileStatus.READY,
@@ -134,7 +124,7 @@ class OdfExtractor(Extractor):
                 )
         except Exception as exc:
             logger.exception("Erreur extraction ODF %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)
 
 
 def _materialize_whitespace(soup: Any) -> None:

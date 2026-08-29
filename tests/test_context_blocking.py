@@ -66,7 +66,7 @@ class TestContextBlocking:
         """Si bloqué, aucun corpus n'est généré."""
         result = run_analysis(big_files_dir, context_limit=128_000, margin=0.15)
         output = tmp_path / "corpus.md"
-        success = generate_corpus(result, output, 128_000, 0.15)
+        success = generate_corpus(result, output)
         assert not success
         assert not output.exists()
 
@@ -74,7 +74,7 @@ class TestContextBlocking:
         """Le rapport est généré même si bloqué."""
         result = run_analysis(big_files_dir, context_limit=128_000, margin=0.15)
         output = tmp_path / "corpus.md"
-        generate_corpus(result, output, 128_000, 0.15)
+        generate_corpus(result, output)
         assert (tmp_path / "corpus_rapport.md").exists()
         assert (tmp_path / "corpus_rapport.json").exists()
 
@@ -83,7 +83,7 @@ class TestContextBlocking:
         result = run_analysis(big_files_dir, context_limit=400_000, margin=0.15)
         assert not result.is_blocked
         output = tmp_path / "corpus_400k.md"
-        success = generate_corpus(result, output, 400_000, 0.15)
+        success = generate_corpus(result, output)
         assert success
         assert output.exists()
         content = output.read_text("utf-8")

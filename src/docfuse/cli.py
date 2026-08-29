@@ -20,12 +20,14 @@ from pathlib import Path
 
 from docfuse import __version__
 from docfuse.config import load_config
-from docfuse.constants import ALL_EXTENSIONS
+from docfuse.constants import ALL_EXTENSIONS, CORPUS_EXTENSIONS, UNUSUAL_CONTEXT_LIMIT
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.registry import list_supported_extensions
+from docfuse.core.report import write_report_pair
 from docfuse.core.tokenizers.registry import list_engines
 from docfuse.i18n import format_number, set_language, t
 from docfuse.models.input_selection import InputSelection
+from docfuse.output.paths import corpus_extension, default_corpus_path, report_base_path
 
 logger = logging.getLogger(__name__)
 
@@ -155,51 +157,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_report(
-    result: OrchestratorResult,
-    output_path: Path,
-    context_limit: int,
-    margin: float,
-    report_path: str | None = None,
-) -> None:
+def _write_report(result: OrchestratorResult, output_path: Path, report_path: str | None) -> None:
     """Écrit le rapport MD + JSON à un chemin personnalisé ou à côté de la sortie.
 
-    CdC §6.3 --report : chemin personnalisé pour le rapport.
+    CdC §6.3 --report : chemin personnalisé pour le rapport (le Markdown et
+    le JSON prennent ce nom avec leur suffixe respectif).
     CdC §19.2 : dry-run génère un rapport même sans corpus.
     """
-    from docfuse.core.report import generate_json_report, generate_markdown_report
-
-    args = (
-        result.files,
-        result.ignored,
-        context_limit,
-        margin,
-        result.total.tokens_estimated,
-        result.total.tokens_with_margin,
-    )
-    estimates = result.estimates
-    engine_id = result.engine_id
-
-    if report_path:
-        rp = Path(report_path)
-        if rp.suffix == ".json":
-            generate_json_report(*args, rp, estimates=estimates, engine_id=engine_id)
-            generate_markdown_report(
-                *args, rp.with_suffix(".md"), estimates=estimates, engine_id=engine_id
-            )
-        else:
-            generate_markdown_report(*args, rp, estimates=estimates, engine_id=engine_id)
-            generate_json_report(
-                *args, rp.with_suffix(".json"), estimates=estimates, engine_id=engine_id
-            )
-    else:
-        stem = output_path.stem + "_rapport"
-        generate_markdown_report(
-            *args, output_path.with_name(stem + ".md"), estimates=estimates, engine_id=engine_id
-        )
-        generate_json_report(
-            *args, output_path.with_name(stem + ".json"), estimates=estimates, engine_id=engine_id
-        )
+    base = Path(report_path) if report_path else report_base_path(output_path)
+    write_report_pair(result, base)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -290,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # M-11: Avertissement au-delà de 1 000 000 tokens (CdC §10.3)
-    if context_limit > 1_000_000:
+    if context_limit > UNUSUAL_CONTEXT_LIMIT:
         print(
             t("gui.unusual_limit", tokens=format_number(context_limit)),
             file=sys.stderr,
@@ -304,9 +270,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         extensions = ALL_EXTENSIONS
 
-    # Input obligatoire
+    # Input obligatoire. D-099 : `parser.error()` sortait avec le code 2,
+    # réservé au blocage plafond (CdC §6.3) — un script appelant ne pouvait
+    # pas distinguer « mauvais appel » de « corpus trop gros ».
     if not args.input:
-        parser.error(t("cli.input"))
+        print(t("cli.input_missing"), file=sys.stderr)
         return 1
 
     # I-07: --input répétable : collecter tous les inputs
@@ -318,32 +286,30 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     selection = InputSelection.from_paths(input_paths)
-    primary_input = selection.primary_path
 
     # Output
     if args.output:
         output_path = Path(args.output)
-        # I-20: l'extension de --output prime sur --format
-        # Si --output foo.pdf --format md, on génère un PDF (extension .pdf prime)
         actual_ext = output_path.suffix.lower()
-        if actual_ext == ".md":
-            output_format = "md"
-        elif actual_ext == ".pdf":
-            output_format = "pdf"
-        else:
+        if actual_ext in CORPUS_EXTENSIONS.values():
+            # I-20: l'extension de --output prime sur --format
+            # Si --output foo.pdf --format md, on génère un PDF (extension .pdf prime)
+            output_format = actual_ext.lstrip(".")
+        elif actual_ext == "" or output_path.is_dir():
             # Pas d'extension : --output désigne un dossier (cas légitime :
             # l'utilisateur veut juste choisir où mettre le corpus).
             # On ajoute le suffixe attendu et on garantit que le dossier existe.
             output_path.mkdir(parents=True, exist_ok=True)
-            ext = ".md" if output_format == "md" else ".pdf"
-            output_path = output_path / f"corpus{ext}"
-    else:
-        ext = ".md" if output_format == "md" else ".pdf"
-        # I-13: Sortie par défaut dans CorpusOne_output/
-        if primary_input.is_dir():
-            output_path = primary_input / "CorpusOne_output" / f"corpus{ext}"
+            output_path = output_path / f"corpus{corpus_extension(output_format)}"
         else:
-            output_path = Path(f"corpus{ext}")
+            # D-099 : `--output notes.txt` créait un dossier `notes.txt/`.
+            print(t("cli.output_bad_extension", path=output_path), file=sys.stderr)
+            return 1
+    else:
+        # I-13: Sortie par défaut dans CorpusOne_output/ — même règle que la
+        # GUI (D-099 : un fichier seul en entrée écrivait dans le dossier
+        # courant côté CLI, dans le dossier du fichier côté GUI).
+        output_path = default_corpus_path(selection, output_format)
 
     # Vérifier que le dossier de sortie est inscriptible
     try:
@@ -383,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{t('exit.blocked')}: {result.block_reason}", file=sys.stderr)
         if args.yes:
             # CdC §6.3 : --yes + dépassement → code 2, rapport éventuel oui
-            _write_report(result, output_path, context_limit, margin, args.report)
+            _write_report(result, output_path, args.report)
             return 2
 
     # Dry-run : analyse seule, mais rapport généré (CdC §19.2)
@@ -393,17 +359,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{t('counter.with_margin')}: {format_number(result.total.tokens_with_margin)}")
         print(f"{t('counter.limit')}: {format_number(context_limit)}")
         # C-05: Générer le rapport même en dry-run
-        _write_report(result, output_path, context_limit, margin, args.report)
+        _write_report(result, output_path, args.report)
         return 0 if not result.is_blocked else 2
 
     # Génération
-    success = generate_corpus(result, output_path, context_limit, margin)
+    success = generate_corpus(result, output_path)
     if not success:
         return 2
 
     # C-07: Rapport avec chemin personnalisé si --report
     if args.report:
-        _write_report(result, output_path, context_limit, margin, args.report)
+        _write_report(result, output_path, args.report)
 
     print(t("gui.corpus_generated", path=str(output_path)))
     print(f"{t('counter.estimated')}: {format_number(result.total.tokens_estimated)}")

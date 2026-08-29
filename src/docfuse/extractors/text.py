@@ -17,7 +17,7 @@ from docfuse.constants import (
     ENCODING_PLAUSIBILITY_SAMPLE_CHARS,
 )
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, file_type_for
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -203,11 +203,26 @@ def decode_text(raw: bytes) -> tuple[str, str, bool]:
     return encoding, repaired, repaired != original
 
 
+def mojibake_metadata(repaired: bool) -> dict[str, str]:
+    """Note de transparence à poser dans `extra_metadata` quand la réparation
+    mojibake a modifié le texte (D-099 : un seul endroit, six copies avant)."""
+    return {"mojibake_repaired": t("text.mojibake_repaired_note")} if repaired else {}
+
+
+def decode_text_with_note(raw: bytes) -> tuple[str, str, dict[str, str]]:
+    """`decode_text()` + note de transparence prête pour `extra_metadata`.
+
+    Returns:
+        Tuple (encodage détecté, texte final, métadonnées à fusionner dans
+        `ExtractedFile.extra_metadata` — vide si rien n'a été réparé).
+    """
+    encoding, text, repaired = decode_text(raw)
+    return encoding, text, mojibake_metadata(repaired)
+
+
 @register(*_TEXT_LIKE_EXTENSIONS)
 class TextExtractor(Extractor):
     """Extracteur pour les fichiers texte brut (dont les fichiers de développement)."""
-
-    file_type = "text"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
@@ -219,16 +234,13 @@ class TextExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text, mojibake_repaired = decode_text(raw)
-            extra_metadata: dict[str, str] = {}
-            if mojibake_repaired:
-                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
+            encoding, text, extra_metadata = decode_text_with_note(raw)
 
             return ExtractedFile(
                 path=path,
                 relative_path=relative_path,
-                extension=path.suffix.lower().lstrip("."),
-                file_type=path.suffix.lower().lstrip("."),
+                extension=file_type_for(path),
+                file_type=file_type_for(path),
                 size_bytes=len(raw),
                 text=text,
                 status=FileStatus.READY,
@@ -237,4 +249,4 @@ class TextExtractor(Extractor):
             )
         except Exception as exc:
             logger.exception("Erreur extraction texte %s", path)
-            return error_result(path, relative_path, cls.file_type, exc)
+            return error_result(path, relative_path, exc)

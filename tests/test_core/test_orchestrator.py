@@ -84,7 +84,7 @@ class TestGenerateCorpus:
     def test_generate_markdown(self, tmp_workspace: Path) -> None:
         result = run_analysis(tmp_workspace, context_limit=128000)
         output = tmp_workspace / "corpus.md"
-        success = generate_corpus(result, output, 128000, 0.15)
+        success = generate_corpus(result, output)
         assert success
         assert output.exists()
         content = output.read_text(encoding="utf-8")
@@ -95,14 +95,14 @@ class TestGenerateCorpus:
         (tmp_path / "big.txt").write_text("A" * 10_000, encoding="utf-8")
         result = run_analysis(tmp_path, context_limit=100)
         output = tmp_path / "corpus.md"
-        success = generate_corpus(result, output, 100, 0.15)
+        success = generate_corpus(result, output)
         assert not success
         assert not output.exists()
 
     def test_report_generated(self, tmp_workspace: Path) -> None:
         result = run_analysis(tmp_workspace, context_limit=128000)
         output = tmp_workspace / "corpus.md"
-        generate_corpus(result, output, 128000, 0.15)
+        generate_corpus(result, output)
         report_md = tmp_workspace / "corpus_rapport.md"
         report_json = tmp_workspace / "corpus_rapport.json"
         assert report_md.exists()
@@ -129,7 +129,7 @@ class TestGenerateCorpus:
         assert len(result.files[0].embedded_images) == 1
 
         output = tmp_path / "corpus.md"
-        assert generate_corpus(result, output, 128000, 0.15)
+        assert generate_corpus(result, output)
         images_dir = tmp_path / "corpus_images"
         assert images_dir.is_dir()
         assert len(list(images_dir.iterdir())) == 1
@@ -157,7 +157,7 @@ class TestTokenizerEngineIntegration:
     def test_mistral_report_mentions_engine(self, tmp_workspace: Path) -> None:
         result = run_analysis(tmp_workspace, context_limit=128000, tokenizer_engine="mistral")
         output = tmp_workspace / "corpus.md"
-        generate_corpus(result, output, 128000, 0.15)
+        generate_corpus(result, output)
         report_json = tmp_workspace / "corpus_rapport.json"
         import json
 
