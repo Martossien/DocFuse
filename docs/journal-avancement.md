@@ -1043,6 +1043,26 @@ détectés mais jamais réellement récupérés.
 - Effet de bord positif : le typage de `eml.py` a été nettoyé au passage
   (mypy : 8 → 4 erreurs pré-existantes sur l'ensemble du projet).
 
+### Test en conditions réelles sur ~/Documents — 1 nouveau bug trouvé et corrigé (D-077) — ✅ Corrigé
+
+- L'utilisateur a demandé de tester DocFuse sur ses vrais documents
+  (`~/Documents/proxmox` : pptx réels, `~/Documents/dwn` : 10 PDF
+  administratifs/juridiques réels, `~/Documents/ia_rep` : odt/rtf/txt) et
+  d'examiner les corpus générés — corpus supprimés après vérification.
+- Les 9 correctifs de l'audit (D-069 à D-076) confirmés sains sur des
+  fichiers réels : formes groupées PPTX rencontrées sans crash, OCR PDF
+  propre sur des documents administratifs réels (0 page vide, doublons
+  correctement détectés, dédup en-têtes/pieds déclenchée), pas de perte
+  constatée sur ODT/RTF (une comparaison qui semblait montrer un trou
+  s'est révélée être deux versions différentes du même document, pas un
+  bug).
+- **Nouveau bug trouvé (D-077)** : un dossier de page web sauvegardée par
+  un navigateur contient du JS/CSS tiers minifié (jQuery, etc.) —
+  `CODE_EXTENSIONS` (D-066) les traitait comme du code utilisateur : 91 %
+  du corpus généré sur ce cas réel (192k/210k tokens) était du bruit pur.
+  Corrigé : exclusion de `*.min.js`/`*.min.css` et des dossiers
+  `node_modules/vendor/dist/build`.
+
 ### État après Session 14
 
 | Métrique | Valeur |
@@ -1050,8 +1070,8 @@ détectés mais jamais réellement récupérés.
 | Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
 | ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
 | mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
-| pytest | ✅ 412 collectés, 374 passed, 39 skipped (tests OCR + 9 bugs corrigés exécutés) |
-| Décisions archivées | 76 (D-001 à D-076) |
+| pytest | ✅ 376 passed, 39 skipped (tests OCR + 9 bugs corrigés + bruit JS/CSS exécutés) |
+| Décisions archivées | 77 (D-001 à D-077) |
 
 ### Reste à faire
 

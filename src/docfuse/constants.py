@@ -157,6 +157,8 @@ IGNORE_PATTERNS: list[str] = [
     "corpusone_report.md",
     "*_rapport.md",  # I-05: Rapports générés par DocFuse
     "*_rapport.json",
+    "*.min.js",  # D-077 : bundle tiers minifié, jamais du code source à lire
+    "*.min.css",
 ]
 
 IGNORE_DIRS: frozenset[str] = frozenset(
@@ -166,6 +168,12 @@ IGNORE_DIRS: frozenset[str] = frozenset(
         ".git",
         "__pycache__",
         "_internal",  # Dossier runtime PyInstaller
+        # D-077 : dépendances/artefacts tiers du monde JS/web — jamais du
+        # code écrit par l'utilisateur, souvent volumineux (jQuery, etc.).
+        "node_modules",
+        "vendor",
+        "dist",
+        "build",
     }
 )
 

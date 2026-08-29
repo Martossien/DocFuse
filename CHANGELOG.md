@@ -37,6 +37,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     en objet) perdu.
   - **XLSX** : formules jamais calculées (fichier généré par script) →
     cellule vide sans aucune trace qu'un calcul existait.
+- **Bruit de bibliothèques JS/CSS tierces exclu des « fichiers de
+  développement »** : trouvé en testant sur un vrai dossier de page web
+  sauvegardée par un navigateur — `*.min.js`/`*.min.css` (jQuery, etc.)
+  représentaient 91 % du corpus généré. Désormais exclus (`*.min.js`,
+  `*.min.css`, dossiers `node_modules/`, `vendor/`, `dist/`, `build/`).
 
 ### Ajouté
 

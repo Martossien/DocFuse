@@ -32,6 +32,35 @@ class TestScanDirectory:
         names = {f.name for f in files}
         assert "~$locked.docx" not in names
 
+    def test_ignores_minified_js_and_css(self, tmp_path: Path) -> None:
+        """D-077 : *.min.js/*.min.css sont des bundles tiers (jQuery, etc.),
+        jamais du code écrit par l'utilisateur — trouvé en testant sur un
+        vrai dossier de page web sauvegardée par un navigateur, où ce bruit
+        représentait 91 % du corpus généré."""
+        (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
+        (tmp_path / "jquery.min.js").write_text("(function(){})();", encoding="utf-8")
+        (tmp_path / "styles.min.css").write_text(".a{color:red}", encoding="utf-8")
+
+        files = scan_directory(tmp_path)
+        names = {f.name for f in files}
+        assert "app.py" in names
+        assert "jquery.min.js" not in names
+        assert "styles.min.css" not in names
+
+    def test_ignores_vendor_dirs(self, tmp_path: Path) -> None:
+        """D-077 : node_modules/vendor/dist/build sont des artefacts ou
+        dépendances tiers, jamais du code écrit par l'utilisateur."""
+        (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
+        for vendor_dir in ("node_modules", "vendor", "dist", "build"):
+            d = tmp_path / vendor_dir
+            d.mkdir()
+            (d / "lib.js").write_text("var x = 1;", encoding="utf-8")
+
+        files = scan_directory(tmp_path, recursive=True)
+        names = {f.name for f in files}
+        assert "app.py" in names
+        assert "lib.js" not in names
+
     def test_recursive_finds_subdir_files(self, tmp_workspace: Path) -> None:
         files = scan_directory(tmp_workspace, recursive=True)
         names = {f.name for f in files}

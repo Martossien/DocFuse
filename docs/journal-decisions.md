@@ -1165,6 +1165,31 @@ concernée (jamais un mock).
   été nettoyé au passage (4 erreurs mypy pré-existantes résolues,
   8 → 4 sur l'ensemble du projet).
 
+### D-077 : exclusion des bundles JS/CSS minifiés et des dossiers vendor
+
+**Décision** : `IGNORE_PATTERNS` gagne `*.min.js`/`*.min.css` ;
+`IGNORE_DIRS` gagne `node_modules`, `vendor`, `dist`, `build`.
+
+**Rationale** :
+- Trouvé en testant DocFuse sur de vrais dossiers utilisateur
+  (`~/Documents`) après l'implémentation de `CODE_EXTENSIONS` (D-066) :
+  un dossier de page web sauvegardée par un navigateur ("Enregistrer la
+  page complète") contient un dossier `..._fichiers/` avec du JS/CSS tiers
+  minifié (jQuery, jQuery UI...). Sur ce cas réel, ce bruit représentait
+  **192 000 des 210 500 tokens du corpus généré (91 %)** — jQuery minifié
+  seul faisait 78 000 tokens.
+- `*.min.js`/`*.min.css` est un signal fiable et sans ambiguïté : un
+  bundle minifié n'est par construction jamais du code destiné à être lu
+  (ni par un humain, ni utilement par une LLM) — contrairement à une
+  extension de langage, aucun faux positif plausible sur un fichier que
+  l'utilisateur aurait lui-même écrit.
+- `node_modules/vendor/dist/build` : mêmes dossiers déjà exclus par
+  convention dans la quasi-totalité des `.gitignore` de l'écosystème
+  JS/web — dépendances ou artefacts de build, jamais du code source.
+- Vérifié sur le dossier réel qui a révélé le problème : les fichiers
+  `*.min.js`/`*.min.css` disparaissent de l'inventaire, le reste
+  (`.pptx`, `.pdf`, `.html`) reste inchangé. 376 tests passent, recette 7/7.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

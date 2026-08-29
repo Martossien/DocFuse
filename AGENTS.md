@@ -204,14 +204,15 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 412 |
+| Tests collectés depuis un clone frais | 414 |
 | ruff | ✅ (dérive pré-existante non bloquante sur `test_acceptance.py`, cf. « Reste à faire » Session 13) |
 | mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
-| pytest | ✅ 374 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 376 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 76 (D-001 à D-076) |
+| Décisions archivées | 77 (D-001 à D-077) |
 | Audit extracteurs | 9 bugs de perte silencieuse corrigés (D-069 à D-076) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX |
+| Test conditions réelles | ~/Documents (pptx/pdf/odt/rtf réels) — 1 bug trouvé et corrigé (D-077 : bruit JS/CSS minifié) |
 | Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
 | OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI non encore exécuté, D-067) |
