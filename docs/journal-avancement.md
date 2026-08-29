@@ -1252,3 +1252,31 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   ancrées via XML de dessin séparé, non exposé par `openpyxl` en mode
   `read_only`) — noté comme extension v1.1 possible, pas abandonné.
 
+### Test en conditions réelles de D-091 + fix JSON/XML/__MACOSX (D-092) — ✅ Corrigé
+
+- Demande explicite de l'utilisateur : tester D-091 (OCR + export images)
+  sur ~/Documents et ~/Téléchargements (1413 fichiers réels) avant de
+  considérer le chantier terminé.
+- Résultat : **0 crash lié à D-091**. 2581 images extraites sur ~65
+  fichiers DOCX/PPTX, noms et tags corrects, qualité OCR vérifiée
+  visuellement sur un échantillon (captures d'écran de slides bien
+  reconnues, images sans texte laissées avec juste le tag `[[IMAGE:...]]`).
+  Performance attendue (~8 min sur 1293 fichiers avec beaucoup de PPTX à
+  images — coût des appels Tesseract, rien d'anormal).
+- 3 erreurs trouvées, **sans rapport avec D-091** — l'utilisateur a demandé
+  de corriger quand même (« on doit fournir un projet de haute qualité »).
+  Deux causes distinctes :
+  1. Deux fichiers ComfyUI réels (`wan22_corrected_workflow.json` et sa
+     copie) réellement corrompus (double-encodage UTF-8 en amont cassant
+     la syntaxe JSON, vérifié en inspectant les octets bruts) — le message
+     d'erreur passait de `JSONDecodeError: Expecting ',' delimiter: ...`
+     (brut, incompréhensible) à un message clair réutilisant la clé i18n
+     `error.corrupt_file` (présente depuis longtemps mais jamais câblée).
+  2. Un fichier `__MACOSX/._....json` : pas du JSON du tout, un artefact
+     AppleDouble créé par macOS à la compression d'un ZIP — ajouté à
+     `IGNORE_DIRS` (même liste que `node_modules`/`vendor`, D-077) plutôt
+     que de le signaler comme "corrompu", ce qui aurait été trompeur.
+- 3 nouveaux tests, 420 passed / 39 skipped, ruff/mypy --strict propres,
+  recette 7/7. Re-testé directement sur les 3 fichiers réels ayant révélé
+  le bug pour confirmer la correction.
+

@@ -12,6 +12,7 @@ from pathlib import Path
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
 from docfuse.extractors.text import detect_encoding
+from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -46,6 +47,23 @@ class JsonExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+            )
+        except json.JSONDecodeError as exc:
+            # D-092 : un JSON syntaxiquement invalide (tronqué, corrompu,
+            # double-encodage UTF-8 en amont) donnait `JSONDecodeError: ...`
+            # brut comme message — incompréhensible pour un utilisateur non
+            # technique. `error.corrupt_file` (déjà présent en i18n, jamais
+            # utilisé jusqu'ici) donne un message clair ; le détail
+            # ligne/colonne de l'exception reste ajouté pour permettre de
+            # localiser le problème dans le fichier.
+            return ExtractedFile(
+                path=path,
+                relative_path=relative_path,
+                extension="json",
+                file_type="json",
+                size_bytes=path.stat().st_size if path.exists() else 0,
+                status=FileStatus.ERROR,
+                error_message=f"{t('error.corrupt_file')} : {exc}",
             )
         except Exception as exc:
             return error_result(path, relative_path, "json", exc)
@@ -83,6 +101,18 @@ class XmlExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+            )
+        except ET.ParseError as exc:
+            # D-092 : même principe que JsonExtractor — message clair plutôt
+            # que le `ParseError` brut de ElementTree.
+            return ExtractedFile(
+                path=path,
+                relative_path=relative_path,
+                extension="xml",
+                file_type="xml",
+                size_bytes=path.stat().st_size if path.exists() else 0,
+                status=FileStatus.ERROR,
+                error_message=f"{t('error.corrupt_file')} : {exc}",
             )
         except Exception as exc:
             return error_result(path, relative_path, "xml", exc)

@@ -1504,6 +1504,45 @@ mémoire jusqu'à la génération du corpus), nouveau `output/image_writer.py`
   en `image_bytes` — le nom suggérait à tort un format unique, alors que
   Tesseract/Leptonica accepte déjà PNG/JPEG/BMP/TIFF par ce même chemin.
 
+### D-092 : erreurs JSON/XML corrompus clarifiées, `__MACOSX/` ignoré
+
+**Décision** :
+1. `JsonExtractor`/`XmlExtractor` capturent maintenant explicitement
+   `json.JSONDecodeError`/`xml.etree.ElementTree.ParseError` avant le
+   `except Exception` générique, et renvoient `t("error.corrupt_file")` +
+   le détail ligne/colonne de l'exception plutôt que le nom brut de la
+   classe d'exception Python.
+2. `__MACOSX` ajouté à `IGNORE_DIRS` (`constants.py`), même liste que
+   `node_modules`/`vendor`/`dist`/`build` (D-077).
+
+**Rationale** :
+- Trouvé en testant D-091 en conditions réelles (~/Documents,
+  ~/Téléchargements, 1413 fichiers) : 3 erreurs JSON sur des fichiers
+  `.json` réels.
+- Deux causes distinctes, deux fixes différents :
+  1. `wan22_corrected_workflow(1).json` / `wan22_corrected_workflow.json`
+     (fichiers ComfyUI réels) : JSON réellement corrompu (double-encodage
+     UTF-8 en amont produisant des octets qui cassent la syntaxe JSON,
+     vérifié en inspectant le contenu brut). Le fichier reste en
+     `FileStatus.ERROR` (rien n'est récupérable, correct de le signaler)
+     mais le message passe de `JSONDecodeError: Expecting ',' delimiter:
+     line 1 column 9951 (char 9950)` (incompréhensible pour un utilisateur
+     non technique) à `Fichier corrompu : Expecting ',' delimiter: ...`
+     (clair, avec le détail technique conservé pour qui veut localiser le
+     problème). Réutilise `error.corrupt_file`, une clé i18n déjà présente
+     mais jamais câblée jusqu'ici.
+  2. `__MACOSX/._multiple_models_hiresfix_v1.json` : pas du JSON du tout —
+     un fichier AppleDouble (métadonnées de resource fork) créé par macOS
+     lors de la compression d'un ZIP, qui hérite du nom de l'original avec
+     un préfixe `._`. Le signaler comme "fichier corrompu" aurait été
+     trompeur (le vrai fichier JSON à côté, sans le préfixe, est
+     parfaitement valide) — ignoré silencieusement comme les autres
+     artefacts tiers déjà filtrés (D-077), pas une erreur.
+- Non-régression : les 420 tests existants restent verts, 2 nouveaux tests
+  d'extracteur (JSON/XML corrompus) + 1 nouveau test d'inventaire
+  (`__MACOSX/` ignoré). Reproduit et confirmé corrigé sur les fichiers
+  réels ayant révélé le bug.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

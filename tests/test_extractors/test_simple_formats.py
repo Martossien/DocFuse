@@ -59,6 +59,19 @@ class TestJsonExtractor:
         assert JsonExtractor.accepts(Path("test.json")) is True
         assert JsonExtractor.accepts(Path("test.xml")) is False
 
+    def test_malformed_json_gives_clear_error(self, tmp_path: Path) -> None:
+        """D-092 : un JSON syntaxiquement invalide (tronqué, corrompu) doit
+        donner un message clair (`error.corrupt_file`), pas le
+        `JSONDecodeError` brut de Python."""
+        f = tmp_path / "broken.json"
+        f.write_text('{"name": "test", "value": }', encoding="utf-8")
+
+        result = JsonExtractor.extract(f, "broken.json")
+        assert result.status is FileStatus.ERROR
+        assert result.error_message is not None
+        assert "corrompu" in result.error_message.lower()
+        assert "JSONDecodeError" not in result.error_message
+
 
 class TestXmlExtractor:
     def test_xml_pretty_print(self, tmp_path: Path) -> None:
@@ -72,6 +85,17 @@ class TestXmlExtractor:
 
     def test_accepts(self) -> None:
         assert XmlExtractor.accepts(Path("test.xml")) is True
+
+    def test_malformed_xml_gives_clear_error(self, tmp_path: Path) -> None:
+        """D-092 : même principe que JsonExtractor — message clair plutôt
+        que le `ParseError` brut d'ElementTree."""
+        f = tmp_path / "broken.xml"
+        f.write_text("<root><item>texte non fermé</root>", encoding="utf-8")
+
+        result = XmlExtractor.extract(f, "broken.xml")
+        assert result.status is FileStatus.ERROR
+        assert result.error_message is not None
+        assert "corrompu" in result.error_message.lower()
 
 
 class TestHtmlExtractor:

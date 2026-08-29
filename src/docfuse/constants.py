@@ -174,6 +174,12 @@ IGNORE_DIRS: frozenset[str] = frozenset(
         "vendor",
         "dist",
         "build",
+        # D-092 : dossier créé par macOS lors de la compression d'une archive
+        # ZIP — contient des fichiers AppleDouble (`._nom`, métadonnées de
+        # resource fork), jamais du contenu réel malgré une extension qui
+        # peut sembler légitime (ex: `__MACOSX/._rapport.json` n'est pas du
+        # JSON, c'est du binaire propriétaire Apple).
+        "__MACOSX",
     }
 )
 

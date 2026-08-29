@@ -61,6 +61,20 @@ class TestScanDirectory:
         assert "app.py" in names
         assert "lib.js" not in names
 
+    def test_ignores_macosx_dir(self, tmp_path: Path) -> None:
+        """D-092 : `__MACOSX/` (créé par macOS lors de la compression d'un
+        ZIP) ne contient que des fichiers AppleDouble (`._nom`), jamais du
+        contenu réel malgré une extension qui peut sembler légitime."""
+        (tmp_path / "rapport.json").write_text("{}", encoding="utf-8")
+        macosx = tmp_path / "__MACOSX"
+        macosx.mkdir()
+        (macosx / "._rapport.json").write_bytes(b"\x00\x05\x16\x07not really json")
+
+        files = scan_directory(tmp_path, recursive=True)
+        names = {f.name for f in files}
+        assert "rapport.json" in names
+        assert "._rapport.json" not in names
+
     def test_recursive_finds_subdir_files(self, tmp_workspace: Path) -> None:
         files = scan_directory(tmp_workspace, recursive=True)
         names = {f.name for f in files}

@@ -17,6 +17,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `PackageNotFoundError`) au lieu d'un message clair — même défaut déjà
   corrigé pour le PDF, jamais étendu aux formats Office. Détecté via la
   signature OLE2/CFBF du conteneur chiffré.
+- **JSON/XML corrompus** : message `JSONDecodeError`/`ParseError` brut
+  remplacé par un message clair (« Fichier corrompu ») avec le détail
+  ligne/colonne conservé.
+- **`__MACOSX/` ignoré** : dossier créé par macOS lors de la compression
+  d'un ZIP (métadonnées `._nom`, jamais du contenu réel) — donnait
+  auparavant une fausse alerte « fichier corrompu » sur des fichiers qui
+  n'ont jamais été le vrai contenu.
 
 ### Ajouté
 
