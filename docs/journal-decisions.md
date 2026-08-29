@@ -1038,6 +1038,38 @@ est publié en parallèle sur la même Release GitHub. Détail complet :
   bascule automatique vers le comportement inchangé (note "OCR non
   disponible") a été vérifiée en masquant Tesseract du PATH.
 
+### D-068 : Texte imbriqué dans un Form XObject (LTFigure) — bug d'extraction PDF corrigé
+
+**Décision** : `_extract_pages_pdfminer()` (`extractors/pdf.py`) appelle
+désormais `extract_pages(path, laparams=LAParams(all_texts=True))` et
+recurse dans chaque `LTFigure` pour en extraire le texte (`_extract_text_in_figure`,
+symétrique de `_count_images_in_figure` qui existait déjà pour les images).
+
+**Rationale** :
+- Bug pré-existant, antérieur à cette session, découvert en diagnostiquant
+  le retour utilisateur "un PDF confidentiel n'a extrait presque rien". Un
+  PDF généré par TCPDF plaçait le texte réel de 3 de ses 5 pages dans un
+  Form XObject imbriqué — `isinstance(element, LTTextContainer)` au premier
+  niveau de la page ne le voyait jamais, donc ces pages semblaient vides
+  (jusqu'à ~2500 caractères silencieusement perdus par page).
+- Sans `LAParams(all_texts=True)`, pdfminer ne regroupe même pas ce texte
+  en lignes/paragraphes (il reste en `LTChar` épars) — le réglage est
+  nécessaire, la récursion seule n'aurait pas suffi.
+- Effet de bord positif inattendu : ce même bug faisait que des pages avec
+  du texte natif parfaitement propre étaient classées `blank`/`ocr` par la
+  nouvelle classification OCR (D-067), qui se basait sur le même comptage
+  de caractères erroné — corriger l'extraction native réduit aussi les
+  faux déclenchements d'OCR (vérifié sur le fichier réel : le document
+  n'a plus besoin d'OCR du tout une fois ce bug corrigé, seules 2 pages
+  restent `mixed` à cause d'une image de fond légitime).
+- Testé avec une reproduction minimale (`reportlab` `beginForm`/`doForm`,
+  `test_text_nested_in_form_xobject_is_extracted`) plutôt qu'avec le
+  fichier réel utilisé pour le diagnostic (confidentiel par erreur,
+  jamais commité ni partagé) — la structure PDF générée est identique
+  (texte dans un Form XObject), donc la repro est fidèle.
+- Zéro régression : 364 tests passent (dont tous les tests PDF/dédup/OCR
+  existants), recette 7/7.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

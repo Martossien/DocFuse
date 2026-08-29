@@ -1000,6 +1000,26 @@ détectés mais jamais réellement récupérés.
   cette session (sandbox Linux, pas de runner Windows) — cf. "Reste à
   faire" ci-dessous.
 
+### Bug d'extraction PDF trouvé et corrigé — texte imbriqué dans un Form XObject (D-068) — ✅ Corrigé
+
+- En creusant le retour utilisateur sur un PDF "confidentiel" mal extrait
+  (fourni pour reproduction, jamais commité — voir garde-fou ci-dessous),
+  diagnostic concret : un PDF TCPDF plaçait le texte réel de 3 pages sur 5
+  dans un `LTFigure` imbriqué (Form XObject), invisible pour l'extraction
+  au premier niveau — jusqu'à ~2500 caractères/page silencieusement perdus,
+  **antérieur à cette session**, pas causé par l'OCR.
+- Corrigé : `LAParams(all_texts=True)` + récursion dans `LTFigure`
+  (`_extract_text_in_figure`, symétrique de `_count_images_in_figure`).
+- Effet de bord positif : ce même bug faussait aussi la classification par
+  page de l'OCR (D-067) — des pages avec du texte natif propre étaient
+  classées `blank`/`ocr` à tort. Le document réel testé n'a plus besoin
+  d'OCR du tout après correction (seules 2 pages restent `mixed`, image de
+  fond légitime).
+- Reproduction ajoutée aux tests via `reportlab` (`beginForm`/`doForm`),
+  jamais avec le fichier réel (confidentiel par erreur — l'utilisateur a
+  explicitement demandé de ne jamais le publier sur GitHub/Internet ; il
+  n'a été lu que localement, en local uniquement, pour diagnostic).
+
 ### État après Session 14
 
 | Métrique | Valeur |
@@ -1007,8 +1027,8 @@ détectés mais jamais réellement récupérés.
 | Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
 | ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
 | mypy --strict | ✅ (aucune nouvelle erreur ; ajout override `pypdfium2.*`) |
-| pytest | ✅ 363 passed, 39 skipped (tests OCR exécutés, Tesseract présent en local) |
-| Décisions archivées | 67 (D-001 à D-067) |
+| pytest | ✅ 364 passed, 39 skipped (tests OCR exécutés, Tesseract présent en local) |
+| Décisions archivées | 68 (D-001 à D-068) |
 
 ### Reste à faire
 
@@ -1024,4 +1044,17 @@ détectés mais jamais réellement récupérés.
   réutilisant `core/ocr/`.
 - ⬜ (reporté de la Session 13) `ruff>=0.4.0` sans borne haute — toujours
   pas pinné.
+- ⬜ **Ordre de lecture pdfminer non garanti** (retour utilisateur,
+  2026-08-29) : sur des mises en page complexes, l'ordre des blocs de texte
+  restitué par pdfminer peut différer de l'ordre visuel (en-tête/pied mal
+  placés). Affecte potentiellement `_dedupe_page_boilerplate` (ne regarde
+  que la 1ère/dernière ligne extraite). Pas encore investigué avec une
+  repro concrète — nécessite un exemple de mise en page problématique.
+- ⬜ **Piste "image + texte OCR vers un moteur vision"** (retour
+  utilisateur) : pour les diagrammes/schémas dont le sens dépasse le texte
+  litéral, l'idée d'envoyer l'image au moteur vision d'une LLM en plus de
+  l'OCR a été discutée. Tension explicite avec le principe actuel "OCR CPU,
+  jamais vision" (coût/réseau/latence). Piste alternative moins invasive
+  évoquée mais pas implémentée : extraire les images en fichiers séparés
+  (dossier `images/`) référencés dans le corpus texte, sans auto-captioning.
 

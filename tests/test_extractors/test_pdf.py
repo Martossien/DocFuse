@@ -123,6 +123,32 @@ class TestPdfExtractor:
         assert occurrences == 1
         assert "pdf_dedup" in result.extra_metadata
 
+    def test_text_nested_in_form_xobject_is_extracted(self, tmp_path: Path) -> None:
+        """D-068 : du texte placé dans un Form XObject (LTFigure) — filigrane,
+        tampon, contenu fusionné, courant avec TCPDF et d'autres générateurs —
+        ne doit pas être silencieusement ignoré. Repro minimale d'un vrai bug
+        trouvé en session sur un PDF réel (TCPDF), où jusqu'à ~2500
+        caractères par page étaient perdus."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+
+        f = tmp_path / "form_xobject.pdf"
+        c = canvas.Canvas(str(f), pagesize=A4)
+        c.beginForm("monform")
+        c.setFont("Helvetica", 12)
+        c.drawString(50, 700, "Texte imbrique dans un Form XObject de test.")
+        c.drawString(50, 680, "Deuxieme ligne pour depasser le seuil de detection.")
+        c.endForm()
+        c.doForm("monform")
+        c.showPage()
+        c.save()
+
+        result = PdfExtractor.extract(f, "form_xobject.pdf")
+        assert result.status is FileStatus.READY
+        assert "Texte imbrique dans un Form XObject" in result.text
+        assert "Deuxieme ligne" in result.text
+        assert "ocr" not in result.extra_metadata
+
     def test_no_dedupe_on_few_pages(self, tmp_path: Path) -> None:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet

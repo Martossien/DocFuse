@@ -10,6 +10,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Non publié]
 
+### Corrigé
+
+- **Texte imbriqué dans un Form XObject (PDF) silencieusement ignoré** :
+  certains PDF (ex. générés par TCPDF — filigranes, tampons, contenu
+  fusionné) placent du texte réel dans un objet `LTFigure` imbriqué, jamais
+  vu par l'extraction au premier niveau de la page. Jusqu'à ~2500
+  caractères par page pouvaient disparaître silencieusement — un document
+  pouvait sembler presque vide (page "peu de texte") alors que son contenu
+  était parfaitement extractible. Corrigé (extraction récursive + réglage
+  de mise en page pdfminer adapté).
+
 ### Ajouté
 
 - **Fichiers de développement traités comme texte brut** : `.py`, `.js`,

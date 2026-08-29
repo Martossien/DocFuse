@@ -163,12 +163,21 @@ def _extract_pages_pdfminer(
 ) -> tuple[list[str], list[int], int, int, list[int]]:
     """Extrait le texte et les images page par page via pdfminer.six.
 
+    ``LAParams(all_texts=True)`` : sans ce réglage, pdfminer ne regroupe pas
+    en lignes/paragraphes le texte situé dans un Form XObject (``LTFigure``
+    imbriqué — filigranes, tampons, contenu fusionné, courant avec des
+    générateurs comme TCPDF). Ce texte reste alors de simples ``LTChar``
+    épars, invisibles pour `isinstance(element, LTTextContainer)` — une page
+    entière de texte réel peut ainsi être vue comme vide. Constaté
+    concrètement en session (2026-08-29, D-068) : jusqu'à ~2500 caractères
+    de texte natif silencieusement ignorés sur certaines pages.
+
     Returns:
         Tuple (textes par page, caractères par page, nombre d'images total,
         nombre de pages, nombre d'images par page).
     """
     from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LTFigure, LTImage, LTTextContainer
+    from pdfminer.layout import LAParams, LTFigure, LTImage, LTTextContainer
 
     pages_text: list[str] = []
     chars_per_page: list[int] = []
@@ -176,7 +185,7 @@ def _extract_pages_pdfminer(
     total_images = 0
     page_count = 0
 
-    for page in extract_pages(str(path)):
+    for page in extract_pages(str(path), laparams=LAParams(all_texts=True)):
         page_count += 1
         page_text_parts: list[str] = []
         page_images = 0
@@ -192,9 +201,11 @@ def _extract_pages_pdfminer(
             if isinstance(element, LTImage):
                 page_images += 1
 
-            # Figures (contiennent souvent des images / XObjects Form)
+            # Figures (contiennent souvent des images ET/OU du texte imbriqué
+            # via un Form XObject — voir le docstring de la fonction)
             if isinstance(element, LTFigure):
                 page_images += _count_images_in_figure(element)
+                page_text_parts.extend(_extract_text_in_figure(element))
 
         total_images += page_images
         image_count_per_page.append(page_images)
@@ -296,6 +307,24 @@ def _count_images_in_figure(figure: Any) -> int:
         return count
 
     return _count_recursive(figure)
+
+
+def _extract_text_in_figure(figure: Any) -> list[str]:
+    """Texte imbriqué dans un LTFigure (récursion profonde, symétrique de
+    `_count_images_in_figure`). Voir le docstring de `_extract_pages_pdfminer`
+    (D-068) : nécessite `LAParams(all_texts=True)` pour que ce texte soit
+    déjà regroupé en `LTTextContainer` plutôt qu'en `LTChar` épars."""
+    from pdfminer.layout import LTFigure, LTTextContainer
+
+    parts: list[str] = []
+    for child in figure:
+        if isinstance(child, LTTextContainer):
+            text = child.get_text()
+            if text.strip():
+                parts.append(text.strip())
+        elif isinstance(child, LTFigure):
+            parts.extend(_extract_text_in_figure(child))
+    return parts
 
 
 def _has_garbage_text(text: str) -> bool:
