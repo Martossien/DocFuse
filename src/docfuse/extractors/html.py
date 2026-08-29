@@ -51,11 +51,25 @@ class HtmlExtractor(Extractor):
     @classmethod
     def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
         try:
-            from bs4 import BeautifulSoup, Tag
+            from bs4 import BeautifulSoup, Tag, UnicodeDammit
 
             raw = path.read_bytes()
-            encoding, data = detect_encoding(raw)
-            html = data.decode(encoding, errors="replace")
+            # D-073 : `detect_encoding()` (BOM→UTF-8→cp1252→...) ignore
+            # totalement <meta charset=...>/<meta http-equiv="Content-Type"
+            # content="...charset=...">. cp1252 décode presque tous les
+            # octets sans erreur, donc la détection générique "gagne" avant
+            # même d'essayer le charset déclaré par la page — mojibake
+            # silencieux et total pour tout charset legacy mono-octet non
+            # latin (cyrillique, grec, hébreu...). `UnicodeDammit(is_html=True)`
+            # sait lire cette déclaration ; on ne garde `detect_encoding()`
+            # qu'en dernier repli si Dammit échoue à produire du texte.
+            dammit = UnicodeDammit(raw, is_html=True)
+            if dammit.unicode_markup is not None:
+                html = dammit.unicode_markup
+                encoding = dammit.original_encoding or "utf-8"
+            else:
+                encoding, data = detect_encoding(raw)
+                html = data.decode(encoding, errors="replace")
 
             soup = BeautifulSoup(html, "lxml")
 

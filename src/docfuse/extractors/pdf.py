@@ -147,12 +147,23 @@ class PdfExtractor(Extractor):
 
 
 def _check_encrypted(path: Path) -> bool:
-    """Vérifie si le PDF est chiffré / protégé par mot de passe via pypdf."""
+    """Vérifie si le PDF est verrouillé par un VRAI mot de passe utilisateur.
+
+    D-071 : `reader.is_encrypted` reste `True` même pour un PDF chiffré avec
+    un mot de passe utilisateur VIDE — cas très courant (documents
+    juridiques/financiers protégés en copie/impression, mais lisibles par
+    n'importe quel lecteur). `is_encrypted` seul bloquait donc à tort des
+    fichiers 100 % lisibles. `reader.decrypt("")` (et pdfminer, qui essaie
+    déjà un mot de passe vide par défaut) permettent de faire la différence :
+    on ne bloque que si le mot de passe vide échoue réellement.
+    """
     try:
-        from pypdf import PdfReader
+        from pypdf import PasswordType, PdfReader
 
         reader = PdfReader(str(path))
-        return reader.is_encrypted
+        if not reader.is_encrypted:
+            return False
+        return reader.decrypt("") == PasswordType.NOT_DECRYPTED
     except Exception:
         # Si pypdf échoue, on continue avec pdfminer
         return False

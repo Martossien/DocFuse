@@ -34,7 +34,6 @@ class DocxExtractor(Extractor):
         try:
             from docx import Document
             from docx.table import Table
-            from docx.text.paragraph import Paragraph
 
             # Compter les images dans word/media/
             image_count = _count_media_images(path)
@@ -45,30 +44,27 @@ class DocxExtractor(Extractor):
             # BUG FIX: extraire paragraphes ET tableaux dans l'ordre du document
             # python-docx n'expose pas l'ordre directement, on itère sur les enfants
             # du body element XML pour respecter l'ordre d'apparition.
+            # D-069 : descend aussi dans les w:sdt (contrôles de contenu Word) —
+            # sans ça, un paragraphe/tableau entier enveloppé dans un contrôle de
+            # contenu (omniprésent dans les modèles RH/juridique/formulaires) est
+            # invisible.
             body = doc.element.body
-            for child in body:
-                if child.tag.endswith("}p"):
-                    para = Paragraph(child, doc)
-                    if para.text.strip():
-                        parts.append(para.text)
-                elif child.tag.endswith("}tbl"):
-                    table = Table(child, doc)
-                    for row in table.rows:
-                        cells = [cell.text.strip() for cell in row.cells]
-                        parts.append(" | ".join(cells))
+            parts.extend(_iter_body_parts(body, doc, Table))
 
             # Headers et footers
             for section in doc.sections:
                 for header in [section.header, section.first_page_header, section.even_page_header]:
                     if header and header.paragraphs:
                         for para in header.paragraphs:
-                            if para.text.strip():
-                                parts.append(f"[en-tête] {para.text}")
+                            text = _flatten_paragraph_text(para._p)
+                            if text.strip():
+                                parts.append(f"[en-tête] {text}")
                 for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
                     if footer and footer.paragraphs:
                         for para in footer.paragraphs:
-                            if para.text.strip():
-                                parts.append(f"[pied de page] {para.text}")
+                            text = _flatten_paragraph_text(para._p)
+                            if text.strip():
+                                parts.append(f"[pied de page] {text}")
 
             # Footnotes et endnotes (via XML brut si python-docx ne les expose pas)
             footnote_text = _extract_footnotes(path)
@@ -99,6 +95,58 @@ class DocxExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction DOCX %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _flatten_paragraph_text(p_element: object) -> str:
+    """Texte complet d'un paragraphe, en descendant dans TOUT élément imbriqué
+    (`w:ins` — suivi des modifications, `w:sdt` — contrôle de contenu au
+    niveau run, `w:hyperlink`, `w:fldSimple`, `w:smartTag`, ...), pas
+    seulement les runs enfants directs comme le fait `Paragraph.text` de
+    python-docx (D-069).
+
+    Exclut volontairement `w:delText` (texte supprimé en suivi des
+    modifications) : on veut le texte final du document, pas les deux
+    versions mélangées.
+    """
+    parts: list[str] = []
+    for el in p_element.iter():  # type: ignore[attr-defined]
+        tag = el.tag
+        if tag.endswith("}t"):
+            parts.append(el.text or "")
+        elif tag.endswith("}tab"):
+            parts.append("\t")
+        elif tag.endswith(("}br", "}cr")):
+            parts.append("\n")
+    return "".join(parts)
+
+
+def _iter_body_parts(container: object, doc: object, table_cls: type) -> list[str]:
+    """Parcourt les enfants d'un conteneur "body-like" (le corps du document,
+    ou le contenu d'un `w:sdt`) et retourne paragraphes/tableaux dans l'ordre
+    d'apparition — en descendant récursivement dans les `w:sdt` (contrôles de
+    contenu Word) rencontrés au niveau bloc (D-069). Sans cette récursion, un
+    paragraphe ou un tableau entier enveloppé dans un contrôle de contenu est
+    invisible : ni `child.tag.endswith("}p")` ni `"}tbl"` ne matche `w:sdt`.
+    """
+    parts: list[str] = []
+    for child in container:  # type: ignore[attr-defined]
+        if child.tag.endswith("}p"):
+            text = _flatten_paragraph_text(child)
+            if text.strip():
+                parts.append(text)
+        elif child.tag.endswith("}tbl"):
+            table = table_cls(child, doc)
+            for row in table.rows:
+                cells = [
+                    "\n".join(_flatten_paragraph_text(p._p) for p in cell.paragraphs).strip()
+                    for cell in row.cells
+                ]
+                parts.append(" | ".join(cells))
+        elif child.tag.endswith("}sdt"):
+            sdt_content = next((c for c in child if c.tag.endswith("}sdtContent")), None)
+            if sdt_content is not None:
+                parts.extend(_iter_body_parts(sdt_content, doc, table_cls))
+    return parts
 
 
 def _count_media_images(path: Path) -> int:

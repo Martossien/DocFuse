@@ -1070,6 +1070,101 @@ symétrique de `_count_images_in_figure` qui existait déjà pour les images).
 - Zéro régression : 364 tests passent (dont tous les tests PDF/dédup/OCR
   existants), recette 7/7.
 
+### D-069 à D-076 : audit systématique des extracteurs, 9 bugs de perte silencieuse corrigés
+
+**Contexte** : après le bug LTFigure (D-068), l'utilisateur a demandé une
+vérification systématique — 5 recherches en parallèle (une par
+bibliothèque : pdfminer/pypdf, python-docx, python-pptx, openpyxl,
+HTML/RTF/EML/MHTML/ODF), croisant issues GitHub connues et lecture précise
+du code réel de chaque extracteur. Résultat : ~25 classes de bugs
+identifiées, 9 confirmées à forte gravité (perte totale/silencieuse de
+contenu substantiel) et corrigées une par une, chacune avec un test de
+non-régression construit sur un fichier réel généré par la bibliothèque
+concernée (jamais un mock).
+
+- **D-069 — DOCX, texte imbriqué invisible** (`w:ins` suivi des
+  modifications, `w:sdt` contrôles de contenu bloc et run) :
+  `Paragraph.text` de python-docx ne regarde que les runs enfants
+  **directs** de `w:p` — tout texte inséré en suivi de modifications, ou
+  dans un contrôle de contenu Word (omniprésent dans les modèles RH/
+  juridique/formulaires), disparaissait. Corrigé par `_flatten_paragraph_text()`
+  (parcourt tous les `w:t` descendants, quel que soit l'élément englobant,
+  exclut `w:delText`) et `_iter_body_parts()` (descend dans les `w:sdt` au
+  niveau bloc). Bonus non ciblé : corrige aussi implicitement les
+  MERGEFIELD via `w:fldSimple` (même mécanisme).
+- **D-070 — EML, email transféré (`message/rfc822`) perdu** : la logique
+  "premier text/plain gagne" faisait que le corps du message englobant
+  (toujours rencontré en premier) gagnait systématiquement sur le sujet et
+  le corps du message transféré en pièce jointe — souvent le contenu le
+  plus important du fichier. Corrigé par un rendu récursif par message
+  (`_render_message`), chaque niveau ayant son propre corps direct
+  (`_extract_direct_body`, qui ignore explicitement les `message/rfc822`
+  imbriqués) et ses propres sous-messages (`_iter_nested_messages`).
+- **D-071 — PDF, mot de passe utilisateur vide rejeté en erreur totale** :
+  `reader.is_encrypted` (pypdf) reste `True` même après déchiffrement
+  réussi — un PDF protégé uniquement en copie/impression (mot de passe
+  utilisateur vide, cas très courant en juridique/financier) était rejeté
+  comme un fichier totalement illisible alors que pdfminer l'aurait extrait
+  sans problème (mot de passe vide essayé par défaut). Corrigé :
+  `_check_encrypted()` tente `reader.decrypt("")` et ne bloque que si ça
+  échoue réellement.
+- **D-072 — ODF (.odt), en-têtes/pieds de page jamais lus** : vivent dans
+  `styles.xml` (`office:master-styles`), jamais dans `content.xml`.
+  Contiennent souvent des métadonnées de document (référence, mention de
+  confidentialité). Corrigé par `_extract_master_headers_footers()`, lu en
+  plus de `content.xml` si `styles.xml` est présent dans l'archive.
+- **D-073 — HTML, `<meta charset>` jamais consulté** : `detect_encoding()`
+  (BOM→UTF-8→cp1252→...) ignore la déclaration HTML — cp1252 décode presque
+  tous les octets sans erreur, donc "gagne" avant même d'essayer le charset
+  déclaré. Mojibake total et silencieux pour tout charset legacy mono-octet
+  non latin (cyrillique, grec, hébreu...), vérifié empiriquement. Corrigé
+  en remplaçant la détection générique par `bs4.UnicodeDammit(is_html=True)`
+  (déjà une dépendance du projet), qui sait lire cette déclaration — repli
+  sur `detect_encoding()` uniquement si Dammit échoue à produire du texte.
+- **D-074 — PPTX, formes groupées (`GroupShape`) sans récursion** :
+  `shape.has_text_frame`/`has_table` renvoient `False` pour le conteneur
+  groupe lui-même — tout texte/tableau dans un groupe (schémas, diagrammes
+  annotés, fréquents dans les decks "corporate") était invisible. Corrigé
+  par `_iter_shapes()`, un itérateur récursif (un groupe peut contenir un
+  groupe) remplaçant `slide.shapes`.
+- **D-075 — RTF, texte de repli des objets OLE incrustés (`\result`)
+  perdu** : striprtf traite `\result` comme une "destination ignorable", au
+  même titre que les données binaires `\objdata` — le texte de repli
+  (souvent un tableau Excel collé en objet, scénario très courant) disparaît
+  avec. Dépendance externe non patchable ; corrigé par un pré-traitement du
+  RTF brut (`_extract_ole_fallback_texts`, scan par profondeur d'accolades
+  respectant les échappements `\{`/`\}`) qui isole chaque groupe `{\result
+  ...}` et le repasse à `rtf_to_text()` séparément — son contenu est
+  lui-même un fragment RTF valide.
+- **D-076 — XLSX, formules jamais calculées → cellule vide sans trace** :
+  `data_only=True` renvoie `None` pour une formule sans valeur en cache
+  (fichier généré par script, jamais ouvert dans Excel/LibreOffice) —
+  indistinguable d'une cellule réellement vide. Fréquent avec des exports
+  automatisés (ERP/BI) : des colonnes de totaux entières disparaissaient.
+  Corrigé en ouvrant un second classeur (`data_only=False`) en parallèle :
+  une cellule `None` dont la formule commence par `=` devient
+  `[formule non calculée: =...]` plutôt que du vide silencieux.
+
+**Rationale commune** :
+- Tous ces bugs partagent la même signature : une bibliothèque d'extraction
+  a une hypothèse structurelle non vérifiée (ordre XML, cache de valeur,
+  déclaration de charset, type de conteneur) et DocFuse lui faisait
+  confiance aveuglément — exactement la même classe que le bug LTFigure
+  (D-068) qui a déclenché cet audit.
+- Chaque correctif a été vérifié par un test de non-régression construit
+  avec la bibliothèque réelle du format concerné (python-docx, pptx,
+  openpyxl, email stdlib, striprtf, zipfile+XML pour ODF), jamais un mock —
+  reproduisant la structure exacte du bug avant de vérifier le correctif.
+- Périmètre volontairement limité aux 9 bugs de **forte gravité** identifiés
+  par l'audit ; les bugs de gravité moyenne/faible (tableaux DOCX imbriqués
+  dans une cellule, SmartArt PPTX, cellules XLSX fusionnées, etc.) sont
+  documentés dans `docs/journal-avancement.md` § Reste à faire, pas corrigés
+  cette session.
+- Non-régression stricte : 374 tests passent (+10 depuis le début de la
+  session), recette 7/7. Effet de bord positif : le typage de `eml.py` a
+  été nettoyé au passage (4 erreurs mypy pré-existantes résolues,
+  8 → 4 sur l'ensemble du projet).
+
 ---
 
 *Fin du journal des décisions — Session 14.*

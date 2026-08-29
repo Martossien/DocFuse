@@ -20,6 +20,23 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   pouvait sembler presque vide (page "peu de texte") alors que son contenu
   était parfaitement extractible. Corrigé (extraction récursive + réglage
   de mise en page pdfminer adapté).
+- **Audit systématique de tous les extracteurs — 9 bugs de perte
+  silencieuse corrigés** (même classe que le bug PDF ci-dessus, trouvés en
+  vérifiant les bugs connus de chaque bibliothèque d'extraction) :
+  - **DOCX** : texte inséré en suivi des modifications (`w:ins`) et
+    contrôles de contenu Word (`w:sdt`) invisibles.
+  - **EML** : email transféré en pièce jointe (`message/rfc822`) —
+    sujet et corps totalement perdus.
+  - **PDF** : mot de passe utilisateur vide (juste des permissions
+    restreintes) rejeté comme un fichier totalement illisible.
+  - **ODF (.odt)** : en-têtes/pieds de page (`styles.xml`) jamais lus.
+  - **HTML** : `<meta charset>` jamais consulté → charabia total et
+    silencieux pour tout encodage legacy non latin (cyrillique, etc.).
+  - **PPTX** : formes groupées — texte/tableaux dans un groupe invisibles.
+  - **RTF** : texte de repli des objets OLE incrustés (tableau Excel collé
+    en objet) perdu.
+  - **XLSX** : formules jamais calculées (fichier généré par script) →
+    cellule vide sans aucune trace qu'un calcul existait.
 
 ### Ajouté
 

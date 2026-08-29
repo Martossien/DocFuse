@@ -1020,15 +1020,38 @@ détectés mais jamais réellement récupérés.
   explicitement demandé de ne jamais le publier sur GitHub/Internet ; il
   n'a été lu que localement, en local uniquement, pour diagnostic).
 
+### Audit systématique des extracteurs — 9 bugs corrigés (D-069 à D-076) — ✅ Corrigé
+
+- Suite au bug LTFigure (D-068), l'utilisateur a demandé de vérifier
+  systématiquement s'il existait d'autres bugs du même genre — pas
+  seulement sur les PDF, sur tous les formats.
+- 5 recherches lancées en parallèle (Agent, un par bibliothèque :
+  pdfminer/pypdf, python-docx, python-pptx, openpyxl,
+  HTML/RTF/EML/MHTML/ODF), croisant issues GitHub connues et lecture
+  précise + tests empiriques du code réel de chaque extracteur.
+- ~25 classes de bugs identifiées au total ; 9 confirmées à forte gravité
+  (perte totale/silencieuse de contenu substantiel), corrigées une par une
+  sur décision explicite de l'utilisateur ("tout corriger dans l'ordre de
+  gravité") : DOCX (`w:ins`, `w:sdt`), EML (email transféré imbriqué), PDF
+  (mot de passe utilisateur vide), ODF (en-têtes/pieds de page), HTML
+  (`<meta charset>`), PPTX (formes groupées), RTF (texte de repli OLE),
+  XLSX (formules non calculées). Détail complet des 9 correctifs et de
+  leur rationale : `docs/journal-decisions.md` D-069 à D-076.
+- Chaque correctif vérifié par un test de non-régression construit avec la
+  bibliothèque réelle du format (jamais un mock), reproduisant la
+  structure exacte du bug.
+- Effet de bord positif : le typage de `eml.py` a été nettoyé au passage
+  (mypy : 8 → 4 erreurs pré-existantes sur l'ensemble du projet).
+
 ### État après Session 14
 
 | Métrique | Valeur |
 |---|---|
 | Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
 | ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
-| mypy --strict | ✅ (aucune nouvelle erreur ; ajout override `pypdfium2.*`) |
-| pytest | ✅ 364 passed, 39 skipped (tests OCR exécutés, Tesseract présent en local) |
-| Décisions archivées | 68 (D-001 à D-068) |
+| mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
+| pytest | ✅ 412 collectés, 374 passed, 39 skipped (tests OCR + 9 bugs corrigés exécutés) |
+| Décisions archivées | 76 (D-001 à D-076) |
 
 ### Reste à faire
 
@@ -1057,4 +1080,15 @@ détectés mais jamais réellement récupérés.
   jamais vision" (coût/réseau/latence). Piste alternative moins invasive
   évoquée mais pas implémentée : extraire les images en fichiers séparés
   (dossier `images/`) référencés dans le corpus texte, sans auto-captioning.
+- ⬜ **Bugs de gravité moyenne identifiés par l'audit, non corrigés cette
+  session** : DOCX (tableaux imbriqués dans une cellule, `MERGEFIELD` via
+  `w:fldSimple` déjà partiellement corrigé en bonus par D-069, zones de
+  texte dans en-têtes/pieds de page, commentaires non extraits), PPTX
+  (SmartArt — non exposé par python-pptx, texte des graphiques), XLSX
+  (cellules fusionnées, commentaires invisibles en `read_only`, dimensions
+  mal déclarées → troncature silencieuse), PDF (annotations/champs de
+  formulaire non lus, texte `(cid:...)` laissé tel quel si OCR
+  indisponible), HTML (commentaires qui fuitent dans le texte, attributs
+  `title`/`alt` hors `<img>`), MHTML (`alt` des images jamais extrait),
+  ODF (.odp : notes d'orateur mélangées au contenu visible sans étiquette).
 

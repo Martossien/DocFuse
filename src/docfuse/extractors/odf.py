@@ -113,6 +113,13 @@ class OdfExtractor(Extractor):
                                     if text:
                                         parts.append(f"- {text}")
 
+                # D-072 : en-têtes/pieds de page ODT vivent dans styles.xml
+                # (office:master-styles), jamais dans content.xml — invisibles
+                # sans ce second passage. Contiennent souvent des métadonnées
+                # de document (référence, mention de confidentialité).
+                if "styles.xml" in zf.namelist():
+                    parts.extend(_extract_master_headers_footers(zf.read("styles.xml")))
+
                 full_text = "\n".join(parts)
 
                 return ExtractedFile(
@@ -128,3 +135,32 @@ class OdfExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction ODF %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _extract_master_headers_footers(styles_xml: bytes) -> list[str]:
+    """Texte des en-têtes/pieds de page ODT (D-072).
+
+    Spec OASIS ODF 1.2 §16.4-16.5 : `office:master-styles` contient un ou
+    plusieurs `style:master-page`, chacun avec un `style:header`/
+    `style:footer` optionnel — le texte récurrent affiché sur les pages qui
+    utilisent ce style de page. Absent de `content.xml`.
+    """
+    from bs4 import BeautifulSoup
+    from bs4 import Tag as BTag
+
+    soup = BeautifulSoup(styles_xml, "xml")
+    parts: list[str] = []
+    for master_page in soup.find_all("style:master-page"):
+        if not isinstance(master_page, BTag):
+            continue
+        header = master_page.find("style:header")
+        if isinstance(header, BTag):
+            text = header.get_text(strip=True)
+            if text:
+                parts.append(f"[en-tête] {text}")
+        footer = master_page.find("style:footer")
+        if isinstance(footer, BTag):
+            text = footer.get_text(strip=True)
+            if text:
+                parts.append(f"[pied de page] {text}")
+    return parts

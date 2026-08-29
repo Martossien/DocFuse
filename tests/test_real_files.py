@@ -475,6 +475,24 @@ class TestEdgeCases:
             or "chiffr" in (result.error_message or "").lower()
         )
 
+    def test_pdf_empty_user_password_is_readable(self, tmp_path: Path) -> None:
+        """D-071 : un PDF chiffré avec un mot de passe UTILISATEUR VIDE (juste
+        des permissions restreintes — copie/impression) est parfaitement
+        lisible et ne doit pas être rejeté comme un PDF réellement protégé.
+        `reader.is_encrypted` reste `True` même après déchiffrement réussi ;
+        c'est `reader.decrypt("")` qui fait la différence."""
+        from pypdf import PdfWriter
+
+        f = tmp_path / "empty_user_password.pdf"
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.encrypt(user_password="", owner_password="secret_owner_pw")
+        with open(f, "wb") as out:
+            writer.write(out)
+
+        result = get_extractor_for(f).safe_extract(f, "empty_user_password.pdf")
+        assert result.status is not FileStatus.ERROR
+
 
 class TestCorpusGeneration:
     """Tests de génération de corpus complet."""

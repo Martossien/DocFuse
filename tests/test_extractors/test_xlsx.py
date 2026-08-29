@@ -58,3 +58,38 @@ class TestXlsxExtractor:
             result = XlsxExtractor.extract(fixture, "sample.xlsx")
             assert result.status is FileStatus.READY
             assert "Feuille1" in result.text
+
+    def test_uncalculated_formula_text_is_recovered(self, tmp_path: Path) -> None:
+        """D-076 : une formule jamais calculée (fichier généré par script,
+        jamais ouvert dans Excel/LibreOffice — pas de valeur en cache dans
+        le fichier) ne doit pas disparaître silencieusement. `data_only=True`
+        renvoie None pour ces cellules, indistinguable d'une cellule
+        réellement vide sans relire le classeur en data_only=False."""
+        import openpyxl
+
+        f = tmp_path / "formulas.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Total"
+        ws["B1"] = "=1+1"  # jamais "calculée" : openpyxl n'évalue jamais les formules
+        wb.save(str(f))
+
+        result = XlsxExtractor.extract(f, "formulas.xlsx")
+        assert result.status is FileStatus.READY
+        assert "=1+1" in result.text
+
+    def test_truly_empty_cell_stays_empty(self, tmp_path: Path) -> None:
+        """Non-régression : une cellule réellement vide (pas une formule non
+        calculée) ne doit pas récupérer de faux marqueur de formule."""
+        import openpyxl
+
+        f = tmp_path / "blank_cell.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Label"
+        ws["A3"] = "AfterGap"
+        wb.save(str(f))
+
+        result = XlsxExtractor.extract(f, "blank_cell.xlsx")
+        assert result.status is FileStatus.READY
+        assert "formule" not in result.text

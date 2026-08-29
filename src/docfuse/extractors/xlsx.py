@@ -33,23 +33,39 @@ class XlsxExtractor(Extractor):
             from openpyxl import load_workbook
 
             wb = load_workbook(str(path), read_only=True, data_only=True)
+            # D-076 : data_only=True renvoie None pour une formule jamais
+            # calculée (fichier généré par script, jamais ouvert dans
+            # Excel/LibreOffice — pas de valeur en cache dans le fichier).
+            # Sans ce second classeur (data_only=False, qui donne le TEXTE
+            # de la formule), la cellule paraît vide sans aucune trace
+            # qu'un calcul existait — perte silencieuse de colonnes de
+            # totaux entières sur des exports automatisés (ERP/BI).
+            wb_formulas = load_workbook(str(path), read_only=True, data_only=False)
             parts: list[str] = []
 
             for sheet in wb.sheetnames:
                 ws = wb[sheet]
+                ws_formulas = wb_formulas[sheet] if sheet in wb_formulas.sheetnames else None
                 rows_text: list[str] = []
                 has_data = False
 
+                formula_rows = (
+                    ws_formulas.iter_rows(values_only=True) if ws_formulas is not None else iter(())
+                )
                 for row in ws.iter_rows(values_only=True):
+                    formula_row = next(formula_rows, ())
                     cells: list[str] = []
-                    for c in row:
-                        if c is None:
-                            # BUG FIX: data_only=True retourne None pour les formules
-                            # non calculées (jamais ouvertes dans Excel). On marque
-                            # la cellule comme vide plutôt que de perdre l'information.
-                            cells.append("")
-                        else:
+                    for idx, c in enumerate(row):
+                        if c is not None:
                             cells.append(str(c))
+                            continue
+                        formula = formula_row[idx] if idx < len(formula_row) else None
+                        if isinstance(formula, str) and formula.startswith("="):
+                            cells.append(f"[formule non calculée: {formula}]")
+                        else:
+                            # BUG FIX: data_only=True retourne aussi None pour une
+                            # cellule réellement vide. On la marque comme vide.
+                            cells.append("")
                     if any(c.strip() for c in cells):
                         has_data = True
                         rows_text.append(" | ".join(cells))
@@ -61,6 +77,7 @@ class XlsxExtractor(Extractor):
 
             sheet_count = len(wb.sheetnames)
             wb.close()
+            wb_formulas.close()
             text = "\n\n".join(parts)
 
             return ExtractedFile(

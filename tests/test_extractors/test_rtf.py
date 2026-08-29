@@ -39,3 +39,27 @@ class TestRtfExtractor:
             result = RtfExtractor.extract(fixture, "sample.rtf")
             assert result.status is FileStatus.READY
             assert "Ceci" in result.text or "texte" in result.text
+
+    def test_ole_object_fallback_text_is_recovered(self, tmp_path: Path) -> None:
+        """D-075 : le texte de repli (\\result) d'un objet OLE incrusté
+        (ex. tableau Excel collé en objet) ne doit pas disparaître avec les
+        données binaires (\\objdata) — striprtf traite les deux comme des
+        "destinations ignorables" indistinctement."""
+        f = tmp_path / "ole.rtf"
+        rtf = (
+            r"{\rtf1\ansi "
+            r"Texte avant.\par "
+            r"{\object\objemb "
+            r"{\*\objdata 0105000002000000}"
+            r"{\result{\rtf1\ansi CONTENU_DE_REPLI_TABLEAU_EXCEL\par}}"
+            r"}"
+            r"Texte apres.\par"
+            r"}"
+        )
+        f.write_bytes(rtf.encode("latin-1"))
+
+        result = RtfExtractor.extract(f, "ole.rtf")
+        assert result.status is FileStatus.READY
+        assert "Texte avant" in result.text
+        assert "Texte apres" in result.text
+        assert "CONTENU_DE_REPLI_TABLEAU_EXCEL" in result.text

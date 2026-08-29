@@ -119,4 +119,20 @@ class TestHtmlExtractor:
     def test_accepts(self) -> None:
         assert HtmlExtractor.accepts(Path("test.html")) is True
         assert HtmlExtractor.accepts(Path("test.htm")) is True
+
+    def test_meta_charset_legacy_encoding_is_respected(self, tmp_path: Path) -> None:
+        """D-073 : <meta charset=...> doit primer sur la détection générique
+        d'encodage. cp1252 décode presque tous les octets sans erreur, donc
+        sans lire cette déclaration, un charset legacy mono-octet non latin
+        (cyrillique ici) devient un mojibake total et silencieux."""
+        html_str = (
+            '<html><head><meta charset="windows-1251"></head>'
+            "<body><p>Привет, тестовый русский текст.</p></body></html>"
+        )
+        f = tmp_path / "cyrillic.html"
+        f.write_bytes(html_str.encode("windows-1251"))
+
+        result = HtmlExtractor.extract(f, "cyrillic.html")
+        assert result.status is FileStatus.READY
+        assert "русский текст" in result.text
         assert HtmlExtractor.accepts(Path("test.txt")) is False

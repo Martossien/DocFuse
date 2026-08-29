@@ -59,3 +59,43 @@ class TestOdfExtractor:
             result = OdfExtractor.extract(fixture, "sample.odt")
             assert result.status is FileStatus.READY
             assert "Ceci" in result.text or "texte" in result.text
+
+    def test_master_page_header_footer_is_extracted(self, tmp_path: Path) -> None:
+        """D-072 : les en-têtes/pieds de page ODT vivent dans styles.xml
+        (office:master-styles), jamais dans content.xml — invisibles sans
+        un second passage dédié."""
+        f = tmp_path / "headers.odt"
+        content_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<office:document-content "
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:body><office:text>"
+            "<text:p>CORPS_DU_DOCUMENT_NORMAL</text:p>"
+            "</office:text></office:body>"
+            "</office:document-content>"
+        )
+        styles_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<office:document-styles "
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+            "<office:master-styles>"
+            '<style:master-page style:name="Standard" style:page-layout-name="Mpm1">'
+            "<style:header><text:p>EN_TETE_CONFIDENTIEL_PROJET_X</text:p></style:header>"
+            "<style:footer><text:p>PIED_DE_PAGE_REFERENCE_ABC</text:p></style:footer>"
+            "</style:master-page>"
+            "</office:master-styles>"
+            "</office:document-styles>"
+        )
+        with zipfile.ZipFile(str(f), "w") as zf:
+            zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+            zf.writestr("content.xml", content_xml)
+            zf.writestr("styles.xml", styles_xml)
+
+        result = OdfExtractor.extract(f, "headers.odt")
+        assert result.status is FileStatus.READY
+        assert "CORPS_DU_DOCUMENT_NORMAL" in result.text
+        assert "EN_TETE_CONFIDENTIEL_PROJET_X" in result.text
+        assert "PIED_DE_PAGE_REFERENCE_ABC" in result.text

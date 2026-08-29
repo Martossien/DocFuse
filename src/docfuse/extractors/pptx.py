@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
@@ -44,7 +45,12 @@ class PptxExtractor(Extractor):
                 slide_count += 1
                 slide_text: list[str] = []
 
-                for shape in slide.shapes:
+                # D-074 : descend dans les formes groupées (GroupShape) —
+                # sans ça, tout texte/tableau dans un groupe (schémas,
+                # diagrammes annotés — fréquents dans les decks "corporate")
+                # est invisible : shape.has_text_frame/has_table renvoient
+                # False pour le conteneur groupe lui-même.
+                for shape in _iter_shapes(slide.shapes):
                     if shape.has_text_frame:
                         for para in shape.text_frame.paragraphs:
                             text = para.text.strip()
@@ -84,6 +90,19 @@ class PptxExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction PPTX %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _iter_shapes(shapes: Any) -> Any:
+    """Parcourt les formes d'une diapo récursivement, en descendant dans les
+    formes groupées (GroupShape, D-074) — la notion de groupe est elle-même
+    récursive (un groupe peut contenir un groupe)."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _iter_shapes(shape.shapes)
+        else:
+            yield shape
 
 
 def _count_media_images(path: Path) -> int:
