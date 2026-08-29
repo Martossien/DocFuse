@@ -1354,6 +1354,51 @@ documentés dans `journal-avancement.md` § Reste à faire.
 exportée — `html.py` l'avait déjà, `mhtml.py` l'acquiert avec le même
 import D-081).
 
+### D-088 : `mypy` et `types-beautifulsoup4` épinglés — même dérive que ruff (D-079), découverte en publiant v0.1.4
+
+**Décision** : `mypy>=1.10.0` → `mypy==2.3.1` ; `types-beautifulsoup4>=4.12.0`
+→ `types-beautifulsoup4==4.12.0.20250516`.
+
+**Rationale** :
+- Découvert en publiant la Release v0.1.4 : la CI installe `mypy` sans
+  borne haute, qui a résolu **mypy 2.3.1** (un saut de version majeure)
+  alors que l'environnement local tournait en 1.16.1 — exactement la même
+  classe de dérive que D-079 (`ruff`), avec le même effet : `lint-and-test`
+  a échoué sur les 6 jambes de la matrice, empêchant `build-windows` et
+  `build-windows-ocr` de se déclencher (les deux `skipped`, 0 asset publié
+  sur la Release initiale).
+- Root cause à deux niveaux :
+  1. `types-beautifulsoup4` n'était en réalité **pas installé du tout**
+     dans l'environnement de dev local (`pip show` → introuvable), alors
+     que `[[tool.mypy.overrides]] module = "bs4.*"` a
+     `ignore_missing_imports = true` — ce réglage masque silencieusement
+     TOUTE erreur de typage bs4 quand le paquet de stubs est absent
+     (repli sur `Any`), mais n'a aucun effet une fois le paquet installé
+     (comme en CI) : mypy type-check alors pour de vrai contre les stubs
+     réels, révélant des erreurs invisibles en local.
+  2. mypy 2.3.1 infère correctement `EmailMessage` depuis
+     `BytesParser(policy=policy.default)` (`eml.py`, `mhtml.py`) — une
+     amélioration par rapport à 1.16.1, qui nécessitait le `cast()`
+     explicite ajouté en D-070. Sous 2.3.1, ce cast devient une erreur
+     `redundant-cast` plutôt qu'une nécessité. Supprimé.
+  3. `types-beautifulsoup4` ne réexporte pas `UnicodeDammit` depuis
+     `bs4/__init__.pyi` (bien que la classe existe réellement et soit
+     correctement stubée dans `bs4/dammit.pyi`) — corrigé en important
+     directement depuis le sous-module (`from bs4.dammit import
+     UnicodeDammit`, D-073) plutôt que le point d'entrée du package.
+- Une fois les deux versions installées localement pour matcher la CI
+  exactement : **0 erreur mypy sur tout le projet** — y compris les
+  erreurs `bs4.NavigableString`/`email.BytesParser` considérées comme
+  « baseline pré-existante » tout au long de cette session (D-069 à D-087)
+  ont en réalité disparu avec la bonne version de mypy. Ce qui semblait
+  être une dette acceptée était en fait un artefact de dérive de version
+  locale, jamais un vrai baseline stable.
+- Leçon retenue : après D-079 (ruff), cette session confirme que **tout
+  outil de dev qui affecte la sortie CI (lint, format, typage) doit être
+  épinglé sur une version exacte**, pas seulement `ruff`. `pytest`/
+  `pip-licenses` restent non épinglés (n'affectent pas le pass/fail sur la
+  base d'une opinion de version, contrairement à ruff/mypy/stubs).
+
 ---
 
 *Fin du journal des décisions — Session 14.*

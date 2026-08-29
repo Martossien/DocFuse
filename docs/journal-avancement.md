@@ -1159,3 +1159,29 @@ Non corrigés cette session (effort plus important ou choix de conception
 graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
 `read_only`, HTML `title`/`alt` hors `<img>`.
 
+### Publication v0.1.4 — même dérive mypy que ruff (D-088) — ✅ Corrigé
+
+- L'utilisateur a demandé de publier la Release ("j'ai installé ton
+  application pour gérer github... tu peux créer la version 0.1.4").
+  Fusion nécessaire au push (`git merge origin/main`, sans conflit) : le
+  workflow d'installation de l'app GitHub avait ajouté deux fichiers
+  workflow (`claude.yml`, `claude-code-review.yml`) via une PR déjà
+  mergée sur `origin/main`, divergente de `main` local.
+- **Release initiale publiée sans assets** (comme le premier essai de
+  v0.1.3) : `lint-and-test` a échoué sur toute la matrice à cause de
+  `mypy` non épinglé, ayant résolu 2.3.1 en CI contre 1.16.1 en local —
+  exactement la même classe de dérive que D-079 (ruff). Root cause à deux
+  niveaux : `types-beautifulsoup4` pas installé du tout en local
+  (`ignore_missing_imports=true` masquait silencieusement les erreurs bs4
+  réelles), et mypy 2.3.1 infère mieux `BytesParser(policy=...)`,
+  rendant un `cast()` explicite (D-070) redondant.
+- Corrigé (D-088) : `mypy`/`types-beautifulsoup4` épinglés, `eml.py`
+  simplifié (cast retiré), `html.py` importe `UnicodeDammit` depuis
+  `bs4.dammit` (jamais réexporté par les stubs depuis `bs4/__init__`).
+  **0 erreur mypy sur tout le projet** une fois les bonnes versions
+  installées — ce qui semblait être un baseline pré-existant accepté tout
+  au long de cette session était en réalité un artefact de dérive locale.
+- Release v0.1.4 supprimée et recréée sur le nouveau commit (aucun
+  téléchargement perdu, 0 asset sur la version cassée) — même procédure
+  que l'incident v0.1.3.
+

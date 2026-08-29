@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import logging
 from email import policy
-from email.message import EmailMessage
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
@@ -43,11 +42,7 @@ class EmlExtractor(Extractor):
     def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
         try:
             with open(path, "rb") as f:
-                # `policy.default.message_factory` est `EmailMessage` au
-                # runtime (vérifié) ; typeshed ne l'infère pas depuis
-                # `BytesParser(policy=...)`, d'où ce cast explicite plutôt
-                # que de propager le type générique `Message` imprécis.
-                msg = cast(EmailMessage, BytesParser(policy=policy.default).parse(f))
+                msg = BytesParser(policy=policy.default).parse(f)
 
             parts = _render_message(msg, is_nested=False)
             full_text = "\n".join(parts)

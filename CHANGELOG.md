@@ -91,6 +91,12 @@ structure exacte du bug avant de vérifier le correctif :
 - `ruff` épinglé sur une version exacte (`==0.16.5`) — dette identifiée en
   v0.1.3 (dérive local/CI ayant cassé la publication initiale de cette
   Release), corrigée pour de bon.
+- `mypy` et `types-beautifulsoup4` épinglés (`==2.3.1` /
+  `==4.12.0.20250516`) — même dérive local/CI, découverte en publiant
+  cette Release : `mypy` non épinglé avait résolu la version 2.3.1 en CI
+  (contre 1.16.1 en local), faisant échouer `lint-and-test` sur toute la
+  matrice et empêchant `build-windows`/`build-windows-ocr` de se
+  déclencher. Corrigé (D-088).
 
 ## [0.1.3] - 2026-08-24 — Beta
 

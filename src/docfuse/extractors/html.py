@@ -51,7 +51,8 @@ class HtmlExtractor(Extractor):
     @classmethod
     def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
         try:
-            from bs4 import BeautifulSoup, Tag, UnicodeDammit
+            from bs4 import BeautifulSoup, Tag
+            from bs4.dammit import UnicodeDammit
 
             raw = path.read_bytes()
             # D-073 : `detect_encoding()` (BOM→UTF-8→cp1252→...) ignore
