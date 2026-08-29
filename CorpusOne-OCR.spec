@@ -29,7 +29,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -84,7 +84,9 @@ a = Analysis(
         (str(i18n_dir / "fr.json"), "docfuse/i18n"),
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
     ]
-    + _tesseract_datas,
+    + _tesseract_datas
+    # D-096 : bibliothèque Tcl `tkdnd` (voir CorpusOne.spec).
+    + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("docfuse.extractors")
     + collect_submodules("tiktoken_ext")
     + [

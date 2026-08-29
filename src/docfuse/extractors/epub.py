@@ -17,6 +17,7 @@ import posixpath
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
@@ -90,12 +91,15 @@ class EpubExtractor(Extractor):
 
                 opf_dir = posixpath.dirname(opf_path)
                 parts: list[str] = []
+                skipped: list[str] = []
                 for item_id in spine_ids:
                     href = manifest.get(item_id)
                     if not href:
+                        skipped.append(item_id)
                         continue
-                    item_path = posixpath.normpath(posixpath.join(opf_dir, href))
-                    if item_path not in names:
+                    item_path = _resolve_spine_item(opf_dir, href, names)
+                    if item_path is None:
+                        skipped.append(href)
                         continue
                     chapter_text = _extract_xhtml_text(zf.read(item_path))
                     if chapter_text:
@@ -107,6 +111,12 @@ class EpubExtractor(Extractor):
                     extra_metadata["epub_title"] = title
                 if author:
                     extra_metadata["epub_author"] = author
+                if skipped:
+                    # D-096 : un item du spine introuvable était sauté en
+                    # silence (statut READY, chapitre manquant sans trace).
+                    extra_metadata["epub_skipped_items"] = t(
+                        "epub.skipped_items_note", count=len(skipped), items=", ".join(skipped)
+                    )
 
                 return ExtractedFile(
                     path=path,
@@ -122,6 +132,20 @@ class EpubExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction EPUB %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _resolve_spine_item(opf_dir: str, href: str, names: set[str]) -> str | None:
+    """Chemin ZIP réel d'un item du spine (D-096).
+
+    Les `href` du manifeste sont des IRI : Calibre/Sigil écrivent
+    `chap%201.xhtml` pour « chap 1.xhtml ». Sans décodage, 1 chapitre sur 2
+    d'un livre à noms de fichiers avec espaces était perdu sans trace.
+    """
+    for candidate in (href, unquote(href)):
+        item_path = posixpath.normpath(posixpath.join(opf_dir, candidate))
+        if item_path in names:
+            return item_path
+    return None
 
 
 def _find_opf_path(zf: zipfile.ZipFile) -> str | None:

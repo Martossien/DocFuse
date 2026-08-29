@@ -1404,4 +1404,30 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   modèle — l'idée reste examinée avec l'utilisateur comme amélioration
   défensive possible (utile contre une troncature silencieuse par un outil
   tiers), pas comme correctif d'un bug DocFuse constaté.
+- Suite : l'utilisateur a rejoué 7 prompts de diagnostic dans l'outil de
+  son travail (« IAka ») et chez la LLM locale sur le même `corpus.md`.
+  Verdict net : l'outil tiers admet lui-même travailler par extraits
+  (RAG), invente des réponses (« Page 1 / 1 » en fin de document, mauvais
+  fichier pour une citation), compte 0 fichier ; la LLM locale répond
+  7/7 mot pour mot. Fichier de comparaison
+  `reponses_llm_locale_arbitrage.txt` produit pour la remontée IT. Le
+  sommaire en tête de corpus est abandonné : il serait soumis au même
+  découpage RAG.
+
+### Audit qualité/bugs/perf — lot 1 « contenu perdu / plantage » (D-096) — ✅ Corrigé
+
+- Méthode : 4 auditeurs en parallèle (extracteurs lourds / légers / cœur /
+  appli), puis reproduction personnelle de chaque finding avant de
+  l'accepter — 22 bugs confirmés sur cas concret, aucun retenu sur parole ;
+  profil CPU réel et micro-benchmarks Tesseract pour la partie perf (lot
+  3). Plan en 4 lots validé par l'utilisateur.
+- Les trois découvertes les plus marquantes : le glisser-déposer GUI
+  n'avait **jamais** fonctionné (message de repli présent à chaque
+  lancement de toutes les sessions de test, jamais relevé — leçon : un
+  message de repli routinier est un bug qui se cache) ; quasi tout HTML
+  réel perdait titres/tableaux/listes (corps dans un `<div>`) ; retirer
+  l'original d'un doublon dans l'interface faisait disparaître son contenu.
+- 23 correctifs, 28 tests de non-régression construits sur les
+  reproductions, 499 tests verts, ruff/mypy stricts, recette 7/7, DnD
+  vérifié actif en direct sur l'affichage de cette session.
 

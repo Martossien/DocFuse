@@ -17,6 +17,31 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   masqués une fois des fichiers chargés, nécessitant un redimensionnement
   manuel. Plutôt que deviner une nouvelle hauteur fixe, la fenêtre utilise
   désormais tout l'espace écran disponible sous Windows.
+- **Audit qualité, lot 1 — 23 correctifs « contenu perdu / plantage »**
+  (D-096), chacun reproduit avant d'être corrigé :
+  - **Le glisser-déposer n'avait jamais fonctionné** (bibliothèque Tcl
+    `tkdnd` jamais chargée, erreur avalée) — corrigé, et embarquée dans
+    l'exe Windows.
+  - HTML : titres, tableaux et listes perdus dès que le corps est dans un
+    `<div>` (quasi toute page réelle) ; mots soudés autour du gras/liens.
+  - ODF : sections, cadres et index ignorés en silence ; mots soudés ;
+    `.ods` sans lignes/colonnes.
+  - DOCX : zones de texte en double avec mots collés ; en-tête/pied répété
+    à chaque section.
+  - XLSX : une feuille graphique faisait perdre tout le classeur.
+  - Retirer l'original d'un doublon dans l'interface faisait disparaître
+    son contenu du corpus.
+  - EML : pièce jointe texte prise pour le corps, `Cc` et noms de PJ
+    absents, charset inconnu → email entier en erreur (aussi MHTML).
+  - EPUB : chapitres au nom avec espaces (`chap%201.xhtml`) sautés en
+    silence. XML : déclaration `encoding=` ignorée, commentaires perdus.
+  - Plantages entiers évités : PDF avec `<` dans un nom de fichier, tri
+    par date sur lien cassé, RTF avec octet cp1252 indéfini, CSV à long
+    champ, config JSON mal typée (la GUI ne s'ouvrait plus).
+  - Dossiers `build/`, `dist/`, `node_modules/`… désormais listés comme
+    ignorés dans le rapport. Markdown CRLF sans fins de ligne mélangées.
+    Plafond mémoire OCR vérifié avant rendu (risque de crash OOM).
+    Erreurs de génération affichées dans l'interface.
 
 ## [0.1.5] - 2026-08-29 — Beta
 

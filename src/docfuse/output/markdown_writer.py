@@ -59,8 +59,10 @@ def write_markdown_corpus(
     lines.append("---")
     lines.append("")
 
-    # Blocs SOURCE pour chaque fichier extrait
-    for f, est in zip(result.files, result.estimates, strict=False):
+    # Blocs SOURCE pour chaque fichier extrait. `strict=True` (D-096) : un
+    # désalignement files/estimates doit échouer bruyamment, jamais tronquer
+    # le corpus en silence (le PDF writer était déjà strict).
+    for f, est in zip(result.files, result.estimates, strict=True):
         if not f.status.is_extracted():
             continue
 
@@ -86,7 +88,20 @@ def write_markdown_corpus(
         lines.append("---")
         lines.append("")
 
-    # CdC §11.1 — LF ou CRLF (conf, défaut CRLF sous Windows)
+    # CdC §11.1 — LF ou CRLF (conf, défaut CRLF sous Windows).
+    # D-096 : seules les jointures entre blocs prenaient `sep` ; l'en-tête
+    # SOURCE (déjà joint en `\n`) et le texte des fichiers (LF, ou CR/CRLF
+    # hérités de la source) gardaient leurs fins de ligne d'origine → fichier
+    # à fins de ligne mélangées en mode CRLF. On normalise tout en `\n`
+    # d'abord, puis une seule conversion vers le séparateur demandé.
     # Utiliser write_bytes pour éviter la conversion automatique \n → \r\n sur Windows
     sep = "\r\n" if line_ending == "crlf" else "\n"
-    output_path.write_bytes(sep.join(lines).encode("utf-8"))
+    content = "\n".join(_normalize_newlines(block) for block in lines)
+    if sep != "\n":
+        content = content.replace("\n", sep)
+    output_path.write_bytes(content.encode("utf-8"))
+
+
+def _normalize_newlines(text: str) -> str:
+    """Ramène CRLF et CR isolés à LF (idempotent sur du LF pur)."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")

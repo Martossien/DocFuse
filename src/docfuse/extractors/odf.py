@@ -18,6 +18,7 @@ from docfuse.core.ocr.base import OcrEngine
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
+from docfuse.extractors.html import tag_text
 from docfuse.i18n import t
 from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -77,99 +78,44 @@ class OdfExtractor(Extractor):
 
                 content_xml = zf.read("content.xml")
                 soup = BeautifulSoup(content_xml, "xml")
+                _materialize_whitespace(soup)
 
                 # BUG FIX: extraire les paragraphes et les tableaux dans l'ordre
                 # sans duplication. On parcourt les enfants de office:text.
                 parts: list[str] = []
 
-                # Trouver le body (office:text avec namespace ODF)
                 from bs4 import Tag as BTag
 
                 # D-087 : .odp (office:presentation) traité en premier, à
                 # part — voir _extract_presentation. Sans ce cas dédié, le
-                # code tombait dans le "dernier fallback" ci-dessous, qui
-                # mélange indistinctement le contenu visible des diapos ET
-                # les notes d'orateur (presentation:notes, jamais affichées
-                # à l'écran — potentielle fuite de contenu non destiné à la
-                # diffusion), sans aucune séparation entre diapos.
+                # code tombait dans un repli générique qui mélangeait le
+                # contenu visible des diapos ET les notes d'orateur.
+                # D-096 : `.ods` (office:spreadsheet) a aussi son traitement
+                # dédié — il tombait dans le même repli, qui listait chaque
+                # cellule sur sa propre ligne (structure lignes/colonnes
+                # perdue, un LLM ne peut plus reconstituer le tableau).
                 office_presentation = soup.find("office:presentation")
-                office_text: BTag | None = None
+                office_spreadsheet = soup.find("office:spreadsheet")
+                office_text = soup.find("office:text")
                 if isinstance(office_presentation, BTag):
                     presentation_parts, presentation_images = _extract_presentation(
                         office_presentation, zf, relative_path, engine, want_export
                     )
                     parts.extend(presentation_parts)
                     embedded_images.extend(presentation_images)
+                elif isinstance(office_spreadsheet, BTag):
+                    parts.extend(_extract_spreadsheet(office_spreadsheet))
+                elif isinstance(office_text, BTag):
+                    ctx = _ImageContext(zf, relative_path, engine, want_export)
+                    parts.extend(_extract_text_children(office_text, ctx))
+                    embedded_images.extend(ctx.images)
                 else:
-                    found_text = soup.find("office:text")
-                    if isinstance(found_text, BTag):
-                        office_text = found_text
-                    else:
-                        # Fallback: chercher par suffixe
-                        for tag in soup.find_all(True):
-                            if isinstance(tag, BTag) and tag.name and tag.name.endswith(":text"):
-                                office_text = tag
-                                break
-
-                if office_presentation is not None:
-                    pass  # déjà traité ci-dessus
-                elif office_text is None:
-                    # Dernier fallback: extraire tous les text:p et text:h
+                    # Dernier repli (document sans corps reconnu) : tout le
+                    # texte, sans coller les mots.
                     for p in soup.find_all(["text:p", "text:h"]):
-                        text = p.get_text(strip=True)
+                        text = tag_text(p)
                         if text:
                             parts.append(text)
-                else:
-                    image_counter = [0]
-                    for child in office_text.children:
-                        if not isinstance(child, BTag):
-                            continue
-                        tag_name = child.name or ""
-
-                        # Tableau → extraire les cellules ligne par ligne
-                        if "table" in tag_name:
-                            parts.extend(_table_rows_to_parts(child))
-
-                        # Paragraphe (text:p) ou titre (text:h)
-                        elif (
-                            tag_name == "p"
-                            or tag_name == "h"
-                            or "text:p" in tag_name
-                            or "text:h" in tag_name
-                        ):
-                            text = child.get_text(strip=True)
-                            if text:
-                                parts.append(text)
-
-                        # Liste
-                        elif "list" in tag_name:
-                            for item in child.find_all(True, recursive=True):
-                                if item.name and "list-item" in item.name:
-                                    text = item.get_text(strip=True)
-                                    if text:
-                                        parts.append(f"- {text}")
-
-                        # D-093 : images intégrées (`draw:frame`/`draw:image`)
-                        # — ancrées au paragraphe (inline, cas le plus
-                        # fréquent) ou directement à la page (`child` lui
-                        # -même un frame, aucune des branches ci-dessus ne
-                        # matchant alors "table"/"p"/"h"/"list").
-                        if want_export or engine is not None:
-                            for href in _iter_image_hrefs(child):
-                                image_counter[0] += 1
-                                marker, embedded = _image_marker(
-                                    zf,
-                                    href,
-                                    relative_path,
-                                    None,
-                                    image_counter[0],
-                                    engine,
-                                    want_export,
-                                )
-                                if marker:
-                                    parts.append(marker)
-                                if embedded:
-                                    embedded_images.append(embedded)
 
                 # D-072 : en-têtes/pieds de page ODT vivent dans styles.xml
                 # (office:master-styles), jamais dans content.xml — invisibles
@@ -196,6 +142,128 @@ class OdfExtractor(Extractor):
             return error_result(path, relative_path, cls.file_type, exc)
 
 
+def _materialize_whitespace(soup: Any) -> None:
+    """Remplace les blancs structurels ODF par des caractères (D-096).
+
+    Dans ODF, plusieurs espaces, une tabulation et un saut de ligne manuel
+    sont des éléments vides (`text:s`, `text:tab`, `text:line-break`) et non
+    des caractères : `get_text` les ignorait, `col1<text:tab/>col2` donnait
+    `col1col2`. Pré-passe unique sur tout le document.
+    """
+    from bs4 import NavigableString
+
+    for tag in soup.find_all(["text:s", "text:tab", "text:line-break"]):
+        if tag.name == "s":
+            count = tag.get("text:c") or tag.get("c") or "1"
+            try:
+                replacement = " " * max(1, int(count))
+            except ValueError:
+                replacement = " "
+        elif tag.name == "tab":
+            replacement = "\t"
+        else:
+            replacement = "\n"
+        tag.replace_with(NavigableString(replacement))
+
+
+class _ImageContext:
+    """État partagé du parcours d'un `.odt` : images collectées + compteur."""
+
+    def __init__(
+        self,
+        zf: zipfile.ZipFile,
+        relative_path: str,
+        engine: OcrEngine | None,
+        want_export: bool,
+    ) -> None:
+        self.zf = zf
+        self.relative_path = relative_path
+        self.engine = engine
+        self.want_export = want_export
+        self.count = 0
+        self.images: list[EmbeddedImage] = []
+
+    @property
+    def active(self) -> bool:
+        return self.want_export or self.engine is not None
+
+
+def _extract_text_children(container: Any, ctx: _ImageContext) -> list[str]:
+    """Contenu d'un conteneur « body-like » ODT (`office:text`, `text:section`,
+    cadre, zone de texte…), dans l'ordre d'apparition (D-096).
+
+    L'ancienne boucle ne connaissait que table/p/h/list : tout autre enfant
+    de `office:text` — `text:section` (mise en page multi-colonnes, sections
+    liées, très courant), cadre ancré à la page, table des matières — était
+    **silencieusement ignoré**, statut READY. De plus `"table" in tag_name`
+    envoyait `table-of-content`/`illustration-index` vers le parseur de
+    tableau, qui ne trouvait aucune ligne et ne rendait rien. Désormais :
+    correspondance exacte pour les tableaux, récursion pour tout conteneur
+    connu, et une branche finale qui émet le texte de tout élément inconnu —
+    rien ne peut disparaître sans trace.
+    """
+    from bs4 import Tag as BTag
+
+    parts: list[str] = []
+    for child in container.children:
+        if not isinstance(child, BTag):
+            continue
+        name = child.name or ""
+
+        if name == "table":
+            parts.extend(_table_rows_to_parts(child))
+        elif name in ("p", "h"):
+            text = tag_text(child)
+            if text:
+                parts.append(text)
+        elif name == "list":
+            for item in child.find_all(True, recursive=True):
+                if item.name and "list-item" in item.name:
+                    text = tag_text(item)
+                    if text:
+                        parts.append(f"- {text}")
+        elif name in ("section", "frame", "text-box", "table-of-content", "index-body") or (
+            name.endswith(("-index", "-source"))
+        ):
+            parts.extend(_extract_text_children(child, ctx))
+        else:
+            text = tag_text(child)
+            if text:
+                parts.append(text)
+
+        # D-093 : images intégrées (`draw:frame`/`draw:image`) ancrées au
+        # paragraphe (inline), à la page (`child` est lui-même un cadre) ou
+        # dans un cadre. Les sections/zones de texte sont parcourues
+        # récursivement : leurs cadres sont traités à leur niveau.
+        if ctx.active and name not in ("section", "text-box"):
+            for href in _iter_image_hrefs(child):
+                ctx.count += 1
+                marker, embedded = _image_marker(
+                    ctx.zf, href, ctx.relative_path, None, ctx.count, ctx.engine, ctx.want_export
+                )
+                if marker:
+                    parts.append(marker)
+                if embedded:
+                    ctx.images.append(embedded)
+    return parts
+
+
+def _extract_spreadsheet(office_spreadsheet: Any) -> list[str]:
+    """Contenu d'un `office:spreadsheet` (.ods), feuille par feuille (D-096),
+    même rendu que l'extracteur XLSX (`### Feuille : nom` + lignes `a | b`)."""
+    from bs4 import Tag as BTag
+
+    parts: list[str] = []
+    for table in office_spreadsheet.find_all("table:table", recursive=False):
+        if not isinstance(table, BTag):
+            continue
+        name = table.get("table:name") or table.get("name") or "?"
+        rows = _table_rows_to_parts(table)
+        body = "\n".join(rows) if rows else "[Feuille vide]"
+        parts.append(f"### Feuille : {name}\n\n{body}")
+    return parts
+
+
 def _table_rows_to_parts(table_tag: Any) -> list[str]:
     """Cellules d'un tableau ODF, une ligne `" | "` par ligne de tableau."""
     from bs4 import Tag as BTag
@@ -206,7 +274,7 @@ def _table_rows_to_parts(table_tag: Any) -> list[str]:
             cells = [
                 c for c in row.children if isinstance(c, BTag) and c.name and "table-cell" in c.name
             ]
-            cell_texts = [c.get_text(strip=True) for c in cells]
+            cell_texts = [tag_text(c) for c in cells]
             if any(cell_texts):
                 parts.append(" | ".join(cell_texts))
     return parts
@@ -273,7 +341,7 @@ def _extract_presentation(
             table.extract()
 
         for p in page.find_all(["text:p", "text:h"]):
-            text = p.get_text(strip=True)
+            text = tag_text(p)
             if text:
                 slide_parts.append(text)
 
@@ -369,12 +437,12 @@ def _extract_master_headers_footers(styles_xml: bytes) -> list[str]:
             continue
         header = master_page.find("style:header")
         if isinstance(header, BTag):
-            text = header.get_text(strip=True)
+            text = tag_text(header)
             if text:
                 parts.append(f"[en-tête] {text}")
         footer = master_page.find("style:footer")
         if isinstance(footer, BTag):
-            text = footer.get_text(strip=True)
+            text = tag_text(footer)
             if text:
                 parts.append(f"[pied de page] {text}")
     return parts

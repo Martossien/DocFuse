@@ -259,6 +259,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # Charger la config (avec chemin explicite si fourni)
     config = load_config(args.config)
+    # D-096 : `Config.validate()` existait mais n'était appelé nulle part —
+    # un plafond négatif ou une marge absurde passaient sans un mot.
+    config_errors = config.validate()
+    if config_errors:
+        for message in config_errors:
+            print(f"{t('cli.config_invalid')}: {message}", file=sys.stderr)
+        return 1
 
     # Surcharge par CLI
     if args.lang:

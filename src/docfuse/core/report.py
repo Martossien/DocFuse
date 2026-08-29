@@ -22,6 +22,20 @@ from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 
+def _check_aligned(files: list[ExtractedFile], estimates: list[TokenEstimate] | None) -> None:
+    """Un `estimates` fourni doit être aligné sur `files` (D-096).
+
+    L'ancien repli silencieux (`i < len(estimates)` sinon octets/4) aurait
+    masqué un désalignement en imprimant des chiffres faux pour la fin de la
+    liste — on préfère échouer bruyamment, comme `zip(strict=True)` dans les
+    writers.
+    """
+    if estimates is not None and len(estimates) != len(files):
+        raise ValueError(
+            f"estimates ({len(estimates)}) et files ({len(files)}) ne sont pas alignés"
+        )
+
+
 def generate_json_report(
     files: list[ExtractedFile],
     ignored_files: list[tuple[Path, str]],
@@ -49,10 +63,11 @@ def generate_json_report(
             utilisé. Si `None`, ce détail est omis.
         engine_id: Identifiant du moteur de comptage utilisé pour ce rapport.
     """
+    _check_aligned(files, estimates)
     files_data: list[dict[str, object]] = []
     for i, f in enumerate(files):
         data = f.to_dict()
-        if estimates is not None and i < len(estimates):
+        if estimates is not None:
             data["tokens_estimated"] = estimates[i].tokens_estimated
             data["tokens_with_margin"] = estimates[i].tokens_with_margin
         files_data.append(data)
@@ -128,8 +143,9 @@ def generate_markdown_report(
             f"{t('table.context_margin')} | {t('table.status')} |"
         )
         lines.append("|---|---|---|---|---|")
+        _check_aligned(files, estimates)
         for i, f in enumerate(files):
-            if estimates is not None and i < len(estimates):
+            if estimates is not None:
                 tokens = estimates[i].tokens_estimated
                 tokens_margin = estimates[i].tokens_with_margin
             else:

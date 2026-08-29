@@ -193,9 +193,41 @@ class OrchestratorResult:
         if reason is not None and all(path_key(item) != key for item, _ in self.ignored):
             self.ignored.append((removed.path, reason))
 
+        self._promote_duplicate_of(removed)
+
         self.total = aggregate_tokens(self.estimates, self.margin, self.engine)
         self.recompute_blocking(self.context_limit)
         return True
+
+    def _promote_duplicate_of(self, removed: ExtractedFile) -> None:
+        """Si `removed` servait d'original à des doublons, promeut le premier
+        d'entre eux pour que le contenu reste dans le corpus (D-096).
+
+        `detect_duplicates` remplace le texte des doublons par une note
+        « identique à <original> ». Retirer l'original (cas typique : c'est
+        le fichier TOO_LARGE que l'utilisateur enlève pour débloquer, D-045)
+        laissait uniquement la note dans le corpus — le contenu réel
+        disparaissait sans aucune trace, en violation de la règle 12.4.
+        """
+        from docfuse.output.source_header import estimate_source_context
+
+        duplicates = [
+            f for f in self.files if f.extra_metadata.get("duplicate_of") == removed.relative_path
+        ]
+        if not duplicates:
+            return
+
+        promoted = duplicates[0]
+        promoted.text = removed.text
+        del promoted.extra_metadata["duplicate_of"]
+        for other in duplicates[1:]:
+            other.extra_metadata["duplicate_of"] = promoted.relative_path
+            other.text = t("duplicate.placeholder_text", original=promoted.relative_path)
+
+        index = self.files.index(promoted)
+        if self._base_statuses[index].is_extracted():
+            promoted.status = self._base_statuses[index]
+            self.estimates[index] = estimate_source_context(promoted, self.margin, self.engine)
 
 
 def run_analysis(

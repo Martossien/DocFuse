@@ -6,6 +6,7 @@ CdC §7.3 — Texte / pretty-print.
 from __future__ import annotations
 
 import json
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -76,6 +77,28 @@ class JsonExtractor(Extractor):
             return error_result(path, relative_path, "json", exc)
 
 
+_XML_DECLARED_ENCODING_RE = re.compile(rb'^\s*<\?xml[^>]*encoding=["\']([A-Za-z0-9._-]+)["\']')
+
+
+def _decode_xml(raw: bytes) -> tuple[str, str, bool]:
+    """Décode un XML en honorant sa déclaration `encoding=` (D-096).
+
+    Même défaut que D-073 pour HTML : `detect_encoding()` acceptait cp1252
+    (« plausible ») pour un fichier déclaré `windows-1251`, produisant du
+    charabia en statut READY. La déclaration est la source de vérité quand
+    Python connaît l'encodage et que le décodage réussit ; sinon repli sur
+    la détection générique.
+    """
+    match = _XML_DECLARED_ENCODING_RE.match(raw[:200])
+    if match:
+        declared = match.group(1).decode("ascii", errors="ignore")
+        try:
+            return declared, raw.decode(declared), False
+        except (LookupError, UnicodeDecodeError):
+            pass
+    return decode_text(raw)
+
+
 @register(".xml")
 class XmlExtractor(Extractor):
     """Extracteur XML (pretty-print)."""
@@ -92,9 +115,13 @@ class XmlExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, text_raw, mojibake_repaired = decode_text(raw)
+            encoding, text_raw, mojibake_repaired = _decode_xml(raw)
             # Migration: minidom déprécié → ElementTree.indent (Python 3.9+)
-            root_el = ET.fromstring(text_raw)
+            # D-096 : `insert_comments=True` — le pretty-print supprimait
+            # tous les commentaires (`<!-- ... -->`), qui portent souvent la
+            # documentation d'un fichier de configuration.
+            parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
+            root_el = ET.fromstring(text_raw, parser=parser)
             ET.indent(root_el, space="  ")
             text = ET.tostring(root_el, encoding="unicode")
             extra_metadata: dict[str, str] = {}

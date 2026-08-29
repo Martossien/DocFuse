@@ -47,6 +47,9 @@ def _should_ignore(filename: str) -> bool:
     return any(fnmatch.fnmatch(filename, pattern) for pattern in IGNORE_PATTERNS)
 
 
+_VCS_DIRS: frozenset[str] = frozenset({".git", ".svn", ".hg", ".bzr"})
+
+
 def _should_ignore_dir(dirname: str) -> bool:
     """Vérifie si un dossier doit être ignoré.
 
@@ -54,8 +57,21 @@ def _should_ignore_dir(dirname: str) -> bool:
     les dossiers commençant par un point (certains peuvent contenir des docs).
     Les dossiers cachés VCS (".git", ".svn", ".hg", ".bzr") et système sont exclus.
     """
-    vcs_dirs = {".git", ".svn", ".hg", ".bzr", ".gitignore"}
-    return dirname in IGNORE_DIRS or dirname in vcs_dirs
+    return dirname in IGNORE_DIRS or dirname in _VCS_DIRS
+
+
+def _safe_mtime(path: Path) -> float:
+    """Clé de tri `mtime` qui ne lève jamais (D-096).
+
+    Un lien symbolique cassé ou un fichier supprimé entre le parcours et le
+    tri faisait remonter `FileNotFoundError` hors de `run_analysis` — toute
+    l'analyse échouait, alors qu'en tri `name` le même fichier est
+    simplement signalé en ERROR par son extracteur.
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def scan_directory(
@@ -103,7 +119,7 @@ def scan_directory(
 
     # Tri selon le mode choisi (CdC §8.1 — sort: name | mtime | type)
     if sort == "mtime":
-        found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        found.sort(key=_safe_mtime, reverse=True)
     elif sort == "type":
         found.sort(key=lambda p: (p.suffix.lower(), natural_sort_key(str(p.relative_to(root)))))
     else:  # name (défaut)
@@ -250,6 +266,8 @@ def list_ignored(
     Returns:
         Liste de (chemin, raison) pour chaque fichier ignoré.
     """
+    from docfuse.i18n import t
+
     if extensions is None:
         extensions = ALL_EXTENSIONS
 
@@ -258,7 +276,19 @@ def list_ignored(
 
     if recursive:
         for dirpath, dirnames, filenames in _walk_with_depth(root, max_depth):
-            dirnames[:] = [d for d in dirnames if not _should_ignore_dir(d)]
+            # D-096 : un dossier élagué (`node_modules/`, `build/`, `dist/`,
+            # `.git/`, `__MACOSX/`…) n'apparaissait ni dans le corpus ni dans
+            # le rapport — invisible, contraire au CdC §7.1 (« tout fichier
+            # rencontré et non retenu est listé »). `build/` ou `dist/` sont
+            # aussi des noms de dossiers documentaires ordinaires : on
+            # signale le dossier élagué, une ligne par dossier.
+            kept_dirs = []
+            for d in dirnames:
+                if _should_ignore_dir(d):
+                    ignored.append((Path(dirpath) / d, t("inventory.ignored_dir")))
+                else:
+                    kept_dirs.append(d)
+            dirnames[:] = kept_dirs
             for filename in filenames:
                 filepath = Path(dirpath) / filename
                 reason = _ignored_reason(filename, extensions, exclude_globs)
@@ -367,7 +397,7 @@ def collect_inputs(
     ]
 
     if sort == "mtime":
-        entries.sort(key=lambda entry: entry.path.stat().st_mtime, reverse=True)
+        entries.sort(key=lambda entry: _safe_mtime(entry.path), reverse=True)
     elif sort == "type":
         entries.sort(
             key=lambda entry: (entry.path.suffix.lower(), natural_sort_key(entry.relative_path))

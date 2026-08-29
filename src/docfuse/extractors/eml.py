@@ -22,6 +22,7 @@ from typing import Any
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.text import decode_text
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -83,6 +84,11 @@ def _render_message(msg: Any, is_nested: bool) -> list[str]:
     if to:
         blocks.append(f"**À** : {to}")
 
+    # D-096 : `Cc` n'était jamais rendu.
+    cc = msg.get("Cc", "")
+    if cc:
+        blocks.append(f"**Cc** : {cc}")
+
     date = msg.get("Date", "")
     if date:
         blocks.append(f"**Date** : {date}")
@@ -94,11 +100,52 @@ def _render_message(msg: Any, is_nested: bool) -> list[str]:
     if rendered_body:
         blocks.append(rendered_body)
 
+    # D-096 : les noms des pièces jointes n'apparaissaient nulle part
+    # (`msg.py` les liste déjà) — leur existence est une information.
+    attachment_names = _attachment_names(msg)
+    if attachment_names:
+        blocks.append(f"[pièces jointes : {', '.join(attachment_names)}]")
+
     for nested in _iter_nested_messages(msg):
         blocks.append("")
         blocks.extend(_render_message(nested, is_nested=True))
 
     return blocks
+
+
+def part_text(part: Any) -> str:
+    """Texte décodé d'une partie MIME, sans jamais lever (D-096).
+
+    `part.get_content()` lève `LookupError` pour tout charset inconnu de
+    Python (`unknown-8bit` — courant dans les bounces —, `iso-8859-8-i`,
+    `x-user-defined`, `utf8mb4`…) : un seul en-tête exotique mettait tout
+    l'email en ERROR alors que les octets se décodent trivialement. Repli :
+    payload brut + `decode_text()` (détection d'encodage + réparation
+    mojibake de `extractors/text.py`, désormais aussi disponible pour EML/
+    MHTML).
+    """
+    try:
+        content = part.get_content()
+        return str(content) if content is not None else ""
+    except (LookupError, UnicodeDecodeError):
+        payload = part.get_payload(decode=True)
+        if not isinstance(payload, bytes):
+            return ""
+        _encoding, text, _repaired = decode_text(payload)
+        return text
+
+
+def _attachment_names(msg: Any) -> list[str]:
+    """Noms de fichiers des pièces jointes directes (hors messages imbriqués)."""
+    names: list[str] = []
+    if not msg.is_multipart():
+        return names
+    for part in msg.walk():
+        if part.get_content_disposition() == "attachment":
+            filename = part.get_filename()
+            if filename:
+                names.append(str(filename))
+    return names
 
 
 def _extract_direct_body(msg: Any) -> tuple[str, str]:
@@ -117,12 +164,16 @@ def _extract_direct_body(msg: Any) -> tuple[str, str]:
             content_type = part.get_content_type()
             if content_type == "message/rfc822":
                 continue  # traité par _iter_nested_messages
+            # D-096 : une pièce jointe `text/plain` (notes.txt) prenait la
+            # place du corps HTML réel — le vrai message disparaissait, la PJ
+            # devenait « le corps ». Les pièces jointes ne sont jamais le
+            # corps (leurs noms sont listés à part).
+            if part.get_content_disposition() == "attachment":
+                continue
             if content_type == "text/plain" and not body_text:
-                body = part.get_content()
-                if body:
-                    body_text = str(body)
+                body_text = part_text(part)
             elif content_type == "text/html" and not body_html:
-                body_html = str(part.get_content())
+                body_html = part_text(part)
             elif part.is_multipart():
                 nested_text, nested_html = _extract_direct_body(part)
                 body_text = body_text or nested_text
@@ -130,9 +181,9 @@ def _extract_direct_body(msg: Any) -> tuple[str, str]:
     else:
         content_type = msg.get_content_type()
         if content_type == "text/html":
-            body_html = str(msg.get_content())
+            body_html = part_text(msg)
         elif content_type != "message/rfc822":
-            body_text = str(msg.get_content() or "")
+            body_text = part_text(msg)
 
     return body_text, body_html
 

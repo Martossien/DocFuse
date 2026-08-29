@@ -11,6 +11,7 @@ import posixpath
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 from docfuse.constants import OCR_LANG
@@ -76,7 +77,11 @@ class XlsxExtractor(Extractor):
 
             from openpyxl import load_workbook
 
-            wb = load_workbook(str(path), read_only=True, data_only=True)
+            # D-096 : `closing()` — les classeurs read_only gardent l'archive
+            # ZIP ouverte jusqu'à `.close()`, qui n'était atteint que sur le
+            # chemin nominal : toute exception dans la boucle des feuilles
+            # laissait deux archives ouvertes jusqu'au GC.
+            wb = closing(load_workbook(str(path), read_only=True, data_only=True))
             # D-076 : data_only=True renvoie None pour une formule jamais
             # calculée (fichier généré par script, jamais ouvert dans
             # Excel/LibreOffice — pas de valeur en cache dans le fichier).
@@ -84,13 +89,26 @@ class XlsxExtractor(Extractor):
             # de la formule), la cellule paraît vide sans aucune trace
             # qu'un calcul existait — perte silencieuse de colonnes de
             # totaux entières sur des exports automatisés (ERP/BI).
-            wb_formulas = load_workbook(str(path), read_only=True, data_only=False)
+            wb_formulas = closing(load_workbook(str(path), read_only=True, data_only=False))
             parts: list[str] = []
 
-            with zipfile.ZipFile(str(path)) as zf:
-                for sheet in wb.sheetnames:
-                    ws = wb[sheet]
-                    ws_formulas = wb_formulas[sheet] if sheet in wb_formulas.sheetnames else None
+            with wb as wb_values, wb_formulas as wb_f, zipfile.ZipFile(str(path)) as zf:
+                sheet_count = len(wb_values.sheetnames)
+                for sheet in wb_values.sheetnames:
+                    ws = wb_values[sheet]
+                    # D-096 : une feuille graphique (`Chartsheet`, onglet
+                    # "Graphique1") est listée dans `sheetnames` mais n'a ni
+                    # cellules ni `reset_dimensions` → `AttributeError` qui
+                    # mettait TOUT le classeur en ERROR, données perdues.
+                    # Signalée explicitement, jamais silencieuse.
+                    if not hasattr(ws, "iter_rows"):
+                        parts.append(
+                            f"### Feuille : {sheet}\n\n[Feuille graphique — pas de cellules]"
+                        )
+                        continue
+                    ws_formulas = wb_f[sheet] if sheet in wb_f.sheetnames else None
+                    if ws_formulas is not None and not hasattr(ws_formulas, "iter_rows"):
+                        ws_formulas = None
 
                     # D-084 : en mode read_only, openpyxl fait confiance à
                     # l'élément XML <dimension> déclaré par le fichier
@@ -169,9 +187,6 @@ class XlsxExtractor(Extractor):
 
                     parts.append(f"### Feuille : {sheet}\n\n{sheet_text}")
 
-            sheet_count = len(wb.sheetnames)
-            wb.close()
-            wb_formulas.close()
             text = "\n\n".join(parts)
 
             return ExtractedFile(

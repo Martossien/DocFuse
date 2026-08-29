@@ -9,6 +9,7 @@ BUG FIX — Plus de duplication du texte (get_text évité sur les éléments st
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,39 @@ STRUCTURED_TAGS = {
     "style",
     "noscript",
 }
+
+# D-096 : un conteneur qui contient l'un de ces descendants est parcouru
+# récursivement (sinon sa structure — titres, tableaux, listes — serait
+# aplatie par `get_text`).
+_STRUCTURED_DESCENDANTS = ["h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "img", "pre"]
+
+# Compacte les suites d'espaces (pas les tabulations ni les retours à la
+# ligne : en ODF une `text:tab` sépare souvent des colonnes, D-096).
+_WHITESPACE_RE = re.compile(r"[ \r\f\v]+")
+_TAB_RE = re.compile(r" ?\t ?")
+
+
+def tag_text(tag: Any) -> str:
+    """Texte d'un élément bs4 sans coller les nœuds adjacents (D-096).
+
+    `get_text(strip=True)` (séparateur vide par défaut) concatène les nœuds
+    texte voisins sans espace : `<h1>Hello <b>World</b> again</h1>` donnait
+    `HelloWorldagain`, `<td>Total <b>100</b> EUR</td>` donnait `Total100EUR`
+    — dès qu'un mot est en gras/italique/lien, les mots se soudent. On joint
+    avec une espace puis on compacte les blancs (les retours à la ligne
+    internes sont conservés pour `<pre>` via `preformatted_text`).
+    """
+    text = str(tag.get_text(separator=" "))
+    text = _WHITESPACE_RE.sub(" ", text)
+    # Le séparateur " " de bs4 entoure aussi les nœuds `\t` matérialisés
+    # (ODF `text:tab`) : on redonne à la tabulation son rôle de séparateur.
+    text = _TAB_RE.sub("\t", text)
+    return "\n".join(line.strip(" ") for line in text.split("\n")).strip()
+
+
+def preformatted_text(tag: Any) -> str:
+    """Texte d'un `<pre>` : conserve retours à la ligne et indentation."""
+    return str(tag.get_text()).strip("\n")
 
 
 @register(".html", ".htm")
@@ -152,7 +186,7 @@ def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) ->
         # Titres → Markdown # (h1-h6 uniquement, pas <hr>, <head>, <html>, etc.)
         if tag_name and tag_name.startswith("h") and len(tag_name) == 2 and tag_name[1].isdigit():
             level = int(tag_name[1])
-            text = element.get_text(strip=True)
+            text = tag_text(element)
             if text:
                 parts.append(f"{'#' * level} {text}")
             continue
@@ -160,12 +194,7 @@ def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) ->
         # Images : compter + extraire le alt
         if tag_name == "img":
             counter["count"] += 1
-            alt_raw = element.get("alt", "")
-            alt = str(alt_raw).strip() if alt_raw else ""
-            if alt:
-                parts.append(f"[image: {alt}]")
-            else:
-                parts.append("[image sans description]")
+            parts.append(_image_placeholder(element))
             continue
 
         # Tableaux → Markdown
@@ -182,40 +211,35 @@ def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) ->
                 parts.append(list_md)
             continue
 
-        # Paragraphes et autres conteneurs → récursion pour trouver images/tableaux/listes
-        if tag_name in (
-            "p",
-            "div",
-            "span",
-            "section",
-            "article",
-            "header",
-            "footer",
-            "main",
-            "dl",
-            "dt",
-            "dd",
-            "pre",
-        ):
-            # D'abord compter les images dans ce conteneur
-            for img in element.find_all("img"):
-                counter["count"] += 1
-                alt_raw = img.get("alt", "")
-                alt = str(alt_raw).strip() if alt_raw else ""
-                if alt:
-                    parts.append(f"[image: {alt}]")
-                else:
-                    parts.append("[image sans description]")
-            # Puis extraire le texte (sans les images déjà traitées)
-            text = element.get_text(separator=" ", strip=True)
+        # Bloc préformaté : retours à la ligne et indentation conservés
+        if tag_name == "pre":
+            text = preformatted_text(element)
             if text:
                 parts.append(text)
             continue
 
-        # Pour tout autre tag, extraire le texte direct (sans récursion sur les enfants structurés)
-        text = element.get_text(strip=True)
+        # D-096 : tout autre élément (p, div, section, main, nav, aside,
+        # blockquote, figure, td…) est un conteneur. S'il contient un
+        # descendant structuré (titre, tableau, liste, image, pre), on
+        # RÉCURSE pour garder cette structure — l'ancien code aplatissait
+        # tout en `get_text`, et comme quasi toute page réelle enveloppe son
+        # corps dans un `<div>`/`<main>`, titres, tableaux et listes
+        # disparaissaient dans la quasi-totalité des cas. Sans descendant
+        # structuré, le texte est extrait d'un bloc (sans coller les mots).
+        if element.find(_STRUCTURED_DESCENDANTS) is not None:
+            _extract_elements(element, parts, counter)
+            continue
+
+        text = tag_text(element)
         if text:
             parts.append(text)
+
+
+def _image_placeholder(img: Any) -> str:
+    """Marqueur texte d'une image (`alt` si présent)."""
+    alt_raw = img.get("alt", "")
+    alt = str(alt_raw).strip() if alt_raw else ""
+    return f"[image: {alt}]" if alt else "[image sans description]"
 
 
 def _table_to_markdown(table: Any) -> str:
@@ -227,7 +251,7 @@ def _table_to_markdown(table: Any) -> str:
     lines: list[str] = []
     for i, row in enumerate(rows):
         cells = row.find_all(["td", "th"])
-        cell_texts = [c.get_text(strip=True) for c in cells]
+        cell_texts = [tag_text(c) for c in cells]
         lines.append("| " + " | ".join(cell_texts) + " |")
         if i == 0:
             lines.append("| " + " | ".join(["---"] * len(cell_texts)) + " |")
@@ -244,7 +268,7 @@ def _list_to_markdown(list_el: Any) -> str:
     lines: list[str] = []
     is_ordered = list_el.name == "ol"
     for i, item in enumerate(items, 1):
-        text = item.get_text(strip=True)
+        text = tag_text(item)
         if is_ordered:
             lines.append(f"{i}. {text}")
         else:

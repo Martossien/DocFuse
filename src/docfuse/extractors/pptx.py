@@ -106,21 +106,21 @@ class PptxExtractor(Extractor):
 
                     if shape.has_text_frame:
                         for para in shape.text_frame.paragraphs:
-                            text = para.text.strip()
+                            text = _clean_text(para.text)
                             if text:
                                 slide_text.append(text)
 
                     if shape.has_table:
                         table = shape.table
                         for row in table.rows:
-                            cells = [cell.text.strip() for cell in row.cells]
+                            cells = [_clean_text(cell.text) for cell in row.cells]
                             slide_text.append(" | ".join(cells))
 
                 # Notes d'orateur
                 if slide.has_notes_slide:
                     notes = slide.notes_slide.notes_text_frame
-                    if notes and notes.text.strip():
-                        slide_text.append(f"[Notes] {notes.text.strip()}")
+                    if notes and _clean_text(notes.text):
+                        slide_text.append(f"[Notes] {_clean_text(notes.text)}")
 
                 if not slide_text:
                     slide_text.append(f"[[DIAPO {i}: aucun texte extractible]]")
@@ -144,6 +144,17 @@ class PptxExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction PPTX %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _clean_text(text: str) -> str:
+    """Normalise le texte d'une forme PPTX (D-096).
+
+    python-pptx rend un saut de ligne manuel (`<a:br/>`, Maj+Entrée dans
+    PowerPoint) comme `\\x0b` (tabulation verticale) dans `.text`. Sans
+    conversion, ce caractère de contrôle finit tel quel dans le Markdown
+    (compté par les tokenizers, rendu en glyphe inconnu dans le PDF).
+    """
+    return text.replace("\x0b", "\n").strip()
 
 
 def _process_picture(

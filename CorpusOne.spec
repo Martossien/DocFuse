@@ -24,7 +24,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -61,7 +61,12 @@ a = Analysis(
         (str(assets_dir / "o200k_base.tiktoken"), "docfuse/assets"),
         (str(i18n_dir / "fr.json"), "docfuse/i18n"),
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
-    ],
+    ]
+    # D-096 : la bibliothèque Tcl `tkdnd` (dossier tkinterdnd2/tkdnd/<os>-<arch>)
+    # n'est pas un module Python : PyInstaller n'a aucun hook pour elle et ne
+    # l'embarquait pas — le glisser-déposer ne pouvait pas fonctionner dans
+    # l'exe même une fois `TkinterDnD.require()` appelé.
+    + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("docfuse.extractors")
     + collect_submodules("tiktoken_ext")
     + [

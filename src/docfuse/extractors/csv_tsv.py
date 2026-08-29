@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import sys
 from pathlib import Path
 
 from docfuse.core.registry import register
@@ -15,6 +16,12 @@ from docfuse.extractors.text import decode_text
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
+
+# D-096 : la limite par défaut du module csv (131 072 caractères par champ)
+# faisait échouer entièrement un CSV dont une seule cellule contient un long
+# texte ou un JSON (exports de bases, logs applicatifs). Réglage global au
+# processus, sûr sous le pool de threads (positionné une fois à l'import).
+csv.field_size_limit(sys.maxsize)
 
 
 @register(".csv", ".tsv")

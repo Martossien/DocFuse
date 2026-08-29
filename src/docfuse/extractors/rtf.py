@@ -48,7 +48,12 @@ class RtfExtractor(Extractor):
 
             raw = path.read_bytes()
             rtf_text = raw.decode("latin-1", errors="replace")
-            text = str(rtf_to_text(rtf_text))  # type: ignore[no-untyped-call]
+            # D-096 : striprtf décode les séquences `\'xx` avec `errors="strict"`
+            # par défaut — un seul octet indéfini en cp1252 (0x81/8D/8F/90/9D,
+            # produits par certains générateurs) faisait échouer tout le
+            # fichier en `UnicodeDecodeError`. `replace` dégrade localement
+            # (un caractère U+FFFD) au lieu de perdre le document entier.
+            text = str(rtf_to_text(rtf_text, errors="replace"))  # type: ignore[no-untyped-call]
 
             ole_fallback_texts = _extract_ole_fallback_texts(rtf_text)
             if ole_fallback_texts:
@@ -85,7 +90,7 @@ def _extract_ole_fallback_texts(rtf_text: str) -> list[str]:
         if inner is None:
             continue
         try:
-            recovered = str(rtf_to_text(inner))  # type: ignore[no-untyped-call]
+            recovered = str(rtf_to_text(inner, errors="replace"))  # type: ignore[no-untyped-call]
         except Exception:
             continue
         recovered = recovered.strip()

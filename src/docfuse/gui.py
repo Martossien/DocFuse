@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from docfuse.config import load_config
+from docfuse.config import Config, load_config
 from docfuse.constants import ALL_EXTENSIONS, DEFAULT_TOKENIZER_ENGINE, STATUS_COLORS
 from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
@@ -54,6 +54,28 @@ def _try_import_dnd() -> tuple[bool, Any]:
 _DND_AVAILABLE, _dnd_mod = _try_import_dnd()
 
 
+def _load_tkdnd(root: Any) -> bool:
+    """Charge le paquet Tcl `tkdnd` dans l'interpréteur de `root` (D-096).
+
+    Importer `tkinterdnd2` ne fait que greffer `drop_target_register`/
+    `dnd_bind` sur les widgets Tk ; le côté Tcl (`package require tkdnd`)
+    n'est chargé que par `TkinterDnD.require(root)`, jamais appelé jusqu'ici.
+    Résultat : `drop_target_register` levait `TclError: invalid command name
+    "tkdnd::drop_target"`, avalé par le `except` de `_setup_drag_and_drop`,
+    et le glisser-déposer annoncé dans le README n'a jamais fonctionné —
+    le message « fallback sur bouton uniquement » apparaissait à chaque
+    lancement sans alerter personne.
+    """
+    if _dnd_mod is None:
+        return False
+    try:
+        _dnd_mod.TkinterDnD.require(root)
+        return True
+    except Exception:
+        logger.warning("Bibliothèque tkdnd introuvable, glisser-déposer désactivé", exc_info=True)
+        return False
+
+
 class DocFuseGUI:
     """Interface graphique principale de DocFuse."""
 
@@ -61,6 +83,14 @@ class DocFuseGUI:
         import customtkinter as ctk
 
         self.config = load_config()
+        # D-096 : une config incohérente (plafond ≤ 0, marge hors bornes…)
+        # est signalée dans le journal et remplacée par les défauts plutôt
+        # que d'alimenter silencieusement l'interface avec des valeurs
+        # absurdes (`validate()` n'était jamais appelé).
+        config_errors = self.config.validate()
+        if config_errors:
+            logger.warning("Config invalide, retour aux défauts : %s", "; ".join(config_errors))
+            self.config = Config()
         set_language(self.config.lang)
 
         ctk.set_appearance_mode("dark")
@@ -68,7 +98,7 @@ class DocFuseGUI:
 
         # C-10: glisser-déposer via tkinterdnd2 si disponible
         self.root = ctk.CTk(className="DocFuse")
-        self._dnd_enabled = _DND_AVAILABLE
+        self._dnd_enabled = _DND_AVAILABLE and _load_tkdnd(self.root)
 
         self.root.title(t("app.title"))
         # D-090 : à 900x720 (minsize 700x600), les boutons du bas (Générer,
@@ -429,7 +459,7 @@ class DocFuseGUI:
         """C-10: enregistre les événements de glisser-déposer sur un widget."""
         try:
             dnd = _dnd_mod
-            if dnd is None:
+            if dnd is None or not self._dnd_enabled:
                 return
 
             widget.drop_target_register(dnd.DND_FILES)
@@ -885,7 +915,16 @@ class DocFuseGUI:
         # Source unique de vérité : OrchestratorResult.recompute_blocking()
         self.result.recompute_blocking(context_limit)
 
-        success = generate_corpus(self.result, output_path, context_limit, self.config.margin)
+        # D-096 : une exception ici (corpus.md verrouillé par un éditeur
+        # sous Windows, dossier en lecture seule, erreur ReportLab) partait
+        # dans `report_callback_exception` de Tk → stderr, inexistant dans
+        # l'exe fenêtré : le clic semblait ne rien faire.
+        try:
+            success = generate_corpus(self.result, output_path, context_limit, self.config.margin)
+        except Exception as exc:
+            logger.exception("Échec de la génération du corpus")
+            self.summary_label.configure(text=t("gui.generation_failed_detail", error=str(exc)))
+            return
         if success:
             self.summary_label.configure(text=t("gui.corpus_generated", path=str(output_path)))
             # I-12: ouvrir le dossier à la fin si demandé
@@ -911,30 +950,40 @@ class DocFuseGUI:
 
             rp = Path(filepath)
             context_limit = self._get_current_limit()
-            generate_markdown_report(
-                self.result.files,
-                self.result.ignored,
-                context_limit,
-                self.config.margin,
-                self.result.total.tokens_estimated,
-                self.result.total.tokens_with_margin,
-                rp,
-                estimates=self.result.estimates,
-                engine_id=self.result.engine_id,
-            )
+            # D-096 : si l'utilisateur choisit `rapport.json`, l'ancien code
+            # écrivait le Markdown dans rapport.json puis l'écrasait avec le
+            # JSON (`with_suffix(".json")` = même chemin) — le rapport
+            # Markdown était perdu. Le Markdown va toujours dans `.md`.
+            md_rp = rp.with_suffix(".md")
             json_rp = rp.with_suffix(".json")
-            generate_json_report(
-                self.result.files,
-                self.result.ignored,
-                context_limit,
-                self.config.margin,
-                self.result.total.tokens_estimated,
-                self.result.total.tokens_with_margin,
-                json_rp,
-                estimates=self.result.estimates,
-                engine_id=self.result.engine_id,
-            )
-            self.summary_label.configure(text=t("gui.report_exported", path=str(rp)))
+            try:
+                generate_markdown_report(
+                    self.result.files,
+                    self.result.ignored,
+                    context_limit,
+                    self.config.margin,
+                    self.result.total.tokens_estimated,
+                    self.result.total.tokens_with_margin,
+                    md_rp,
+                    estimates=self.result.estimates,
+                    engine_id=self.result.engine_id,
+                )
+                generate_json_report(
+                    self.result.files,
+                    self.result.ignored,
+                    context_limit,
+                    self.config.margin,
+                    self.result.total.tokens_estimated,
+                    self.result.total.tokens_with_margin,
+                    json_rp,
+                    estimates=self.result.estimates,
+                    engine_id=self.result.engine_id,
+                )
+            except Exception as exc:
+                logger.exception("Échec de l'export du rapport")
+                self.summary_label.configure(text=t("gui.generation_failed_detail", error=str(exc)))
+                return
+            self.summary_label.configure(text=t("gui.report_exported", path=str(md_rp)))
 
     def _stop_analysis(self) -> None:
         """Arrête l'analyse en cours."""

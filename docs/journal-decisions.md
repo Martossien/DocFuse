@@ -1786,6 +1786,131 @@ hauteur 720 avait été choisie en D-090.
   reproduisant exactement le symptôme réel — à confirmer par
   l'utilisateur.
 
+### D-096 : audit qualité — lot 1, contenu perdu / plantages entiers (23 correctifs)
+
+**Contexte** : audit demandé par l'utilisateur (« code haute qualité et
+maintenabilité, chasse aux bugs, vitesse sans dégradation, refactoring si
+besoin »). Méthode : 4 auditeurs en parallèle par zone du code, puis
+**chaque finding reproduit sur un cas concret avant d'être retenu** (22
+bugs confirmés, 0 accepté sur parole ; 2 findings « par lecture » vérifiés
+en corrigeant). Plan en 4 lots (D-096 bugs, D-097 encodage, D-098
+performance mesurée, D-099 maintenabilité). Constat général rassurant :
+mypy strict, thread-safety, handles — sains. Les défauts se concentrent
+sur trois classes : (a) contenu qui disparaît sans trace malgré la règle
+12.4, (b) plantage entier sur un cas particulier au lieu d'une dégradation
+locale, (c) code copié-collé qui a divergé.
+
+**Décisions (une ligne par correctif, test de non-régression dans
+`tests/test_regressions_d096.py`)** :
+
+*Contenu perdu sans trace (règle 12.4)*
+- `orchestrator.remove_file` : retirer l'original d'un doublon ne laissait
+  que la note « identique à … » — le contenu réel disparaissait du corpus.
+  Le premier doublon est promu (texte restauré, note retirée, autres
+  doublons re-pointés, estimation recalculée).
+- HTML : tout conteneur (`div`/`section`/`main`/`nav`…) était aplati par
+  `get_text` — titres, tableaux et listes perdus sur quasi toute page
+  réelle (le corps est toujours dans un `div`). Récursion si un descendant
+  structuré existe. Impacte aussi l'EPUB (même parcours).
+- HTML/ODF : `get_text(strip=True)` (séparateur vide) soudait les mots dès
+  qu'un mot était en gras/lien (`HelloWorldagain`, `Bonjourmondeentier`).
+  Helper partagé `html.tag_text()` (séparateur espace + compaction,
+  tabulations et retours à la ligne préservés) ; en ODF, `text:s`/
+  `text:tab`/`text:line-break` matérialisés en caractères avant lecture.
+- ODF : tout enfant de `office:text` autre que table/p/h/list était
+  ignoré en silence (`text:section` — mise en page multi-colonnes, très
+  courant —, cadres, index) ; `"table" in nom` envoyait `table-of-content`
+  vers un parseur de tableau vide. Correspondance exacte, récursion dans
+  les conteneurs, branche finale qui émet le texte de tout inconnu.
+- `.ods` : tombait dans le repli générique, une cellule par ligne (lignes/
+  colonnes perdues). Traitement dédié `office:spreadsheet`, même rendu que
+  XLSX.
+- DOCX : zone de texte émise 2× (une fois inline via `iter()`, une fois par
+  `_extract_textboxes`) avec les mots collés ; Word 2010+ double encore par
+  `mc:Fallback`. `_flatten_paragraph_text` saute `w:txbxContent` et
+  `mc:Fallback` (parcours à pile explicite) ; `_extract_textboxes` est
+  l'unique émetteur, paragraphes joints par `\n`. Notes de bas de page/fin
+  : `_flatten_paragraph_text` par `w:p` (cohérent D-069, plus de
+  `w:delText`), et lecture sur les parties déjà chargées par python-docx
+  (`_part_element`) — plus de BeautifulSoup ni de réouverture du ZIP dans
+  `docx.py` (perf comptée en D-098).
+- DOCX : en-tête/pied « lié au précédent » répété à chaque section (×N).
+  `is_linked_to_previous` → ignoré.
+- EPUB : item du spine introuvable (href percent-encodé `chap%201.xhtml`,
+  Calibre/Sigil) sauté en silence, READY. `unquote()` puis note
+  `epub_skipped_items` visible en-tête SOURCE/rapport.
+- EML : une pièce jointe `text/plain` prenait la place du corps HTML ;
+  `Cc` et noms de PJ jamais rendus. `Content-Disposition: attachment`
+  exclu du corps, `Cc` + `[pièces jointes : …]` rendus (comme `msg.py`).
+- Inventaire : `build/`, `dist/`, `vendor/`, `node_modules/`, `.git/`,
+  `__MACOSX/` élagués sans apparaître dans le rapport (CdC §7.1 ; `build/`
+  et `dist/` sont aussi des noms de dossiers documentaires). Une entrée
+  ignorée par dossier élagué (`inventory.ignored_dir`). `.gitignore` retiré
+  de la liste des « dossiers » VCS (nom de fichier).
+- PDF (D-086) : le nettoyage du texte poubelle `(cid:…)` ne s'appliquait
+  que sans moteur OCR ; quand l'OCR échoue, le bruit restait. Helper
+  `_blank_if_garbage` partagé par les deux branches.
+
+*Plantage entier sur un cas particulier*
+- XLSX : une feuille graphique (`Chartsheet`) → `AttributeError` → tout le
+  classeur en ERROR, données perdues. Détectée (`hasattr(iter_rows)`) et
+  signalée `[Feuille graphique — pas de cellules]`. Classeurs fermés via
+  `closing()` (fuite de handles sur le chemin d'erreur).
+- `pdf_writer` : en-tête SOURCE non échappé → `a<b>.txt` faisait échouer
+  toute la génération PDF. `xml.sax.saxutils.escape` partout.
+- `inventory` : `sort="mtime"` plantait `run_analysis` sur un lien
+  symbolique cassé (`stat()` dans la clé de tri). `_safe_mtime` → 0.
+- `config.py` : `"context_limit": "abc"` → `ValueError` non rattrapé → la
+  GUI ne s'ouvrait plus ; `"exclude_globs": "*.log"` → `['*','.','l','o',
+  'g']` → tout exclu sans indice ; `"recursive": "false"` → `True`.
+  `ValueError` rattrapé (retour aux défauts, config neuve), `_as_str_list`,
+  `_as_bool` strict. **`Config.validate()` existait mais n'était appelé
+  nulle part** : CLI → exit 1 avec message, GUI → journal + défauts.
+- EML/MHTML : charset inconnu de Python (`unknown-8bit`, fréquent dans
+  les bounces) → `LookupError` → tout l'email en ERROR. `eml.part_text()`
+  : repli payload brut + `decode_text()` (apporte aussi la réparation
+  mojibake à EML/MHTML).
+- XML : déclaration `encoding=` ignorée (même défaut que D-073 pour HTML)
+  → charabia READY sur du `windows-1251` ; commentaires supprimés au
+  pretty-print. `_decode_xml` honore la déclaration ;
+  `TreeBuilder(insert_comments=True)`.
+- RTF : un seul `\'81` (octet indéfini en cp1252) → `UnicodeDecodeError`
+  pour tout le fichier. `errors="replace"`.
+- CSV : champ > 131 072 caractères → fichier entier en ERREUR.
+  `csv.field_size_limit(sys.maxsize)`.
+- PDF/OCR : plafond de pixels vérifié *après* le rendu — la bitmap était
+  déjà allouée (page A0 ≈ 250 Mo, page hostile plusieurs Go) ; un OOM est
+  un SIGKILL non rattrapable, même classe que D-078. `page.get_size()`
+  avant `render()`.
+- PPTX : `<a:br/>` rendu `\x0b` (tabulation verticale) par python-pptx,
+  laissé tel quel dans le Markdown. `_clean_text` → `\n`.
+
+*Interface*
+- **Le glisser-déposer n'a jamais fonctionné** : `tkinterdnd2` greffe les
+  méthodes Python mais le paquet Tcl `tkdnd` n'est chargé que par
+  `TkinterDnD.require(root)`, jamais appelé → `TclError: invalid command
+  name "tkdnd::drop_target"`, avalé par un `except`, message « fallback
+  sur bouton uniquement » à chaque lancement (visible dans toutes les
+  sessions de test GUI de ce projet, jamais relevé). `_load_tkdnd()` à la
+  création de la fenêtre ; les deux specs PyInstaller embarquent désormais
+  `collect_data_files("tkinterdnd2")` (sans quoi l'exe n'aurait pas la
+  bibliothèque Tcl même une fois `require` appelé — aucun hook PyInstaller
+  n'existe pour ce paquet). Vérifié en direct sur l'affichage de cette
+  session : `_dnd_enabled == True`, paquet `tkdnd` présent.
+- GUI Générer/Rapport : une exception partait vers `stderr`, inexistant en
+  exe fenêtré — le clic semblait ne rien faire. `try/except` +
+  `gui.generation_failed_detail`. Le dialogue « Rapport » avec `rapport.
+  json` écrivait le Markdown dans le `.json` puis l'écrasait — Markdown
+  toujours dans `.md`, JSON dans `.json`.
+- Markdown CRLF : seules les jointures entre blocs prenaient CRLF, l'en-
+  tête et le texte gardaient LF → fichier mélangé (18 CRLF + 11 LF mesurés).
+  Normalisation en `\n` puis une seule conversion. `zip(strict=True)` dans
+  le writer Markdown (le PDF l'était déjà) et alignement `files/estimates`
+  vérifié bruyamment dans `report.py` au lieu d'un repli silencieux.
+
+**Vérification** : 499 tests (28 nouveaux), ruff/mypy --strict propres,
+recette 7/7 ; les 23 reproductions rejouées contre le code corrigé.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

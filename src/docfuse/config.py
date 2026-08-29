@@ -158,15 +158,51 @@ def load_config(explicit_path: Path | None = None) -> Config:
         if config_path.exists() and config_path.is_file():
             try:
                 data = json.loads(config_path.read_text(encoding="utf-8"))
-                config = _merge_config(config, data)
+                if not isinstance(data, dict):
+                    raise TypeError("le document JSON racine doit être un objet")
+                config = _merge_config(Config(), data)
                 logger.info("Config chargée depuis %s", config_path)
                 break
-            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                # D-096 : `ValueError` (ex. `"context_limit": "abc"`) n'était
+                # pas rattrapé → la GUI ne s'ouvrait plus du tout. Un fichier
+                # de config invalide doit dégrader vers les défauts, jamais
+                # empêcher le lancement. On repart d'une `Config()` neuve pour
+                # ne pas garder une fusion partielle.
+                config = Config()
                 logger.warning(
                     "Config invalide dans %s : %s — bascule sur défauts", config_path, exc
                 )
 
     return config
+
+
+def _as_bool(value: Any, field_name: str) -> bool:
+    """Convertit une valeur JSON en booléen strict (D-096).
+
+    `bool("false")` vaut `True` : une config `"recursive": "false"` était
+    silencieusement lue comme vraie. Accepte les booléens JSON et, par
+    tolérance, les chaînes "true"/"false" ; tout le reste est une erreur.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    raise TypeError(f"{field_name} doit être un booléen (valeur: {value!r})")
+
+
+def _as_str_list(value: Any, field_name: str) -> list[str]:
+    """Convertit une valeur JSON en liste de chaînes (D-096).
+
+    `[str(g) for g in "*.log"]` donnait `['*', '.', 'l', 'o', 'g']` — le
+    pattern `*` excluait alors tous les fichiers sans aucun indice. Une
+    chaîne seule est acceptée comme liste d'un élément.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(g, str) for g in value):
+        return list(value)
+    raise TypeError(f"{field_name} doit être une liste de chaînes (valeur: {value!r})")
 
 
 def _merge_config(base: Config, data: dict[str, Any]) -> Config:
@@ -183,19 +219,21 @@ def _merge_config(base: Config, data: dict[str, Any]) -> Config:
     if "margin" in data:
         base.margin = float(data["margin"])
     if "recursive" in data:
-        base.recursive = bool(data["recursive"])
+        base.recursive = _as_bool(data["recursive"], "recursive")
     if "sort" in data:
         base.sort = str(data["sort"])
     if "open_output_folder" in data:
-        base.open_output_folder = bool(data["open_output_folder"])
+        base.open_output_folder = _as_bool(data["open_output_folder"], "open_output_folder")
     if "exclude_globs" in data:
-        base.exclude_globs = [str(g) for g in data["exclude_globs"]]
+        base.exclude_globs = _as_str_list(data["exclude_globs"], "exclude_globs")
     if "max_depth" in data:  # I-04
         base.max_depth = int(data["max_depth"])
     if "tokenizer_engine" in data:
         base.tokenizer_engine = str(data["tokenizer_engine"])
     if "extract_embedded_images" in data:
-        base.extract_embedded_images = bool(data["extract_embedded_images"])
+        base.extract_embedded_images = _as_bool(
+            data["extract_embedded_images"], "extract_embedded_images"
+        )
     if "scan" in data and isinstance(data["scan"], dict):
         scan_data: dict[str, Any] = data["scan"]
         if "min_chars_file" in scan_data:

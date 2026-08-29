@@ -94,32 +94,39 @@ class DocxExtractor(Extractor):
             body = doc.element.body
             parts.extend(_iter_body_parts(body, doc, Table, collector))
 
-            # Headers et footers
+            # Headers et footers.
+            # D-096 : un en-tête/pied « lié au précédent » (`is_linked_to_
+            # previous`, le défaut de chaque nouvelle section Word) renvoie
+            # la définition de la section précédente — un rapport à une
+            # section par chapitre répétait le même en-tête N fois.
             for section in doc.sections:
                 for header in [section.header, section.first_page_header, section.even_page_header]:
-                    if header and header.paragraphs:
-                        for para in header.paragraphs:
-                            text = _flatten_paragraph_text(para._p)
-                            if text.strip():
-                                parts.append(f"[en-tête] {text}")
+                    if header.is_linked_to_previous:
+                        continue
+                    for para in header.paragraphs:
+                        text = _flatten_paragraph_text(para._p)
+                        if text.strip():
+                            parts.append(f"[en-tête] {text}")
                 for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
-                    if footer and footer.paragraphs:
-                        for para in footer.paragraphs:
-                            text = _flatten_paragraph_text(para._p)
-                            if text.strip():
-                                parts.append(f"[pied de page] {text}")
+                    if footer.is_linked_to_previous:
+                        continue
+                    for para in footer.paragraphs:
+                        text = _flatten_paragraph_text(para._p)
+                        if text.strip():
+                            parts.append(f"[pied de page] {text}")
 
-            # Footnotes et endnotes (via XML brut si python-docx ne les expose pas)
-            footnote_text = _extract_footnotes(path)
+            # Footnotes et endnotes — parties déjà chargées par python-docx
+            # (aucune réouverture du ZIP, D-096/D-098).
+            footnote_text = _extract_notes(doc, "/word/footnotes.xml", "}footnote")
             if footnote_text:
                 parts.append(f"[notes de bas de page]\n{footnote_text}")
 
-            endnote_text = _extract_endnotes(path)
+            endnote_text = _extract_notes(doc, "/word/endnotes.xml", "}endnote")
             if endnote_text:
                 parts.append(f"[notes de fin]\n{endnote_text}")
 
-            # I-19: zones de texte (w:txbxContent) depuis document.xml
-            textbox_text = _extract_textboxes(path)
+            # I-19: zones de texte (w:txbxContent) du corps et des en-têtes/pieds
+            textbox_text = _extract_textboxes(doc)
             if textbox_text:
                 parts.append(f"[zones de texte]\n{textbox_text}")
 
@@ -151,17 +158,52 @@ def _flatten_paragraph_text(p_element: object) -> str:
     Exclut volontairement `w:delText` (texte supprimé en suivi des
     modifications) : on veut le texte final du document, pas les deux
     versions mélangées.
+
+    D-096 : ne descend PAS dans `w:txbxContent` (zone de texte ancrée dans
+    un run du paragraphe — émise une seule fois, à part, par
+    `_extract_textboxes`) ni dans `mc:Fallback` (copie VML de secours d'un
+    élément DrawingML, que Word écrit en double de `mc:Choice`). Sans ces
+    deux exclusions, le texte d'une zone de texte apparaissait 2 à 4 fois.
     """
     parts: list[str] = []
-    for el in p_element.iter():  # type: ignore[attr-defined]
+    stack = list(reversed(list(p_element)))  # type: ignore[call-overload]
+    while stack:
+        el = stack.pop()
         tag = el.tag
+        if not isinstance(tag, str):  # commentaires/PI lxml
+            continue
+        if tag.endswith(_SKIPPED_SUBTREES):
+            continue
         if tag.endswith("}t"):
             parts.append(el.text or "")
         elif tag.endswith("}tab"):
             parts.append("\t")
         elif tag.endswith(("}br", "}cr")):
             parts.append("\n")
+        stack.extend(reversed(list(el)))
     return "".join(parts)
+
+
+_SKIPPED_SUBTREES = ("}txbxContent", "}Fallback")
+
+
+def _paragraphs_text(container: Any) -> str:
+    """Texte de tous les `w:p` descendants de `container` (hors sous-arbres
+    exclus), un paragraphe par ligne — jamais collés (D-096)."""
+    texts: list[str] = []
+    stack = list(reversed(list(container)))
+    while stack:
+        el = stack.pop()
+        tag = el.tag
+        if not isinstance(tag, str) or tag.endswith(_SKIPPED_SUBTREES):
+            continue
+        if tag.endswith("}p"):
+            text = _flatten_paragraph_text(el)
+            if text.strip():
+                texts.append(text)
+            continue
+        stack.extend(reversed(list(el)))
+    return "\n".join(texts)
 
 
 class _ImageCollector:
@@ -291,92 +333,101 @@ def _count_media_images(path: Path) -> int:
         return 0
 
 
-def _extract_footnotes(path: Path) -> str:
-    """Extrait le texte des footnotes depuis word/footnotes.xml."""
-    try:
-        from bs4 import BeautifulSoup
+def _part_element(doc: Any, partname: str) -> Any | None:
+    """Racine lxml d'une partie du paquet DOCX déjà chargé par python-docx
+    (`/word/footnotes.xml`, `/word/header1.xml`…), ou `None` si absente.
 
-        with zipfile.ZipFile(str(path), "r") as zf:
-            if "word/footnotes.xml" not in zf.namelist():
-                return ""
-            xml = zf.read("word/footnotes.xml")
-            soup = BeautifulSoup(xml, "xml")
-            texts: list[str] = []
-            for fn in soup.find_all("w:footnote"):
-                # Ignorer les footnotes système (separator/continuationSeparator)
-                fn_id = fn.get("w:id", "")
-                if fn_id in ("-1", "0"):
-                    continue
-                text = fn.get_text(strip=True)
-                if text:
-                    texts.append(text)
-            return "\n".join(texts)
-    except Exception as _e:
-        logger.warning("Échec extraction notes/zones: %s", _e)
+    D-096/D-098 : l'ancien code rouvrait le `.docx` (ZIP) et re-parsait la
+    partie avec BeautifulSoup — jusqu'à 6 ouvertures du ZIP par fichier et
+    un second parse du `document.xml` complet ~10× plus lent que celui que
+    python-docx a déjà fait. Les parties XML chargées exposent `.element` ;
+    les autres sont parsées une fois depuis `.blob` (lxml, jamais bs4).
+    """
+    from lxml import etree
+
+    for part in doc.part.package.iter_parts():
+        if str(part.partname) != partname:
+            continue
+        element = getattr(part, "element", None)
+        if element is not None:
+            return element
+        try:
+            return etree.fromstring(part.blob)
+        except etree.XMLSyntaxError:
+            logger.warning("Partie DOCX %s illisible, ignorée", partname)
+            return None
+    return None
+
+
+def _extract_notes(doc: Any, partname: str, note_tag_suffix: str) -> str:
+    """Notes de bas de page (`/word/footnotes.xml`, `}footnote`) ou de fin
+    (`/word/endnotes.xml`, `}endnote`), une note par bloc, paragraphes
+    séparés par `\\n` (D-096 : bs4 `get_text(strip=True)` collait runs et
+    paragraphes — « …endNext » — et incluait `w:delText`, contrairement au
+    corps ; `_flatten_paragraph_text` est désormais l'unique règle).
+
+    Ignore les notes système `w:id` -1 et 0 (séparateurs).
+    """
+    root = _part_element(doc, partname)
+    if root is None:
         return ""
+    texts: list[str] = []
+    for note in root:
+        tag = note.tag
+        if not isinstance(tag, str) or not tag.endswith(note_tag_suffix):
+            continue
+        note_id = next((v for k, v in note.attrib.items() if k.endswith("}id")), "")
+        if note_id in ("-1", "0"):
+            continue
+        text = _paragraphs_text(note)
+        if text:
+            texts.append(text)
+    return "\n".join(texts)
 
 
-def _extract_endnotes(path: Path) -> str:
-    """Extrait le texte des endnotes depuis word/endnotes.xml."""
-    try:
-        from bs4 import BeautifulSoup
-
-        with zipfile.ZipFile(str(path), "r") as zf:
-            if "word/endnotes.xml" not in zf.namelist():
-                return ""
-            xml = zf.read("word/endnotes.xml")
-            soup = BeautifulSoup(xml, "xml")
-            texts: list[str] = []
-            for en in soup.find_all("w:endnote"):
-                en_id = en.get("w:id", "")
-                if en_id in ("-1", "0"):
-                    continue
-                text = en.get_text(strip=True)
-                if text:
-                    texts.append(text)
-            return "\n".join(texts)
-    except Exception as _e:
-        logger.warning("Échec extraction notes/zones: %s", _e)
-        return ""
-
-
-def _extract_textboxes(path: Path) -> str:
-    """I-19: Extrait le texte des zones de texte (w:txbxContent).
+def _extract_textboxes(doc: Any) -> str:
+    """I-19: texte des zones de texte (`w:txbxContent`) du corps et des
+    en-têtes/pieds de page — l'unique endroit qui les émet (D-096).
 
     CdC §8.3 — DOCX : zones de texte doivent être extraites.
-    python-docx n'expose pas les text boxes → parsing XML manuel.
-
-    D-082 : deux bugs corrigés ensemble.
-    1. `find_all("w:txbxcontent")` (minuscules) ne matchait jamais
-       `<w:txbxContent>` (camelCase, la casse réelle produite par Word) —
-       le parseur XML de BeautifulSoup est sensible à la casse. Cette
-       fonction ne trouvait donc **jamais rien**, sur aucun fichier, en
-       dépit de son nom et de son commentaire d'origine (I-19).
-    2. Les en-têtes/pieds de page vivent dans des parties ZIP séparées
-       (`word/header1.xml`, `word/footer1.xml`, ...), pas dans
-       `word/document.xml` — une zone de texte placée dans un en-tête/pied
-       (logo + bloc adresse en papier à en-tête, filigrane) restait
-       invisible même une fois (1) corrigé, tant que seul `document.xml`
-       était lu.
+    D-082 : les en-têtes/pieds de page vivent dans des parties séparées
+    (`word/header1.xml`…) — une zone de texte en papier à en-tête restait
+    invisible tant que seul `document.xml` était lu.
+    D-096 : Word 2010+ écrit chaque zone DrawingML en double — `mc:Choice`
+    (wps) + `mc:Fallback` (VML) ; on ignore le sous-arbre `mc:Fallback`
+    pour ne pas doubler, et les paragraphes d'une zone sont joints par
+    `\\n` au lieu d'être collés.
     """
-    try:
-        from bs4 import BeautifulSoup
+    texts: list[str] = []
+    partnames = ["/word/document.xml"] + [
+        str(part.partname)
+        for part in doc.part.package.iter_parts()
+        if str(part.partname).startswith(("/word/header", "/word/footer"))
+        and str(part.partname).endswith(".xml")
+    ]
+    for partname in partnames:
+        root = _part_element(doc, partname)
+        if root is None:
+            continue
+        for txbx in _iter_textboxes(root):
+            text = _paragraphs_text(txbx)
+            if text:
+                texts.append(text)
+    return "\n".join(texts)
 
-        with zipfile.ZipFile(str(path), "r") as zf:
-            parts = [
-                n
-                for n in zf.namelist()
-                if n == "word/document.xml"
-                or (n.startswith(("word/header", "word/footer")) and n.endswith(".xml"))
-            ]
-            texts: list[str] = []
-            for part in parts:
-                soup = BeautifulSoup(zf.read(part), "xml")
-                for txbx in soup.find_all("w:txbxContent"):
-                    text = txbx.get_text(strip=True)
-                    if text:
-                        texts.append(text)
-            return "\n".join(texts)
-    except Exception as _e:
-        logger.warning("Échec extraction notes/zones: %s", _e)
-        return ""
+
+def _iter_textboxes(root: Any) -> list[Any]:
+    """`w:txbxContent` d'un arbre, hors sous-arbres `mc:Fallback` (doublons
+    VML) et hors zones imbriquées dans une zone déjà retenue."""
+    found: list[Any] = []
+    stack = [root]
+    while stack:
+        el = stack.pop()
+        tag = el.tag
+        if not isinstance(tag, str) or tag.endswith("}Fallback"):
+            continue
+        if tag.endswith("}txbxContent"):
+            found.append(el)
+            continue
+        stack.extend(reversed(list(el)))
+    return found

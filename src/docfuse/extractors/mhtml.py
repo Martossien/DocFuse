@@ -16,6 +16,7 @@ from pathlib import Path
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.eml import part_text
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -47,8 +48,9 @@ class MhtmlExtractor(Extractor):
             for part in msg.walk() if msg.is_multipart() else [msg]:
                 content_type = part.get_content_type()
                 if content_type == "text/html":
-                    html_content = part.get_content()
-                    text = _html_to_text(str(html_content))
+                    # D-096 : `part_text` ne lève jamais sur un charset
+                    # inconnu (voir extractors/eml.py).
+                    text = _html_to_text(part_text(part))
                     if text:
                         parts.append(text)
                 elif content_type.startswith("image/"):

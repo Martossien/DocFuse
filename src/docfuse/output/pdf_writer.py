@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from docfuse.core.orchestrator import OrchestratorResult
 from docfuse.i18n import t
@@ -19,6 +20,11 @@ from docfuse.output.source_header import build_source_header
 logger = logging.getLogger(__name__)
 
 _ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
+
+def _escape(text: str) -> str:
+    """Échappe une ligne pour le mini-langage XML de `reportlab.Paragraph`."""
+    return escape(text)
 
 
 def _register_fonts() -> tuple[str, str]:
@@ -104,15 +110,18 @@ def write_pdf_corpus(
             continue
 
         header = build_source_header(f, margin, est.tokens_estimated, est.tokens_with_margin)
+        # D-096 : l'en-tête SOURCE passait à `Paragraph` sans échappement
+        # (seul le corps l'était) — un nom de fichier ou une note contenant
+        # `<`/`>`/`&` (ex. `a<b>.txt`, titre EPUB `<Untitled>`) faisait
+        # échouer toute la génération PDF (`Parse error` ReportLab).
         for line in header.split("\n"):
             if line.strip():
-                story.append(Paragraph(line, header_style))
+                story.append(Paragraph(_escape(line), header_style))
         story.append(Spacer(1, 6))
 
         for paragraph in f.text.split("\n"):
             if paragraph.strip():
-                safe = paragraph.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                story.append(Paragraph(safe, body_style))
+                story.append(Paragraph(_escape(paragraph), body_style))
 
         story.append(PageBreak())
 

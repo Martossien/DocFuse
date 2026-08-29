@@ -353,6 +353,21 @@ def _has_garbage_text(text: str) -> bool:
     return any(marker in text for marker in PDF_OCR_GARBAGE_MARKERS)
 
 
+def _blank_if_garbage(kind: PageKind, text: str) -> str:
+    """Texte de page à conserver quand l'OCR n'a rien donné (D-086, D-096).
+
+    Une page classée `OCR` à cause de texte natif « poubelle » (glyphes non
+    mappés — `(cid:...)`, `�`) ne doit pas garder ce bruit dans le corpus :
+    c'est inutilisable, et une page sans contenu extractible est déjà
+    signalée proprement par le marqueur `[[PAGE N: aucun texte extractible]]`.
+    Une page `OCR` avec du texte réel mais trop court reste inchangée : ce
+    texte, bien que sous le seuil, ne doit pas disparaître.
+    """
+    if kind is PageKind.OCR and _has_garbage_text(text):
+        return ""
+    return text
+
+
 def classify_page(text: str, char_count: int, has_image: bool) -> PageKind:
     """Classe une page pour décider si l'OCR lui serait utile.
 
@@ -414,18 +429,10 @@ def _apply_ocr(
 
     engine = resolve_ocr_engine()
     if engine is None:
-        # D-086 : sans moteur OCR, le texte natif "poubelle" (glyphes non
-        # mappés — `(cid:...)`, `�`) qui a justement déclenché la
-        # classification OCR ne doit pas rester tel quel dans le corpus :
-        # ça pollue le texte de bruit inutilisable plutôt que de simplement
-        # signaler "pas de texte ici", ce que fait déjà normalement une
-        # page sans contenu extractible. Une page classée `ocr` avec du
-        # texte non-poubelle (juste trop court) reste inchangée : ce texte,
-        # bien que sous le seuil, est réel et ne doit pas disparaître.
-        cleaned_pages = list(pages_text)
-        for idx in ocr_indices:
-            if kinds[idx] is PageKind.OCR and _has_garbage_text(cleaned_pages[idx]):
-                cleaned_pages[idx] = ""
+        cleaned_pages = [
+            _blank_if_garbage(kinds[i], page) if i in ocr_indices else page
+            for i, page in enumerate(pages_text)
+        ]
         return cleaned_pages, t("ocr.unavailable_note", pages=len(ocr_indices))
 
     ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine)
@@ -437,6 +444,10 @@ def _apply_ocr(
         kind = kinds[idx]
         if not ok or not text.strip():
             pages_failed += 1
+            # D-096 : l'OCR a échoué (raster impossible, page hors plafond,
+            # timeout, résultat vide) — la règle D-086 s'applique exactement
+            # comme sans moteur : ne pas laisser le texte poubelle.
+            new_pages[idx] = _blank_if_garbage(kind, new_pages[idx])
             continue
         marker = f"[[PAGE {idx + 1} — texte OCR (tesseract, {OCR_LANG})]]\n{text.strip()}"
         if kind is PageKind.MIXED and new_pages[idx].strip():
@@ -497,15 +508,27 @@ def _ocr_pages(
         try:
             pdf = pdfium.PdfDocument(str(path))
             try:
+                scale = OCR_DPI / 72
                 for idx in capped:
                     try:
                         page = pdf[idx]
-                        bitmap = page.render(scale=OCR_DPI / 72)
+                        # D-096 : le plafond de pixels était vérifié APRÈS le
+                        # rendu — la bitmap complète était déjà allouée (une
+                        # page A0 à 200 dpi ≈ 250 Mo RGBA, une page hostile
+                        # plusieurs Go) : un OOM est un SIGKILL, pas une
+                        # exception rattrapable, et tue tout le processus
+                        # (même classe que D-078). Rejet avant allocation.
+                        width, height = page.get_size()
+                        if (width * scale) * (height * scale) > OCR_MAX_PIXELS_PER_PAGE:
+                            logger.warning(
+                                "Page %d de %s trop grande pour l'OCR, ignorée", idx + 1, path
+                            )
+                            continue
+                        bitmap = page.render(scale=scale)
                         pil_image = bitmap.to_pil()
-                        if pil_image.width * pil_image.height <= OCR_MAX_PIXELS_PER_PAGE:
-                            buf = io.BytesIO()
-                            pil_image.save(buf, format="PNG")
-                            pngs[idx] = buf.getvalue()
+                        buf = io.BytesIO()
+                        pil_image.save(buf, format="PNG")
+                        pngs[idx] = buf.getvalue()
                     except Exception:
                         logger.warning(
                             "Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True

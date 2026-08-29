@@ -18,6 +18,7 @@ _EXTRA_METADATA_LABELS: list[tuple[str, str]] = [
     ("ocr", "source_header.ocr"),
     ("epub_title", "source_header.epub_title"),
     ("epub_author", "source_header.epub_author"),
+    ("epub_skipped_items", "source_header.epub_skipped_items"),
 ]
 
 

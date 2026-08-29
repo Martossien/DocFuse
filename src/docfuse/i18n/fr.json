@@ -69,6 +69,7 @@
   "cli.margin": "Marge à appliquer",
   "cli.tokenizer_engine": "Moteur de comptage : approx (défaut), mistral ou openai (précis)",
   "cli.list_tokenizers": "Affiche les moteurs de comptage disponibles et sort",
+  "cli.config_invalid": "Configuration invalide",
   "cli.recursive": "Parcourir les sous-dossiers",
   "cli.extract_images": "Exporter les images intégrées DOCX/PPTX (+ tag de position dans le corpus)",
   "cli.no_recursive": "Ne pas parcourir les sous-dossiers",
@@ -116,6 +117,7 @@
   "inventory.image_ocr_disabled": "Fichier image, OCR désactivé, non inclus",
   "inventory.unsupported_ext": "Extension non supportée: {ext}",
   "inventory.removed_by_user": "Retiré par l'utilisateur",
+  "inventory.ignored_dir": "Dossier système/technique ignoré (et tout son contenu)",
 
   "corpus.title": "Corpus DocFuse",
   "corpus.generated": "Généré le",
@@ -129,6 +131,7 @@
   "gui.analysis_done": "Analyse terminée",
   "gui.analysis_failed": "Échec de l'analyse",
   "gui.analysis_failed_detail": "L'analyse n'a pas pu aboutir : {error}",
+  "gui.generation_failed_detail": "La génération a échoué : {error}",
   "gui.analysis_cancelled": "Analyse arrêtée",
   "gui.analysis_cancelled_detail": "L'analyse a été arrêtée. Aucun corpus partiel ne sera généré.",
   "gui.analysis_in_progress": "Inventaire terminé : extraction et calcul des tokens en cours…",
@@ -158,6 +161,8 @@
   "source_header.ocr": "ocr",
   "source_header.epub_title": "titre",
   "source_header.epub_author": "auteur",
+  "source_header.epub_skipped_items": "chapitres_manquants",
+  "epub.skipped_items_note": "{count} entrée(s) du sommaire introuvable(s) dans l'archive, non incluse(s) : {items}",
 
   "text.mojibake_repaired_note": "Texte corrompu (encodage incohérent) détecté et corrigé automatiquement",
 
