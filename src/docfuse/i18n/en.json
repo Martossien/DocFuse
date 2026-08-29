@@ -108,6 +108,8 @@
   "error.corrupt_file": "Corrupt file",
   "error.permission": "Permission denied",
   "error.unknown": "Unknown error",
+  "error.zip_bomb_suspected": "Suspicious file (abnormal compression ratio), extraction refused for safety",
+  "error.encrypted_epub": "Protected EPUB file (DRM), cannot be read",
 
   "inventory.special_ignored": "Special file ignored",
   "inventory.excluded_by_pattern": "Excluded by pattern",
@@ -150,9 +152,14 @@
 
   "source_header.secrets_detected": "secret_alert",
   "source_header.duplicate_of": "duplicate_of",
+  "source_header.mojibake_repaired": "encoding_repaired",
   "source_header.markdown_base64_stripped": "base64_images_removed",
   "source_header.pdf_dedup": "notes",
   "source_header.ocr": "ocr",
+  "source_header.epub_title": "title",
+  "source_header.epub_author": "author",
+
+  "text.mojibake_repaired_note": "Corrupted text (inconsistent encoding) automatically detected and repaired",
 
   "ocr.tesseract": "Tesseract",
   "ocr.applied_note": "{pages_ocr} scanned page(s) recognized via OCR, {pages_mixed} mixed page(s) (text + OCR), {pages_failed} page(s) remaining unreadable, out of {pages_total} page(s) ({lang})",

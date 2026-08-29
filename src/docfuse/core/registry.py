@@ -81,6 +81,7 @@ def _ensure_loaded() -> None:
         "docfuse.extractors.odf",
         "docfuse.extractors.eml",
         "docfuse.extractors.mhtml",
+        "docfuse.extractors.epub",
     ]
 
     for mod_name in extractor_modules:

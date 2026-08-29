@@ -5,11 +5,69 @@ CdC §7.3 — Si ZIP/XML trivial (OpenDocument).
 
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 
+import pytest
+
+from docfuse.core.ocr.tesseract import TesseractEngine
 from docfuse.extractors.odf import OdfExtractor
 from docfuse.models.file_status import FileStatus
+
+_OCR_AVAILABLE = TesseractEngine().is_available()
+
+_ODT_NS = (
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" '
+    'xmlns:xlink="http://www.w3.org/1999/xlink"'
+)
+
+_ODP_NS = _ODT_NS + (' xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"')
+
+
+def _red_square_png() -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _odt_with_image(tmp_path: Path, name: str, image_bytes: bytes) -> Path:
+    f = tmp_path / name
+    content_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?><office:document-content {_ODT_NS}>'
+        "<office:body><office:text>"
+        "<text:p>Texte avant image.</text:p>"
+        '<text:p><draw:frame><draw:image xlink:href="Pictures/img1.png"/></draw:frame></text:p>'
+        "<text:p>Texte apres image.</text:p>"
+        "</office:text></office:body></office:document-content>"
+    )
+    with zipfile.ZipFile(str(f), "w") as zf:
+        zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        zf.writestr("content.xml", content_xml)
+        zf.writestr("Pictures/img1.png", image_bytes)
+    return f
+
+
+def _odp_with_image(tmp_path: Path, name: str, image_bytes: bytes) -> Path:
+    f = tmp_path / name
+    content_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?><office:document-content {_ODP_NS}>'
+        "<office:body><office:presentation>"
+        '<draw:page draw:name="page1">'
+        '<draw:frame><draw:image xlink:href="Pictures/slide1.png"/></draw:frame>'
+        "<text:p>Titre diapo 1</text:p>"
+        "</draw:page>"
+        "</office:presentation></office:body></office:document-content>"
+    )
+    with zipfile.ZipFile(str(f), "w") as zf:
+        zf.writestr("mimetype", "application/vnd.oasis.opendocument.presentation")
+        zf.writestr("content.xml", content_xml)
+        zf.writestr("Pictures/slide1.png", image_bytes)
+    return f
 
 
 class TestOdfExtractor:
@@ -174,3 +232,56 @@ class TestOdfExtractor:
         assert result.status is FileStatus.READY
         assert "TITRE_DIAPO" in result.text
         assert "Alpha | Beta" in result.text
+
+    def test_odt_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
+        """D-093 : export actif -> l'image ODT est capturée et un tag
+        `[[IMAGE: ...]]` inséré au point d'apparition."""
+        f = _odt_with_image(tmp_path, "with_image.odt", _red_square_png())
+
+        result = OdfExtractor.extract(f, "with_image.odt", extract_images=True)
+        assert result.status is FileStatus.READY
+        assert len(result.embedded_images) == 1
+        image = result.embedded_images[0]
+        assert image.filename.startswith("with_image__img1")
+        assert f"[[IMAGE: {image.filename}]]" in result.text
+
+    def test_odt_embedded_image_export_disabled_by_default(self, tmp_path: Path) -> None:
+        f = _odt_with_image(tmp_path, "with_image2.odt", _red_square_png())
+
+        result = OdfExtractor.extract(f, "with_image2.odt")
+        assert result.embedded_images == []
+        assert "[[IMAGE" not in result.text
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_odt_embedded_image_ocr_extracts_text_automatically(self, tmp_path: Path) -> None:
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (300, 80), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 30), "Bonjour ODT", fill="black")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        f = _odt_with_image(tmp_path, "with_text_image.odt", buf.getvalue())
+
+        result = OdfExtractor.extract(f, "with_text_image.odt")
+        assert "onjour" in result.text or "ODT" in result.text
+        assert result.embedded_images == []
+
+    def test_odp_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
+        """D-093 : export actif -> l'image ODP est capturée avec le numéro
+        de diapo dans le nom."""
+        f = _odp_with_image(tmp_path, "with_image.odp", _red_square_png())
+
+        result = OdfExtractor.extract(f, "with_image.odp", extract_images=True)
+        assert result.status is FileStatus.READY
+        assert len(result.embedded_images) == 1
+        image = result.embedded_images[0]
+        assert image.filename.startswith("with_image__slide1__img1")
+        assert f"[[IMAGE: {image.filename}]]" in result.text
+
+    def test_odp_embedded_image_export_disabled_by_default(self, tmp_path: Path) -> None:
+        f = _odp_with_image(tmp_path, "with_image2.odp", _red_square_png())
+
+        result = OdfExtractor.extract(f, "with_image2.odp")
+        assert result.embedded_images == []
+        assert "[[IMAGE" not in result.text

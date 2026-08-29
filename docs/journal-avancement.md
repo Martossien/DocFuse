@@ -1280,3 +1280,58 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   recette 7/7. Re-testé directement sur les 3 fichiers réels ayant révélé
   le bug pour confirmer la correction.
 
+### Mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF (D-093) — ✅ Corrigé
+
+- Suite du test réel D-091/D-092 : clone d'un projet tiers en dehors du
+  dépôt (scratchpad de session, jamais dans DocFuse) pour en analyser la
+  gestion de fichiers et en tirer des idées — sans copier de code, sans
+  attribution dans aucun commit/document du projet (contrainte explicite
+  de l'utilisateur, ce projet n'étant plus open-source). 6 pistes
+  retenues/analysées avec l'utilisateur.
+- **ftfy (réparation mojibake)** : licence vérifiée (Apache-2.0 + wcwidth
+  MIT) avant ajout comme dépendance. Testé honnêtement sur les 2 fichiers
+  réels `wan22_corrected_workflow*.json` ayant motivé le correctif : ftfy
+  répare une partie du texte mais ne suffit pas à les rendre syntaxiquement
+  valides (corruption multi-passes sur du texte chinois, plus retorse que
+  le cas simple testé unitairement) — ces 2 fichiers restent en erreur
+  claire (D-092), mais le mécanisme profite au cas général.
+- **Faux positifs trouvés en testant sur ~/Téléchargements en conditions
+  réelles — 3 passes successives** : la configuration par défaut de ftfy
+  marquait ~145 fichiers parfaitement valides comme « réparés ». Chaque
+  passe : inspecter le diff caractère par caractère d'un vrai fichier
+  flagué, identifier l'option ftfy responsable, la désactiver, retester
+  sur les deux dossiers en entier avant de passer à la suivante.
+  1. `uncurl_quotes` (guillemets `’` → `'` légitimes) : 145 → 79 fichiers.
+  2. `fix_line_breaks` (CRLF → LF sur tout fichier, sans lien avec le
+     mojibake) : 79 → 41 fichiers.
+  3. `fix_character_width` (cassait un littéral JS d'espaces Unicode dans
+     un bundle minifié réel, convertissait de la ponctuation chinoise
+     pleine chasse légitime en ASCII dans un JSON réel) : 41 → 41 (2
+     Documents + 39 Téléchargements, résidu attendu — NFC standard +
+     réparations cp1252 réelles légitimes, pas des faux positifs).
+  6 tests de non-régression dédiés au final. Exactement le genre de
+  vérification en conditions réelles qui a déjà payé plusieurs fois cette
+  session (D-091 SIGSEGV, D-092 __MACOSX) — sans elle, ce correctif aurait
+  silencieusement altéré des centaines de fichiers légitimes.
+- **Garde-fou "bombe zip"** : ratio + volume minimal combinés (jamais l'un
+  seul), pour ne jamais bloquer un petit fichier légitimement répétitif.
+- **EPUB** : découverte importante en vérifiant les licences avant
+  d'ajouter une dépendance — `ebooklib` (le choix le plus évident) est en
+  AGPLv3+, strictement interdit. Implémentation native (zipfile +
+  ElementTree + BeautifulSoup, même approche que `odf.py`), aucune
+  nouvelle dépendance. Réutilise le parcours structuré déjà testé de
+  `html.py` pour le texte des chapitres (DRY).
+- **Images XLSX/ODF** : chaîne de relations OOXML (sheet → drawing →
+  media) vérifiée empiriquement en générant et inspectant un vrai XLSX
+  avec image avant d'écrire le code — même technique que
+  `_merge_ranges()` déjà présente dans `xlsx.py` pour contourner les
+  limites du mode `read_only` d'openpyxl. ODF plus simple (chemin direct,
+  pas d'indirection par relation).
+- **`.doc`/`.msg`** : analysé sans coder, comme demandé — `extract-msg`
+  (GPL) écarté, `olefile` (BSD) insuffisant seul. Conclusion consignée
+  dans "Reste à faire", pas un chantier à ouvrir maintenant.
+- 458 passed / 39 skipped (38 nouveaux tests), ruff/mypy --strict propres,
+  recette 7/7 (92 extensions, +1 pour `.epub`). Re-testé sur ~/Documents +
+  ~/Téléchargements (1413 fichiers réels) avec toutes les nouvelles
+  fonctionnalités actives simultanément.
+

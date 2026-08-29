@@ -13,9 +13,11 @@ Contrat :
 from __future__ import annotations
 
 import logging
+import zipfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from docfuse.constants import ZIP_BOMB_MAX_RATIO, ZIP_BOMB_MIN_UNCOMPRESSED_BYTES
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -45,6 +47,35 @@ def is_ole_encrypted(path: Path) -> bool:
             return f.read(len(_OLE_CFBF_MAGIC)) == _OLE_CFBF_MAGIC
     except OSError:
         return False
+
+
+def is_zip_bomb(path: Path) -> bool:
+    """Détecte un conteneur ZIP (DOCX/PPTX/XLSX/ODF/EPUB) suspect (D-093).
+
+    Un fichier légitime généré par Office/LibreOffice a un taux de
+    compression normal. Un ratio anormal (`ZIP_BOMB_MAX_RATIO`) N'EST
+    dangereux que combiné à un volume décompressé réellement conséquent
+    (`ZIP_BOMB_MIN_UNCOMPRESSED_BYTES`) — un petit fichier très répétitif
+    (ex: un tableau creux généré par script) n'est jamais un problème,
+    même avec un ratio élevé. Heuristique documentée comme telle, pas une
+    science exacte.
+
+    Un fichier qui n'est pas un ZIP valide (ex: déjà rejeté par
+    `is_ole_encrypted()`) renvoie `False` — ce n'est pas le rôle de cette
+    fonction de diagnostiquer ce cas.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            total_uncompressed = sum(info.file_size for info in zf.infolist())
+            total_compressed = sum(info.compress_size for info in zf.infolist())
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+    if total_uncompressed < ZIP_BOMB_MIN_UNCOMPRESSED_BYTES:
+        return False
+    if total_compressed == 0:
+        return total_uncompressed > 0
+    return (total_uncompressed / total_compressed) > ZIP_BOMB_MAX_RATIO
 
 
 def error_result(

@@ -6,10 +6,40 @@ Feuille vide signalée. Nom de feuille en titre.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import pytest
+
+from docfuse.core.ocr.tesseract import TesseractEngine
 from docfuse.extractors.xlsx import XlsxExtractor
 from docfuse.models.file_status import FileStatus
+
+_OCR_AVAILABLE = TesseractEngine().is_available()
+
+
+def _xlsx_with_image(tmp_path: Path, name: str, image_bytes: bytes) -> Path:
+    import openpyxl
+    from openpyxl.drawing.image import Image as XlsxImage
+
+    f = tmp_path / name
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Feuil1"
+    ws["A1"] = "texte avant image"
+    img = XlsxImage(io.BytesIO(image_bytes))
+    img.anchor = "C3"
+    ws.add_image(img)
+    wb.save(str(f))
+    return f
+
+
+def _red_square_png() -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+    return buf.getvalue()
 
 
 class TestXlsxExtractor:
@@ -180,3 +210,41 @@ class TestXlsxExtractor:
         result = XlsxExtractor.extract(f, "blank_cell.xlsx")
         assert result.status is FileStatus.READY
         assert "formule" not in result.text
+
+    def test_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
+        """D-093 : export actif -> l'image est capturée avec un nom explicite
+        (feuille incluse) et un tag `[[IMAGE: ...]]` ajouté en fin de feuille."""
+        f = _xlsx_with_image(tmp_path, "with_image.xlsx", _red_square_png())
+
+        result = XlsxExtractor.extract(f, "with_image.xlsx", extract_images=True)
+        assert result.status is FileStatus.READY
+        assert len(result.embedded_images) == 1
+        image = result.embedded_images[0]
+        assert image.filename.startswith("with_image__sheet_Feuil1__img1")
+        assert image.data
+        assert f"[[IMAGE: {image.filename}]]" in result.text
+
+    def test_embedded_image_export_disabled_by_default(self, tmp_path: Path) -> None:
+        """D-093 : sans `extract_images`, aucune image capturée (non-régression)."""
+        f = _xlsx_with_image(tmp_path, "with_image2.xlsx", _red_square_png())
+
+        result = XlsxExtractor.extract(f, "with_image2.xlsx")
+        assert result.embedded_images == []
+        assert "[[IMAGE" not in result.text
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_embedded_image_ocr_extracts_text_automatically(self, tmp_path: Path) -> None:
+        """D-093 : OCR automatique des images intégrées Excel, sans avoir
+        besoin d'activer l'export."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (300, 80), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 30), "Bonjour Excel", fill="black")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        f = _xlsx_with_image(tmp_path, "with_text_image.xlsx", buf.getvalue())
+
+        result = XlsxExtractor.extract(f, "with_text_image.xlsx")
+        assert "onjour" in result.text or "Excel" in result.text
+        assert result.embedded_images == []

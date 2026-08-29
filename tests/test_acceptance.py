@@ -105,6 +105,19 @@ class TestLicenseCompliance:
         for pkg in forbidden:
             assert pkg not in content.lower(), f"Dépendance interdite : {pkg}"
 
+    def test_ebooklib_not_a_dependency(self) -> None:
+        """`ebooklib` (la bibliothèque EPUB Python la plus évidente) est en
+        AGPLv3+ — l'extracteur EPUB de DocFuse (extractors/epub.py) est
+        volontairement écrit à la main sur zipfile/ElementTree/BeautifulSoup
+        pour rester conforme licence. Garde-fou contre une réintroduction
+        par mégarde."""
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        content = pyproject.read_text(encoding="utf-8").lower()
+
+        assert "ebooklib" not in content
+        assert "extract-msg" not in content
+        assert "extract_msg" not in content
+
     def test_mistral_common_not_a_dependency(self) -> None:
         """Le paquet `mistral-common` tire `pydantic-extra-types[pycountry]`,
         et `pycountry` est LGPL-2.1 (voir core/tokenizers/mistral.py). Le
@@ -146,6 +159,8 @@ class TestLicenseCompliance:
             "requests",  # dep of tiktoken (jamais appelé par notre code, cf. tests offline)
             "pypdfium2",  # rastérisation PDF pour l'OCR (core/ocr/, extractors/pdf.py)
             "pillow",  # encodage PNG des pages rastérisées avant OCR
+            "ftfy",  # réparation du mojibake (extractors/text.py)
+            "wcwidth",  # dep de ftfy
         ]
 
         for pkg_name in runtime_deps:

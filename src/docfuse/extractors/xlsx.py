@@ -7,14 +7,20 @@ Feuille vide signalée. Nom de feuille en titre.
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+from docfuse.constants import OCR_LANG
+from docfuse.core.embedded_images import build_image_marker, build_image_tag
+from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted
+from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted, is_zip_bomb
 from docfuse.i18n import t
-from docfuse.models.extraction_result import ExtractedFile
+from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -33,9 +39,7 @@ class XlsxExtractor(Extractor):
         return path.suffix.lower() == ".xlsx"
 
     @classmethod
-    def extract(
-        cls, path: Path, relative_path: str, _extract_images: bool = False
-    ) -> ExtractedFile:
+    def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         try:
             # D-089 : un .xlsx protégé par mot de passe à l'ouverture est un
             # conteneur OLE2, plus un ZIP — sans cette détection, openpyxl
@@ -51,6 +55,24 @@ class XlsxExtractor(Extractor):
                     status=FileStatus.ERROR,
                     error_message=t("error.encrypted_office"),
                 )
+
+            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
+            if is_zip_bomb(path):
+                return ExtractedFile(
+                    path=path,
+                    relative_path=relative_path,
+                    extension="xlsx",
+                    file_type=cls.file_type,
+                    size_bytes=path.stat().st_size,
+                    status=FileStatus.ERROR,
+                    error_message=t("error.zip_bomb_suspected"),
+                )
+
+            # D-093 : OCR/export des images intégrées, seulement si utile
+            # (export demandé ou OCR disponible) — sinon zéro coût ajouté.
+            engine = resolve_ocr_engine()
+            want_export = extract_images
+            embedded_images: list[EmbeddedImage] = []
 
             from openpyxl import load_workbook
 
@@ -132,10 +154,20 @@ class XlsxExtractor(Extractor):
                             has_data = True
                             rows_text.append(" | ".join(cells))
 
-                    if has_data:
-                        parts.append(f"### Feuille : {sheet}\n\n" + "\n".join(rows_text))
-                    else:
-                        parts.append(f"### Feuille : {sheet}\n\n[Feuille vide]")
+                    sheet_text = "\n".join(rows_text) if has_data else "[Feuille vide]"
+
+                    # D-093 : images intégrées ancrées sur cette feuille —
+                    # regroupées en fin de feuille plutôt qu'à la cellule
+                    # d'ancrage exacte (voir docstring de `_extract_sheet_images`).
+                    if merge_path and merge_path in zf.namelist():
+                        sheet_markers, sheet_images = _extract_sheet_images(
+                            zf, merge_path, sheet, relative_path, engine, want_export
+                        )
+                        if sheet_markers:
+                            sheet_text += "\n\n" + "\n\n".join(sheet_markers)
+                        embedded_images.extend(sheet_images)
+
+                    parts.append(f"### Feuille : {sheet}\n\n{sheet_text}")
 
             sheet_count = len(wb.sheetnames)
             wb.close()
@@ -151,6 +183,7 @@ class XlsxExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 page_count=sheet_count,
+                embedded_images=embedded_images,
             )
         except Exception as exc:
             logger.exception("Erreur extraction XLSX %s", path)
@@ -183,6 +216,154 @@ def _merge_ranges(zf: zipfile.ZipFile, worksheet_path: str) -> list[tuple[int, i
             continue
         ranges.append((min_col, min_row, max_col, max_row))
     return ranges
+
+
+def _extract_sheet_images(
+    zf: zipfile.ZipFile,
+    sheet_path: str,
+    sheet_name: str,
+    relative_path: str,
+    engine: OcrEngine | None,
+    want_export: bool,
+) -> tuple[list[str], list[EmbeddedImage]]:
+    """Images intégrées ancrées sur une feuille XLSX (D-093).
+
+    `openpyxl` en mode `read_only=True` (obligatoire ici pour supporter de
+    gros classeurs) n'expose pas du tout les dessins/images — on lit donc
+    le XML brut du ZIP directement, en suivant la même chaîne de relations
+    OOXML que python-pptx/python-docx font automatiquement pour DOCX/PPTX :
+    `sheetN.xml` → `_rels/sheetN.xml.rels` (relation "drawing") →
+    `drawingM.xml` (ancres `oneCellAnchor`/`twoCellAnchor`, chacune avec un
+    `<a:blip r:embed="rIdY">`) → `_rels/drawingM.xml.rels` (relation
+    "image") → fichier média réel.
+
+    Les marqueurs sont regroupés en fin de feuille plutôt qu'ancrés à la
+    cellule exacte : la position (ligne, colonne) de l'ancre XML ne
+    correspond pas forcément à une ligne "avec données" au sens du texte
+    déjà généré (tableau pipe par ligne non vide) — une fausse précision
+    d'ancrage serait trompeuse.
+
+    Returns:
+        Tuple (marqueurs à ajouter au texte de la feuille, images à
+        exporter). N'échoue jamais : toute relation manquante ou XML
+        illisible donne simplement une liste vide.
+    """
+    markers: list[str] = []
+    images: list[EmbeddedImage] = []
+    if not want_export and engine is None:
+        return markers, images
+
+    sheet_rels_path = posixpath.join(
+        posixpath.dirname(sheet_path), "_rels", posixpath.basename(sheet_path) + ".rels"
+    )
+    if sheet_rels_path not in zf.namelist():
+        return markers, images
+
+    try:
+        drawing_target = _find_target_by_type(zf.read(sheet_rels_path), "/drawing")
+    except Exception:
+        return markers, images
+    if not drawing_target:
+        return markers, images
+
+    drawing_path = _resolve_rel_target(sheet_path, drawing_target)
+    if drawing_path not in zf.namelist():
+        return markers, images
+
+    drawing_rels_path = posixpath.join(
+        posixpath.dirname(drawing_path), "_rels", posixpath.basename(drawing_path) + ".rels"
+    )
+    try:
+        drawing_rels = (
+            _parse_relationships(zf.read(drawing_rels_path))
+            if drawing_rels_path in zf.namelist()
+            else {}
+        )
+        image_rids = _parse_drawing_images(zf.read(drawing_path))
+    except Exception:
+        logger.warning("Lecture du dessin %s échouée", drawing_path, exc_info=True)
+        return markers, images
+
+    count = 0
+    for rid in image_rids:
+        target = drawing_rels.get(rid)
+        if not target:
+            continue
+        media_path = _resolve_rel_target(drawing_path, target)
+        try:
+            data = zf.read(media_path)
+        except KeyError:
+            continue
+
+        count += 1
+        ext = media_path.rsplit(".", 1)[-1] if "." in media_path else "png"
+        tag = build_image_tag(relative_path, f"sheet_{sheet_name}", count, ext)
+
+        ocr_text = ""
+        if engine is not None:
+            try:
+                ocr_text = engine.ocr_image(data, OCR_LANG)
+            except Exception:
+                logger.warning("Échec OCR image %s", tag, exc_info=True)
+
+        marker = build_image_marker(tag if want_export else None, ocr_text, OCR_LANG)
+        if not marker:
+            continue
+        markers.append(marker)
+        if want_export:
+            images.append(EmbeddedImage(filename=tag, data=data))
+
+    return markers, images
+
+
+def _resolve_rel_target(owner_part: str, target: str) -> str:
+    """Résout un `Target` de relation OOXML (absolu `/xl/...` ou relatif
+    `../drawings/...`) en chemin ZIP sans slash initial."""
+    if target.startswith("/"):
+        return target.lstrip("/")
+    base_dir = posixpath.dirname(owner_part)
+    return posixpath.normpath(posixpath.join(base_dir, target))
+
+
+def _find_target_by_type(rels_xml: bytes, type_suffix: str) -> str | None:
+    """Premier `Target` d'un fichier `.rels` dont le `Type` se termine par
+    `type_suffix` (ex: "/drawing")."""
+    try:
+        root = ET.fromstring(rels_xml)
+    except ET.ParseError:
+        return None
+    for rel in root:
+        if (rel.get("Type") or "").endswith(type_suffix):
+            return rel.get("Target")
+    return None
+
+
+def _parse_relationships(rels_xml: bytes) -> dict[str, str]:
+    """Table `Id -> Target` complète d'un fichier `.rels`."""
+    try:
+        root = ET.fromstring(rels_xml)
+    except ET.ParseError:
+        return {}
+    return {rel.get("Id", ""): rel.get("Target", "") for rel in root}
+
+
+def _parse_drawing_images(drawing_xml: bytes) -> list[str]:
+    """`rId` (attribut `r:embed`) de chaque image d'un `drawingN.xml`, dans
+    l'ordre d'apparition des ancres (`oneCellAnchor`/`twoCellAnchor`)."""
+    try:
+        root = ET.fromstring(drawing_xml)
+    except ET.ParseError:
+        return []
+    rids: list[str] = []
+    for anchor in root:
+        if not (anchor.tag.endswith("}oneCellAnchor") or anchor.tag.endswith("}twoCellAnchor")):
+            continue
+        for el in anchor.iter():
+            if el.tag.endswith("}blip"):
+                rid = next((v for k, v in el.attrib.items() if k.endswith("}embed")), None)
+                if rid:
+                    rids.append(rid)
+    return rids
 
 
 def _apply_merged_cells(grid: list[list[str]], ranges: list[tuple[int, int, int, int]]) -> None:

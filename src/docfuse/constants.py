@@ -41,6 +41,7 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".eml": "eml",
     ".mhtml": "mhtml",
     ".mht": "mhtml",
+    ".epub": "epub",
 }
 
 # Fichiers de développement traités comme texte brut (pas de parsing
@@ -289,6 +290,33 @@ OCR_MAX_PAGES_PER_FILE: int = 200
 
 OCR_MAX_PIXELS_PER_PAGE: int = 4000 * 4000
 """Plafond largeur×hauteur d'une page rastérisée — protection mémoire."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Détection d'encodage : plausibilité du décodage cp1252 (D-093)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ENCODING_MAX_CONTROL_RATIO: float = 0.01
+"""Ratio maximal de caractères de contrôle (hors tab/LF/CR) toléré dans un
+texte décodé en cp1252 pour être accepté tel quel — au-delà, on retombe sur
+charset-normalizer plutôt que de garder un cp1252 mal choisi."""
+
+ENCODING_PLAUSIBILITY_SAMPLE_CHARS: int = 100_000
+"""Nombre de caractères analysés pour le test de plausibilité — coût borné
+même sur un gros fichier."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Garde-fou "bombe zip" pour les formats conteneurs ZIP (D-093)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ZIP_BOMB_MAX_RATIO: float = 200.0
+"""Ratio (taille décompressée / taille compressée) au-delà duquel un
+conteneur ZIP (DOCX/PPTX/XLSX/ODF/EPUB) est jugé suspect. Heuristique, pas
+une science exacte — combiné à `ZIP_BOMB_MIN_UNCOMPRESSED_BYTES` pour éviter
+les faux positifs sur un petit fichier légitimement très répétitif."""
+
+ZIP_BOMB_MIN_UNCOMPRESSED_BYTES: int = 300 * 1024 * 1024
+"""Volume décompressé minimal (300 Mo) pour que le ratio ci-dessus déclenche
+un rejet — un petit fichier avec un ratio élevé n'est jamais dangereux."""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Performance

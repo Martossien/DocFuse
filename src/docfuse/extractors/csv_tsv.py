@@ -11,7 +11,8 @@ from pathlib import Path
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import detect_encoding
+from docfuse.extractors.text import decode_text
+from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -32,8 +33,10 @@ class CsvTsvExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, data = detect_encoding(raw)
-            text_raw = data.decode(encoding, errors="replace")
+            encoding, text_raw, mojibake_repaired = decode_text(raw)
+            extra_metadata: dict[str, str] = {}
+            if mojibake_repaired:
+                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
             # M-05: Détecter si le CSV utilise ; (fréquent en français)
@@ -57,6 +60,7 @@ class CsvTsvExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+                extra_metadata=extra_metadata,
             )
         except Exception as exc:
             return error_result(path, relative_path, cls.file_type, exc)

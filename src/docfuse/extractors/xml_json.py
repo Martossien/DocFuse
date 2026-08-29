@@ -11,7 +11,7 @@ from pathlib import Path
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import detect_encoding
+from docfuse.extractors.text import decode_text
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -33,10 +33,16 @@ class JsonExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, data = detect_encoding(raw)
-            text_raw = data.decode(encoding, errors="replace")
+            # D-093 : la réparation mojibake (ftfy) est appliquée AVANT
+            # json.loads() — un JSON syntaxiquement corrompu par un
+            # double-encodage UTF-8 en amont peut ainsi redevenir du JSON
+            # valide au lieu de finir systématiquement en ERROR (D-092).
+            encoding, text_raw, mojibake_repaired = decode_text(raw)
             obj = json.loads(text_raw)
             text = json.dumps(obj, indent=2, ensure_ascii=False)
+            extra_metadata: dict[str, str] = {}
+            if mojibake_repaired:
+                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             return ExtractedFile(
                 path=path,
@@ -47,6 +53,7 @@ class JsonExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+                extra_metadata=extra_metadata,
             )
         except json.JSONDecodeError as exc:
             # D-092 : un JSON syntaxiquement invalide (tronqué, corrompu,
@@ -85,12 +92,14 @@ class XmlExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, data = detect_encoding(raw)
-            text_raw = data.decode(encoding, errors="replace")
+            encoding, text_raw, mojibake_repaired = decode_text(raw)
             # Migration: minidom déprécié → ElementTree.indent (Python 3.9+)
             root_el = ET.fromstring(text_raw)
             ET.indent(root_el, space="  ")
             text = ET.tostring(root_el, encoding="unicode")
+            extra_metadata: dict[str, str] = {}
+            if mojibake_repaired:
+                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             return ExtractedFile(
                 path=path,
@@ -101,6 +110,7 @@ class XmlExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+                extra_metadata=extra_metadata,
             )
         except ET.ParseError as exc:
             # D-092 : même principe que JsonExtractor — message clair plutôt
@@ -134,8 +144,10 @@ class YamlIniExtractor(Extractor):
     ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
-            encoding, data = detect_encoding(raw)
-            text = data.decode(encoding, errors="replace")
+            encoding, text, mojibake_repaired = decode_text(raw)
+            extra_metadata: dict[str, str] = {}
+            if mojibake_repaired:
+                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             return ExtractedFile(
                 path=path,
@@ -146,6 +158,7 @@ class YamlIniExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 encoding=encoding,
+                extra_metadata=extra_metadata,
             )
         except Exception as exc:
             return error_result(path, relative_path, path.suffix.lower().lstrip("."), exc)

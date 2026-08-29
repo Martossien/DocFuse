@@ -14,7 +14,8 @@ from typing import Any
 
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
-from docfuse.extractors.text import detect_encoding
+from docfuse.extractors.text import detect_encoding, repair_mojibake
+from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -74,6 +75,12 @@ class HtmlExtractor(Extractor):
                 encoding, data = detect_encoding(raw)
                 html = data.decode(encoding, errors="replace")
 
+            # D-093 : réparation mojibake, quel que soit le chemin de
+            # décodage pris ci-dessus (Dammit ou detect_encoding()).
+            repaired_html = repair_mojibake(html)
+            mojibake_repaired = repaired_html != html
+            html = repaired_html
+
             soup = BeautifulSoup(html, "lxml")
 
             # Supprimer les scripts et styles
@@ -95,6 +102,9 @@ class HtmlExtractor(Extractor):
             image_count = image_counter["count"]
 
             full_text = "\n\n".join(parts)
+            extra_metadata: dict[str, str] = {}
+            if mojibake_repaired:
+                extra_metadata["mojibake_repaired"] = t("text.mojibake_repaired_note")
 
             return ExtractedFile(
                 path=path,
@@ -106,6 +116,7 @@ class HtmlExtractor(Extractor):
                 status=FileStatus.READY,
                 encoding=encoding,
                 image_count=image_count,
+                extra_metadata=extra_metadata,
             )
         except Exception as exc:
             logger.exception("Erreur extraction HTML %s", path)

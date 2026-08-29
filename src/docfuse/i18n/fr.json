@@ -108,6 +108,8 @@
   "error.corrupt_file": "Fichier corrompu",
   "error.permission": "Permission refusée",
   "error.unknown": "Erreur inconnue",
+  "error.zip_bomb_suspected": "Fichier suspect (taux de compression anormal), extraction refusée par sécurité",
+  "error.encrypted_epub": "Fichier EPUB protégé (DRM), impossible à lire",
 
   "inventory.special_ignored": "Fichier spécial ignoré",
   "inventory.excluded_by_pattern": "Exclu par pattern",
@@ -150,9 +152,14 @@
 
   "source_header.secrets_detected": "alerte_secret",
   "source_header.duplicate_of": "doublon_de",
+  "source_header.mojibake_repaired": "encodage_repare",
   "source_header.markdown_base64_stripped": "images_base64_retirees",
   "source_header.pdf_dedup": "notes",
   "source_header.ocr": "ocr",
+  "source_header.epub_title": "titre",
+  "source_header.epub_author": "auteur",
+
+  "text.mojibake_repaired_note": "Texte corrompu (encodage incohérent) détecté et corrigé automatiquement",
 
   "ocr.tesseract": "Tesseract",
   "ocr.applied_note": "{pages_ocr} page(s) scannée(s) reconnue(s) par OCR, {pages_mixed} page(s) mixte(s) (texte + OCR), {pages_failed} page(s) restée(s) illisible(s), sur {pages_total} page(s) ({lang})",

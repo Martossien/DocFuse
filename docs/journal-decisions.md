@@ -1543,6 +1543,135 @@ mémoire jusqu'à la génération du corpus), nouveau `output/image_writer.py`
   (`__MACOSX/` ignoré). Reproduit et confirmé corrigé sur les fichiers
   réels ayant révélé le bug.
 
+### D-093 : mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF
+
+**Contexte** : après avoir testé D-091/D-092 en conditions réelles et
+comparé la gestion de fichiers de DocFuse à celle d'un projet tiers pour
+trouver des idées (sans copier de code, sans attribution dans aucun
+artefact du dépôt — contrainte explicite de l'utilisateur), 5 pistes
+retenues, une analysée sans implémentation.
+
+**1. Réparation du mojibake (`ftfy`, nouvelle dépendance)** — `ftfy`
+(Apache-2.0, dépendance unique `wcwidth` MIT — licences vérifiées) répare
+les cas de double-encodage UTF-8/Latin-1 évidents. Nouvelle fonction
+combinée `extractors/text.py::decode_text()` (détecte, décode, répare),
+appliquée dans les 5 extracteurs qui partagent `detect_encoding()`
+(text/markdown/csv_tsv/xml_json ×3/html), toujours avant tout parsing
+structuré (JSON/XML) — un fichier corrompu peut ainsi redevenir valide au
+lieu de finir systématiquement en `ERROR` (D-092). Jamais silencieux :
+`extra_metadata["mojibake_repaired"]` trace toute modification, visible en
+en-tête `## SOURCE:` et rapport, comme les notes existantes. **Testé sur
+les 2 fichiers réels ayant motivé ce correctif**
+(`wan22_corrected_workflow*.json`, D-092) : `ftfy` répare une partie du
+texte (`decode_inconsistent_utf8`, `fix_character_width`) mais **ne suffit
+pas à rendre ces 2 fichiers syntaxiquement valides** — leur corruption
+combine plusieurs passes de mojibake sur du texte chinois, un cas plus
+retors que le schéma simple testé unitairement. Honnêteté : ces 2 fichiers
+précis restent en `ERROR` (message clair, D-092), mais `ftfy` reste une
+amélioration nette pour le cas général (mojibake simple, plus fréquent).
+**Faux positifs trouvés et corrigés en testant sur ~/Téléchargements — 3
+passes successives, chacune re-testée en conditions réelles avant de
+considérer le correctif terminé** : la configuration par défaut de `ftfy`
+marquait ~145 fichiers non corrompus comme « réparés ». Trois causes
+distinctes, chacune isolée en inspectant le diff caractère par caractère
+d'un vrai fichier flagué avant de désactiver l'option correspondante :
+1. `uncurl_quotes` : guillemets typographiques légitimes (`’`) convertis
+   en guillemets ASCII (`'`) — normalisation cosmétique, pas une
+   réparation. 145 → 79 fichiers après désactivation.
+2. `fix_line_breaks` : CRLF converti en LF sur n'importe quel fichier
+   texte, sans lien avec le mojibake — la gestion des fins de ligne est
+   déjà un choix explicite du corpus généré (`line_ending=`), pas de
+   l'extraction. 79 → 41 fichiers.
+3. `fix_character_width` : cassait un littéral de chaîne JS listant les
+   espaces Unicode (bundle minifié réel, `　` collapsé en espace
+   ASCII simple) et convertissait la ponctuation chinoise pleine chasse
+   légitime (`，`) en ASCII dans un JSON réel contenant du texte chinois.
+   41 → 2 fichiers (Documents) / 39 (Téléchargements).
+Restait ensuite un résidu attendu et accepté, pas un bug : la
+normalisation NFC (conservée) fusionne U+2000/U+2001 (EN/EM QUAD) avec
+U+2002/U+2003 (EN/EM SPACE) — des singletons canoniquement équivalents
+selon Unicode lui-même, un comportement standard que fait tout logiciel
+Unicode-aware, pas une perte de sens ; `fix_c1_controls` (partie de
+`fix_encoding`, volontairement conservé) répare aussi de vrais octets
+Windows-1252 égarés comme `\x85` → `…`, exactement le comportement
+recherché. Seules les heuristiques de détection/correction d'encodage
+réellement corrompu (famille `fix_encoding`) restent actives ; `ftfy.
+TextFixerConfig(uncurl_quotes=False, fix_latin_ligatures=False,
+fix_line_breaks=False, fix_character_width=False)`. 6 tests de
+non-régression dédiés (guillemets/ligatures/CRLF/ponctuation
+chinoise/espace pleine chasse légitimes préservés tels quels + réparation
+cp1252 réelle toujours fonctionnelle).
+
+**2. Garde-fou "bombe zip"** — nouveau `extractors/base.py::is_zip_bomb()`
+(même emplacement que `is_ole_encrypted`) : ratio décompressé/compressé
+(`ZIP_BOMB_MAX_RATIO`=200) **combiné à** un volume décompressé minimal
+(`ZIP_BOMB_MIN_UNCOMPRESSED_BYTES`=300 Mo) — un petit fichier très
+répétitif n'est jamais dangereux même avec un ratio élevé. Appelé en tout
+début d'`extract()` dans DOCX/PPTX/XLSX/ODF/EPUB, avant tout parsing.
+Nouvelle clé i18n `error.zip_bomb_suspected`.
+
+**3. Validation de plausibilité après décodage cp1252** —
+`extractors/text.py::_looks_plausible()` : ratio de caractères de contrôle
+Unicode (catégorie `Cc`, hors tab/LF/CR) sur un échantillon
+(`ENCODING_PLAUSIBILITY_SAMPLE_CHARS`=100 000 caractères, coût borné).
+cp1252 accepte presque tous les octets — sans ce garde-fou, un fichier qui
+échoue le test UTF-8 strict pour une raison anodine (séquence multi-octets
+tronquée en fin de fichier) tombait directement sur un cp1252 potentiellement
+mal choisi, sans jamais tenter `charset-normalizer`.
+
+**4. Extracteur EPUB natif (`extractors/epub.py`, aucune nouvelle
+dépendance)** — **découverte importante** : `ebooklib`, la bibliothèque
+EPUB Python la plus évidente, est en **AGPLv3+** (vérifié sur PyPI) —
+strictement interdite (règle 12.1). Implémentation native sur
+`zipfile`+`ElementTree`+BeautifulSoup, même approche que `extractors/odf.py`
+pour un format structurellement très proche (ZIP de XHTML/OPF). Pipeline :
+`is_zip_bomb()` → `META-INF/container.xml` (chemin OPF) → OPF
+(`<metadata>` titre/auteur → `extra_metadata`, `<manifest>` id→href,
+`<spine>` ordre de lecture) → chaque chapitre XHTML extrait via le parcours
+structuré déjà testé de `extractors/html.py::_extract_elements` (titres →
+Markdown, tableaux, listes — réutilisé, pas dupliqué). DRM
+(`META-INF/encryption.xml`) détecté explicitement → erreur claire
+(`error.encrypted_epub`) plutôt qu'une tentative d'extraction sur du
+contenu chiffré. Garde-fou de non-régression :
+`test_ebooklib_not_a_dependency` (même esprit que
+`test_mistral_common_not_a_dependency`).
+
+**5. `.doc`/`.msg` — analyse seule, aucun code** : `extract-msg` (choix
+évident pour `.msg`) est en **GPL**, interdit. `olefile` (BSD) donne accès
+aux flux OLE2 bruts des deux formats mais aucune logique d'extraction de
+texte prête à l'emploi et compatible licence — `.doc` nécessiterait de
+décoder soi-même la "piece table" du format binaire Word 97-2003 (chantier
+important, source d'erreurs) ; `.msg` (spec MS-OXMSG) est plus direct mais
+reste à écrire de zéro. Conclusion : non recommandé maintenant, aucun
+chemin propre/léger/conforme licence. Piste v1.2+ si des fichiers `.msg`
+réels posent un jour problème (voir « Reste à faire » AGENTS.md).
+
+**6. Extension de l'OCR/export d'images (D-091) à XLSX et ODF (odt/odp)** —
+`openpyxl` en `read_only=True` (obligatoire pour les gros classeurs)
+n'expose aucun dessin/image ; résolu en lisant le XML brut du ZIP,
+exactement comme `_merge_ranges()`/`_apply_merged_cells()` le font déjà
+dans ce même fichier pour les cellules fusionnées. Chaîne XML vérifiée
+empiriquement (XLSX de test généré et inspecté) :
+`sheetN.xml` → relation "drawing" → `drawingM.xml` (ancres
+`oneCellAnchor`/`twoCellAnchor`, chacune avec un `<a:blip r:embed>`) →
+relation "image" → média réel. Position : `sheet_{nom_feuille}`, marqueurs
+regroupés **en fin de feuille** (pas d'ancrage cellule-par-cellule — la
+position XML de l'ancre ne correspond pas forcément à une ligne "avec
+données" du tableau pipe déjà généré, une fausse précision serait
+trompeuse). ODF plus simple : `<draw:frame><draw:image xlink:href="...">`
+donne le chemin ZIP direct, sans indirection par relation — hooké dans la
+boucle `office_text.children` existante (odt, séquentiel) et
+`_extract_presentation` (odp, `slide{i}` comme PPTX). `.ods` non traité
+pour la position (comme XLSX, hors scope — feuilles de calcul, images
+rarement porteuses de contenu). Même infrastructure que D-091
+(`core/embedded_images.py`, `resolve_ocr_engine()`), aucun nouveau module.
+
+**Vérification** : 452 tests (nouveaux : mojibake/plausibilité,
+zip-bomb ×9, EPUB ×7, images XLSX ×3, images ODT/ODP ×5), ruff/mypy stricts
+propres, recette 7/7 (92 extensions listées, +1 pour `.epub`). Re-testé sur
+~/Documents + ~/Téléchargements (1413 fichiers réels) avec toutes les
+nouvelles fonctionnalités actives simultanément.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

@@ -24,6 +24,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   d'un ZIP (métadonnées `._nom`, jamais du contenu réel) — donnait
   auparavant une fausse alerte « fichier corrompu » sur des fichiers qui
   n'ont jamais été le vrai contenu.
+- **Réparation automatique du mojibake** (encodage incohérent,
+  double-encodage UTF-8/Latin-1) sur les fichiers texte/Markdown/CSV/
+  JSON/XML/HTML — signalé dans l'en-tête `## SOURCE:` quand une correction
+  a eu lieu, jamais silencieux.
+- **Faux-positifs d'encodage cp1252 réduits** : un décodage cp1252
+  implausible (beaucoup de caractères de contrôle) retombe désormais sur
+  `charset-normalizer` au lieu d'être accepté aveuglément.
 
 ### Ajouté
 
@@ -44,6 +51,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   explicite (document + emplacement), et un tag `[[IMAGE: nom.png]]` est
   inséré dans le corpus au point d'apparition, pour qu'un LLM multimodal
   externe sache où positionner sa description.
+- **OCR/export des images intégrées étendu à Excel (.xlsx) et OpenDocument
+  (.odt/.odp)** — même mécanisme que DOCX/PPTX : OCR automatique, export
+  optionnel avec tag de position (`sheet_NomFeuille`/`slideN`).
+- **Support EPUB** (`.epub`) — texte extrait dans l'ordre de lecture
+  (spine), titre/auteur capturés, tableaux/listes convertis en Markdown.
+  Aucun fichier chiffré/DRM traité (erreur claire à la place).
+- **Garde-fou "bombe zip"** sur tous les formats conteneurs ZIP
+  (DOCX/PPTX/XLSX/ODF/EPUB) : un fichier au taux de compression anormal
+  est rejeté avant tout parsing, par sécurité.
 
 ## [0.1.4] - 2026-08-29 — Beta
 

@@ -17,7 +17,7 @@ from docfuse.core.embedded_images import build_image_marker, build_image_tag
 from docfuse.core.ocr.base import OcrEngine
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted
+from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted, is_zip_bomb
 from docfuse.i18n import t
 from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -51,6 +51,18 @@ class PptxExtractor(Extractor):
                     size_bytes=path.stat().st_size,
                     status=FileStatus.ERROR,
                     error_message=t("error.encrypted_office"),
+                )
+
+            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
+            if is_zip_bomb(path):
+                return ExtractedFile(
+                    path=path,
+                    relative_path=relative_path,
+                    extension="pptx",
+                    file_type=cls.file_type,
+                    size_bytes=path.stat().st_size,
+                    status=FileStatus.ERROR,
+                    error_message=t("error.zip_bomb_suspected"),
                 )
 
             from pptx import Presentation

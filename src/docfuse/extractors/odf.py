@@ -12,9 +12,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from docfuse.constants import OCR_LANG
+from docfuse.core.embedded_images import build_image_marker, build_image_tag
+from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
-from docfuse.models.extraction_result import ExtractedFile
+from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
+from docfuse.i18n import t
+from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -31,11 +36,27 @@ class OdfExtractor(Extractor):
         return path.suffix.lower() in (".odt", ".ods", ".odp")
 
     @classmethod
-    def extract(
-        cls, path: Path, relative_path: str, _extract_images: bool = False
-    ) -> ExtractedFile:
+    def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         try:
+            # D-093 : garde-fou "bombe zip" avant tout parsing du conteneur.
+            if is_zip_bomb(path):
+                return ExtractedFile(
+                    path=path,
+                    relative_path=relative_path,
+                    extension=path.suffix.lower().lstrip("."),
+                    file_type=path.suffix.lower().lstrip("."),
+                    size_bytes=path.stat().st_size,
+                    status=FileStatus.ERROR,
+                    error_message=t("error.zip_bomb_suspected"),
+                )
+
             from bs4 import BeautifulSoup
+
+            # D-093 : OCR/export des images intégrées (odt/odp), seulement
+            # si utile — sinon zéro coût ajouté par rapport à avant.
+            engine = resolve_ocr_engine()
+            want_export = extract_images
+            embedded_images: list[EmbeddedImage] = []
 
             with zipfile.ZipFile(str(path), "r") as zf:
                 # Compter les images
@@ -74,7 +95,11 @@ class OdfExtractor(Extractor):
                 office_presentation = soup.find("office:presentation")
                 office_text: BTag | None = None
                 if isinstance(office_presentation, BTag):
-                    parts.extend(_extract_presentation(office_presentation))
+                    presentation_parts, presentation_images = _extract_presentation(
+                        office_presentation, zf, relative_path, engine, want_export
+                    )
+                    parts.extend(presentation_parts)
+                    embedded_images.extend(presentation_images)
                 else:
                     found_text = soup.find("office:text")
                     if isinstance(found_text, BTag):
@@ -95,6 +120,7 @@ class OdfExtractor(Extractor):
                         if text:
                             parts.append(text)
                 else:
+                    image_counter = [0]
                     for child in office_text.children:
                         if not isinstance(child, BTag):
                             continue
@@ -123,6 +149,28 @@ class OdfExtractor(Extractor):
                                     if text:
                                         parts.append(f"- {text}")
 
+                        # D-093 : images intégrées (`draw:frame`/`draw:image`)
+                        # — ancrées au paragraphe (inline, cas le plus
+                        # fréquent) ou directement à la page (`child` lui
+                        # -même un frame, aucune des branches ci-dessus ne
+                        # matchant alors "table"/"p"/"h"/"list").
+                        if want_export or engine is not None:
+                            for href in _iter_image_hrefs(child):
+                                image_counter[0] += 1
+                                marker, embedded = _image_marker(
+                                    zf,
+                                    href,
+                                    relative_path,
+                                    None,
+                                    image_counter[0],
+                                    engine,
+                                    want_export,
+                                )
+                                if marker:
+                                    parts.append(marker)
+                                if embedded:
+                                    embedded_images.append(embedded)
+
                 # D-072 : en-têtes/pieds de page ODT vivent dans styles.xml
                 # (office:master-styles), jamais dans content.xml — invisibles
                 # sans ce second passage. Contiennent souvent des métadonnées
@@ -141,6 +189,7 @@ class OdfExtractor(Extractor):
                     text=full_text,
                     status=FileStatus.READY,
                     image_count=image_count,
+                    embedded_images=embedded_images,
                 )
         except Exception as exc:
             logger.exception("Erreur extraction ODF %s", path)
@@ -163,7 +212,13 @@ def _table_rows_to_parts(table_tag: Any) -> list[str]:
     return parts
 
 
-def _extract_presentation(office_presentation: Any) -> list[str]:
+def _extract_presentation(
+    office_presentation: Any,
+    zf: zipfile.ZipFile,
+    relative_path: str,
+    engine: OcrEngine | None,
+    want_export: bool,
+) -> tuple[list[str], list[EmbeddedImage]]:
     """Contenu d'un `office:presentation` (.odp), diapo par diapo (D-087).
 
     Corrige deux problèmes du fallback générique (`text:p`/`text:h`
@@ -176,10 +231,15 @@ def _extract_presentation(office_presentation: Any) -> list[str]:
       fondues dans le texte "normal" (risque de fuite de contenu non
       destiné à la diffusion).
     - Aucune séparation entre diapos.
+
+    D-093 : les images intégrées de chaque diapo sont détectées et
+    numérotées par diapo (`slide{i}`, comme PPTX), avant que les tables
+    soient retirées de l'arbre (une image dans une cellule reste détectée).
     """
     from bs4 import Tag as BTag
 
     parts: list[str] = []
+    embedded_images: list[EmbeddedImage] = []
     for i, page in enumerate(office_presentation.find_all("draw:page", recursive=False), 1):
         notes_texts: list[str] = []
         for notes in page.find_all("presentation:notes"):
@@ -189,6 +249,17 @@ def _extract_presentation(office_presentation: Any) -> list[str]:
             notes.extract()  # retiré de l'arbre : jamais compté deux fois
 
         slide_parts: list[str] = []
+
+        if want_export or engine is not None:
+            for slide_image_index, href in enumerate(_iter_image_hrefs(page), 1):
+                marker, embedded = _image_marker(
+                    zf, href, relative_path, f"slide{i}", slide_image_index, engine, want_export
+                )
+                if marker:
+                    slide_parts.append(marker)
+                if embedded:
+                    embedded_images.append(embedded)
+
         # Tables d'abord, puis retirées de l'arbre — sinon le texte de leurs
         # cellules serait aussi capté par la recherche text:p/text:h plus
         # bas (une cellule contient un text:p) et compté deux fois.
@@ -210,7 +281,74 @@ def _extract_presentation(office_presentation: Any) -> list[str]:
             parts.append(f"## Diapo {i}\n" + "\n".join(slide_parts))
         if notes_texts:
             parts.append(f"[notes orateur diapo {i}]\n" + "\n".join(notes_texts))
-    return parts
+    return parts, embedded_images
+
+
+def _iter_image_hrefs(tag: Any) -> list[str]:
+    """Chemins ZIP (`xlink:href`) des images intégrées (`draw:frame` >
+    `draw:image`) trouvées dans `tag`, y compris `tag` lui-même si c'est
+    déjà un `draw:frame` (ancrage "à la page", D-093). Contrairement à
+    OOXML (DOCX/PPTX/XLSX), pas d'indirection par relation : le chemin ZIP
+    est donné directement par `xlink:href`."""
+    from bs4 import Tag as BTag
+
+    def _is_frame(t: Any) -> bool:
+        return (
+            isinstance(t, BTag)
+            and bool(t.name)
+            and (t.name == "frame" or t.name.endswith(":frame"))
+        )
+
+    def _is_image(t: Any) -> bool:
+        return (
+            isinstance(t, BTag)
+            and bool(t.name)
+            and (t.name == "image" or t.name.endswith(":image"))
+        )
+
+    frames = [tag] if _is_frame(tag) else []
+    frames.extend(t for t in tag.find_all(True, recursive=True) if _is_frame(t))
+
+    hrefs: list[str] = []
+    for frame in frames:
+        image_tag = next((t for t in frame.find_all(True, recursive=True) if _is_image(t)), None)
+        if image_tag is None:
+            continue
+        href = image_tag.get("xlink:href")
+        if href:
+            hrefs.append(str(href))
+    return hrefs
+
+
+def _image_marker(
+    zf: zipfile.ZipFile,
+    href: str,
+    relative_path: str,
+    location: str | None,
+    index: int,
+    engine: OcrEngine | None,
+    want_export: bool,
+) -> tuple[str, EmbeddedImage | None]:
+    """Construit le marqueur inline (et l'image à exporter) d'une image ODF
+    (D-093). N'échoue jamais : une image illisible est ignorée."""
+    try:
+        data = zf.read(href)
+    except KeyError:
+        return "", None
+
+    ext = href.rsplit(".", 1)[-1] if "." in href else "png"
+    tag = build_image_tag(relative_path, location, index, ext)
+
+    ocr_text = ""
+    if engine is not None:
+        try:
+            ocr_text = engine.ocr_image(data, OCR_LANG)
+        except Exception:
+            logger.warning("Échec OCR image %s", tag, exc_info=True)
+
+    marker = build_image_marker(tag if want_export else None, ocr_text, OCR_LANG)
+    embedded = EmbeddedImage(filename=tag, data=data) if want_export and marker else None
+    return marker, embedded
 
 
 def _extract_master_headers_footers(styles_xml: bytes) -> list[str]:

@@ -12,9 +12,12 @@ from docfuse.models.extraction_result import ExtractedFile
 _EXTRA_METADATA_LABELS: list[tuple[str, str]] = [
     ("secrets_detected", "source_header.secrets_detected"),
     ("duplicate_of", "source_header.duplicate_of"),
+    ("mojibake_repaired", "source_header.mojibake_repaired"),
     ("markdown_base64_stripped", "source_header.markdown_base64_stripped"),
     ("pdf_dedup", "source_header.pdf_dedup"),
     ("ocr", "source_header.ocr"),
+    ("epub_title", "source_header.epub_title"),
+    ("epub_author", "source_header.epub_author"),
 ]
 
 
