@@ -1508,3 +1508,16 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   format pour quel outil ? », sans nommer d'outil tiers.
 - 2 tests (relecture pypdf du PDF généré), 534 verts, 572 collectés.
 
+### Release 0.1.6 beta — ✅ Publiée
+
+- Procédure AGENTS.md §13 suivie : bump `0.1.6` (pyproject + `__init__`),
+  CHANGELOG `[0.1.6]`, `docs/releases/v0.1.6.md`, README FR/EN (badge de
+  version, badge de tests 534, tableau de téléchargement, section « Quel
+  format pour quel outil ? »), tag `v0.1.6`, Release GitHub — les zips
+  `CorpusOne`/`CorpusOne-OCR` et leurs SHA-256 attachés par la CI.
+- Pré-requis vérifiés avant publication, à la demande de l'utilisateur :
+  CI verte sur Ubuntu et Windows après trois correctifs de portabilité
+  (limite de champ CSV, nom de fichier de test, CRLF dans `<pre>`), et test
+  réel sur ~/Documents + ~/Téléchargements **en Markdown et en PDF** (voir
+  D-100 pour les chiffres).
+

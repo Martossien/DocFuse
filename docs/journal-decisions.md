@@ -2156,9 +2156,12 @@ tokens inutile pour une LLM à grand contexte, donc jamais par défaut.
 
 **Vérification** : `tests/test_pdf_page_header.py` (pypdf relit le PDF
 généré : chaque page porte son fichier, jamais celui du voisin ; chemin
-long raccourci), suite complète verte, test réel avant v0.1.6 sur
-~/Documents + ~/Téléchargements en Markdown et en PDF (voir
-journal-avancement).
+long raccourci), suite complète verte. Test réel avant v0.1.6 sur
+~/Documents + ~/Téléchargements (1 417 fichiers, OCR + export) : Markdown
+identique octet pour octet au run de fin d'audit (114,8 Mo, 1 s) ; PDF de
+**38 649 pages** (75 Mo, 1 675 s — ReportLab, sans optimisation) relu par
+pypdf : 60 pages tirées au hasard portent toutes leur en-tête `fichier
+(i/1415)`, première page `(1/1415)`, dernière `(1415/1415)`.
 
 ---
 

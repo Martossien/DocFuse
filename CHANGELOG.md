@@ -8,7 +8,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
-## [Non publié]
+## [0.1.6] - 2026-08-29 — Beta
+
+Version issue d'un audit complet du code (bugs, encodage, performance,
+maintenabilité — D-096 à D-099) et d'un retour d'usage sur le corpus PDF
+(D-100).
 
 ### Ajouté
 
@@ -97,6 +101,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     le résumé ; la barre de progression ne recule plus.
   - Images exportées : deux documents homonymes ne s'écrasent plus.
   - Note « secrets potentiels » plafonnée à 10 lignes par type.
+
+### Technique
+
+- 534 tests (572 collectés ; 39 ignorés sans `tests/samples_real/`), 100
+  décisions archivées (D-001 à D-100). Tests de non-régression par lot
+  d'audit : `test_regressions_d096.py` à `d099.py`, `test_pdf_page_header.py`.
+- CI Windows : `csv.field_size_limit(sys.maxsize)` levait `OverflowError`
+  (C long 32 bits) ; nom de fichier `a<b>.txt` invalide dans un test ; CRLF
+  conservés dans les blocs `<pre>` HTML — corrigés.
+- Nouvelles constantes documentées (`OCR_MAX_CONCURRENCY`, `MAX_WORKERS`
+  dérivé du CPU, `VERBATIM_EXTENSIONS`, `OUTPUT_DIR_NAME`, `REPORT_SUFFIX`,
+  `SECRETS_NOTE_MAX_LINES_PER_KIND`, `PDF_PAGE_HEADER_MAX_CHARS`…), nouveau
+  module `output/paths.py`.
 
 ## [0.1.5] - 2026-08-29 — Beta
 
@@ -417,6 +434,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.1.6]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.6
 [0.1.5]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.3
