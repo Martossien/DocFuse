@@ -8,7 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
-## [Non publié]
+## [0.1.5] - 2026-08-29 — Beta
 
 ### Corrigé
 
@@ -63,6 +63,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Support des formats Office legacy binaires** : `.doc`, `.xls`, `.ppt`
   (Word/Excel/PowerPoint 97-2003) et `.msg` (email Outlook) — aucun
   binaire externe, aucune installation requise sur la machine.
+
+### Technique
+
+- 509 tests collectés (471 passed / 39 skipped) — 94 décisions archivées
+  (D-001 à D-094).
+- Nouvelles dépendances : `ftfy` (réparation mojibake), `office_oxide`
+  (extension native Rust, `.doc`/`.xls`/`.ppt`), `python-oxmsg` (`.msg`) —
+  toutes vérifiées MIT/Apache-2.0/BSD, sans GPL/AGPL/LGPL. `office_oxide`
+  étant un binaire compilé par plateforme, son empaquetage PyInstaller
+  Windows est à confirmer sur cette Release (pas d'environnement
+  Windows/Wine disponible en session de développement pour le tester).
 
 ## [0.1.4] - 2026-08-29 — Beta
 
@@ -316,6 +327,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.1.5]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.2
