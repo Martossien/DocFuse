@@ -10,6 +10,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Non publié]
 
+### Ajouté
+
+- **Corpus PDF : chaque page indique son fichier source** (D-100) —
+  l'en-tête de page porte désormais `Corpus DocFuse — fichier (3/12)` en
+  plus du numéro de page. Les assistants d'entreprise qui indexent un PDF
+  le découpent page par page : chaque passage reste ainsi attribuable à sa
+  source, ce qu'un `.md` découpé à taille fixe ne garantit pas. Nouvelle
+  section README « Quel format pour quel outil ? » (FR/EN) : Markdown pour
+  un LLM qui reçoit le fichier entier, PDF pour un assistant à recherche.
+
 ### Corrigé
 
 - **GUI : fenêtre maximisée au démarrage sous Windows** — retour utilisateur

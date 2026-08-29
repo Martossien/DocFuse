@@ -251,6 +251,10 @@ CSV_FIELD_SIZE_LIMIT: int = 2**31 - 1
 tout fichier à long champ). `sys.maxsize` lève `OverflowError` sous Windows
 (C long 32 bits) — valeur portable, 2 Go par champ suffisent largement."""
 
+PDF_PAGE_HEADER_MAX_CHARS: int = 70
+"""Longueur maximale du chemin relatif inscrit dans l'en-tête de chaque page
+du corpus PDF (D-100) ; au-delà, raccourci par la gauche."""
+
 UNUSUAL_CONTEXT_LIMIT: int = 1_000_000
 """Au-delà de ce plafond, un avertissement « valeur inhabituelle » est émis
 (CdC §10.3, M-11)."""

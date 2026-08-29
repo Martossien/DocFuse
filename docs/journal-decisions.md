@@ -2116,4 +2116,50 @@ exportées, corpus de 114 Mo avec 1 415 blocs SOURCE (= 1 417 − 2), 399 s.
 
 ---
 
+### D-100 : en-tête de page PDF avec le fichier source — le PDF pour les assistants à recherche
+
+**Contexte** : l'utilisateur a rejoué les 7 prompts de diagnostic (voir
+D-095) dans un assistant d'entreprise tiers, cette fois avec le corpus
+**PDF** de DocFuse au lieu du `.md` : résultat nettement meilleur (≈ 4/7
+contre un quasi-échec), sans être fiable — la LLM locale à contexte long
+fait 7/7 sur le `.md`. L'assistant décrit lui-même sa méthode : il découpe
+le PDF **page par page** en « passages » avec métadonnées. Or
+`pdf_writer` fait un saut de page entre chaque source : les passages d'un
+PDF sont alignés sur les fichiers, ceux d'un `.md` (découpage à taille
+fixe) sont à cheval sur deux `## SOURCE:` et perdent leur attribution. Les
+erreurs restantes (« premier fichier » faux, « ligne précédente » qui est
+en réalité 12 lignes après) sont des artefacts de découpage/recherche.
+
+**Décision** : rendre chaque page du PDF autoporteuse. L'en-tête de page
+inscrit désormais `Corpus DocFuse — <fichier> (i/N)` (clé i18n
+`corpus.source_position`, chemin raccourci par la gauche au-delà de
+`PDF_PAGE_HEADER_MAX_CHARS`) à côté du numéro de page. Implémentation :
+un flowable invisible `_SourceMarker` avant chaque en-tête SOURCE, un
+gabarit `_CorpusDocTemplate` qui note le dernier marqueur vu
+(`afterFlowable`) et dessine l'en-tête en fin de page (`afterPage`) —
+comme chaque source commence sur une nouvelle page, une page ne contient
+jamais qu'un fichier, le dernier marqueur est le bon. `SimpleDocTemplate`
++ `onPage` ne convenait pas : `onPage` est appelé en *début* de page,
+avant les flowables, donc avec le fichier de la page précédente.
+
+**Documentation** : nouvelle section README FR/EN « Quel format pour quel
+outil ? » — Markdown pour un LLM qui reçoit le fichier entier, PDF pour un
+assistant qui indexe et répond par recherche, avec la limite explicite :
+un tel assistant ne lit jamais tout le corpus, DocFuse garantit le fichier
+produit, pas ce que l'outil aval choisit d'en lire. Aucun outil tiers n'est
+nommé.
+
+**Rejeté (pour l'instant)** : option « repères RAG » dans le Markdown
+(ligne d'ancrage `[[SOURCE: fichier — page N]]` à chaque page et tous les
+~80 lignes) — proposée à l'utilisateur, en attente de décision ; coût en
+tokens inutile pour une LLM à grand contexte, donc jamais par défaut.
+
+**Vérification** : `tests/test_pdf_page_header.py` (pypdf relit le PDF
+généré : chaque page porte son fichier, jamais celui du voisin ; chemin
+long raccourci), suite complète verte, test réel avant v0.1.6 sur
+~/Documents + ~/Téléchargements en Markdown et en PDF (voir
+journal-avancement).
+
+---
+
 *Fin du journal des décisions — Session 14.*

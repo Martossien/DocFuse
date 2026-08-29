@@ -117,6 +117,7 @@
   "corpus.version_label": "Version",
   "corpus.files": "Fichiers",
   "corpus.page": "Page {num}",
+  "corpus.source_position": "{file} ({index}/{total})",
 
   "gui.corpus_generated": "Corpus généré : {path}",
   "gui.report_exported": "Rapport exporté : {path}",

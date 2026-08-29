@@ -1485,4 +1485,26 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   divergente était un bug latent, invisible tant que le code était dupliqué.
 - 19 tests, 532 verts, ruff/mypy stricts, recette 7/7 ; GUI vérifiée sur
   écran réel (glisser-déposer actif, phases, bouton PDF).
+- Fin de chantier : run réel ~/Documents + ~/Téléchargements avec OCR et
+  export, 1 417 fichiers, 2 erreurs (JSON corrompus connus), 2 581 images
+  exportées, 399 s. CI GitHub : les trois lots précédents étaient rouges
+  sur les seuls jobs Windows (`csv.field_size_limit(sys.maxsize)` →
+  `OverflowError`, C long 32 bits) — corrigé par une constante portable.
+
+### Corpus PDF : chaque page porte son fichier source (D-100) — ✅ Livré
+
+- Retour utilisateur : les 7 prompts de diagnostic rejoués dans un
+  assistant d'entreprise tiers avec le corpus **PDF** donnent ≈ 4/7 (contre
+  un quasi-échec en `.md`), la LLM locale restant à 7/7. Diagnostic : cet
+  assistant découpe un PDF page par page, et `pdf_writer` change de page à
+  chaque source — les passages restent alignés sur les fichiers, ce qu'un
+  `.md` découpé à taille fixe ne garantit pas. Les erreurs restantes
+  (premier fichier faux, « ligne précédente » située 12 lignes après) sont
+  des artefacts de recherche, pas de DocFuse.
+- Implémenté : en-tête de page `Corpus DocFuse — fichier (i/N)` via un
+  marqueur invisible par source et un gabarit qui dessine l'en-tête en fin
+  de page (`onPage` de ReportLab est appelé en début de page, avant les
+  flowables — piège documenté dans D-100). Section README FR/EN « Quel
+  format pour quel outil ? », sans nommer d'outil tiers.
+- 2 tests (relecture pypdf du PDF généré), 534 verts, 572 collectés.
 

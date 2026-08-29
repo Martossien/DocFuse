@@ -140,6 +140,19 @@ Lancer la CLI :
 python -m docfuse --input "D:\Mon dossier" --output "corpus.md" --format md --yes
 ```
 
+### Quel format pour quel outil ?
+
+| Votre outil | Format conseillé | Pourquoi |
+|---|---|---|
+| Un LLM à grand contexte (chat, API, modèle local) qui reçoit **le fichier entier** | **Markdown** (`corpus.md`) | Tout le corpus tient dans le contexte : le modèle voit chaque `## SOURCE:` et peut citer mot pour mot. Vérifié : 100 % des fichiers retrouvés par un modèle local sur 60 fichiers réels. |
+| Un assistant qui **indexe** les documents et répond par recherche (RAG : découpage en passages, puis sélection des passages jugés pertinents) | **PDF** (`corpus.pdf`) | Ces outils découpent un PDF page par page. DocFuse commence chaque fichier source sur une nouvelle page et inscrit sur **chaque page** le nom du fichier et sa position (`rapport.docx (3/12)`) : chaque passage reste attribuable à sa source. Un `.md` est au contraire découpé à taille fixe, à cheval sur les fichiers. |
+
+Limite à connaître : un assistant à recherche ne lit jamais tout le corpus.
+Les comptages, « premier/dernier fichier » ou citations de la « ligne
+précédente » restent peu fiables quel que soit le format. DocFuse garantit
+que rien ne manque dans le fichier produit ; il ne peut pas garantir ce que
+l'outil en aval choisit d'en lire.
+
 ### Utilisation CLI
 
 ```text
@@ -426,6 +439,18 @@ Launch the CLI:
 ```bash
 python -m docfuse --input "D:/My folder" --output "corpus.md" --format md --yes
 ```
+
+### Which format for which tool?
+
+| Your tool | Recommended format | Why |
+|---|---|---|
+| A long-context LLM (chat, API, local model) that receives **the whole file** | **Markdown** (`corpus.md`) | The entire corpus fits in the context window: the model sees every `## SOURCE:` and can quote verbatim. Verified: 100% of files found by a local model on 60 real files. |
+| An assistant that **indexes** documents and answers by retrieval (RAG: split into passages, then pick the passages it deems relevant) | **PDF** (`corpus.pdf`) | Such tools split a PDF page by page. DocFuse starts every source file on a new page and prints the file name and its position (`report.docx (3/12)`) on **every page**: each passage stays attributable to its source. A `.md` is split at a fixed size instead, straddling files. |
+
+Known limit: a retrieval-based assistant never reads the whole corpus.
+Counts, "first/last file" or "the line before" quotes remain unreliable
+whatever the format. DocFuse guarantees nothing is missing from the file it
+produces; it cannot guarantee what the downstream tool chooses to read.
 
 ### CLI usage
 
