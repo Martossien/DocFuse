@@ -127,6 +127,12 @@ def _iter_body_parts(container: object, doc: object, table_cls: type) -> list[st
     contenu Word) rencontrés au niveau bloc (D-069). Sans cette récursion, un
     paragraphe ou un tableau entier enveloppé dans un contrôle de contenu est
     invisible : ni `child.tag.endswith("}p")` ni `"}tbl"` ne matche `w:sdt`.
+
+    D-083 : le contenu d'une cellule est lui-même parcouru récursivement
+    (`cell._tc`, pas seulement `cell.paragraphs`) — un tableau imbriqué
+    dans une cellule (fréquent dans les gabarits de rapports/formulaires
+    complexes) était sinon totalement invisible : `_Cell.paragraphs` ne
+    liste que les paragraphes directs, jamais un tableau imbriqué.
     """
     parts: list[str] = []
     for child in container:  # type: ignore[attr-defined]
@@ -138,7 +144,7 @@ def _iter_body_parts(container: object, doc: object, table_cls: type) -> list[st
             table = table_cls(child, doc)
             for row in table.rows:
                 cells = [
-                    "\n".join(_flatten_paragraph_text(p._p) for p in cell.paragraphs).strip()
+                    "\n".join(_iter_body_parts(cell._tc, doc, table_cls)).strip()
                     for cell in row.cells
                 ]
                 parts.append(" | ".join(cells))
@@ -212,24 +218,41 @@ def _extract_endnotes(path: Path) -> str:
 
 
 def _extract_textboxes(path: Path) -> str:
-    """I-19: Extrait le texte des zones de texte (w:txbxContent) depuis document.xml.
+    """I-19: Extrait le texte des zones de texte (w:txbxContent).
 
     CdC §8.3 — DOCX : zones de texte doivent être extraites.
     python-docx n'expose pas les text boxes → parsing XML manuel.
+
+    D-082 : deux bugs corrigés ensemble.
+    1. `find_all("w:txbxcontent")` (minuscules) ne matchait jamais
+       `<w:txbxContent>` (camelCase, la casse réelle produite par Word) —
+       le parseur XML de BeautifulSoup est sensible à la casse. Cette
+       fonction ne trouvait donc **jamais rien**, sur aucun fichier, en
+       dépit de son nom et de son commentaire d'origine (I-19).
+    2. Les en-têtes/pieds de page vivent dans des parties ZIP séparées
+       (`word/header1.xml`, `word/footer1.xml`, ...), pas dans
+       `word/document.xml` — une zone de texte placée dans un en-tête/pied
+       (logo + bloc adresse en papier à en-tête, filigrane) restait
+       invisible même une fois (1) corrigé, tant que seul `document.xml`
+       était lu.
     """
     try:
         from bs4 import BeautifulSoup
 
         with zipfile.ZipFile(str(path), "r") as zf:
-            if "word/document.xml" not in zf.namelist():
-                return ""
-            xml = zf.read("word/document.xml")
-            soup = BeautifulSoup(xml, "xml")
+            parts = [
+                n
+                for n in zf.namelist()
+                if n == "word/document.xml"
+                or (n.startswith(("word/header", "word/footer")) and n.endswith(".xml"))
+            ]
             texts: list[str] = []
-            for txbx in soup.find_all("w:txbxcontent"):
-                text = txbx.get_text(strip=True)
-                if text:
-                    texts.append(text)
+            for part in parts:
+                soup = BeautifulSoup(zf.read(part), "xml")
+                for txbx in soup.find_all("w:txbxContent"):
+                    text = txbx.get_text(strip=True)
+                    if text:
+                        texts.append(text)
             return "\n".join(texts)
     except Exception as _e:
         logger.warning("Échec extraction notes/zones: %s", _e)

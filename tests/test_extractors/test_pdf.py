@@ -224,6 +224,31 @@ class TestPdfOcr:
         assert "ocr" in result.extra_metadata
         assert "pas disponible" in result.extra_metadata["ocr"]
 
+    def test_garbage_text_cleaned_when_ocr_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-086 : sans moteur OCR, le texte natif "poubelle" (glyphes non
+        mappés, `(cid:...)`) qui a déclenché la classification OCR ne doit
+        pas rester tel quel dans le corpus — ça pollue le texte de bruit
+        inutilisable. Une page classée `ocr` pour texte simplement trop
+        court (mais réel) doit, elle, rester inchangée."""
+        import docfuse.extractors.pdf as pdf_module
+
+        monkeypatch.setattr(pdf_module, "resolve_ocr_engine", lambda: None)
+
+        garbage_page = "(cid:12)(cid:12)(cid:12)" * 10
+        short_real_page = "court"
+        pages = [garbage_page, short_real_page]
+        chars = [len(p) for p in pages]
+        images = [0, 0]
+
+        new_pages, note = pdf_module._apply_ocr(Path("/fake.pdf"), pages, chars, images)
+
+        assert new_pages[0] == ""
+        assert new_pages[1] == short_real_page
+        assert note is not None
+        assert "pas disponible" in note
+
     @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
     def test_scan_with_engine_recovers_text(self, tmp_path: Path) -> None:
         pdf_path = _make_image_only_pdf(

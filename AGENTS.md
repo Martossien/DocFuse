@@ -204,14 +204,14 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 415 |
-| ruff | ✅ (dérive pré-existante non bloquante sur `test_acceptance.py`, cf. « Reste à faire » Session 13) |
-| mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
-| pytest | ✅ 377 passed, 39 skipped (`tests/samples_real/` absent) |
+| Tests collectés depuis un clone frais | 427 |
+| ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
+| mypy --strict | ✅ 5 erreurs pré-existantes (même classe `bs4.NavigableString`/email `BytesParser`, aucune nouvelle catégorie) |
+| pytest | ✅ 388 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 78 (D-001 à D-078) |
-| Audit extracteurs | 9 bugs de perte silencieuse corrigés (D-069 à D-076) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX |
+| Décisions archivées | 87 (D-001 à D-087) |
+| Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements — 2 bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe entre PDF concurrents)** |
 | Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |

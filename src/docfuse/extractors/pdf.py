@@ -412,7 +412,19 @@ def _apply_ocr(
 
     engine = resolve_ocr_engine()
     if engine is None:
-        return pages_text, t("ocr.unavailable_note", pages=len(ocr_indices))
+        # D-086 : sans moteur OCR, le texte natif "poubelle" (glyphes non
+        # mappés — `(cid:...)`, `�`) qui a justement déclenché la
+        # classification OCR ne doit pas rester tel quel dans le corpus :
+        # ça pollue le texte de bruit inutilisable plutôt que de simplement
+        # signaler "pas de texte ici", ce que fait déjà normalement une
+        # page sans contenu extractible. Une page classée `ocr` avec du
+        # texte non-poubelle (juste trop court) reste inchangée : ce texte,
+        # bien que sous le seuil, est réel et ne doit pas disparaître.
+        cleaned_pages = list(pages_text)
+        for idx in ocr_indices:
+            if kinds[idx] is PageKind.OCR and _has_garbage_text(cleaned_pages[idx]):
+                cleaned_pages[idx] = ""
+        return cleaned_pages, t("ocr.unavailable_note", pages=len(ocr_indices))
 
     ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine)
 

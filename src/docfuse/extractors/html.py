@@ -115,9 +115,15 @@ def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) ->
     Parcourt les enfants directs et extrait chaque élément selon son type.
     `counter` est un dict mutable {"count": int} pour compter les images par référence.
     """
-    from bs4 import NavigableString, Tag
+    from bs4 import Comment, NavigableString, Tag
 
     for element in parent.children:
+        if isinstance(element, Comment):
+            # D-080 : Comment hérite de NavigableString — sans cette
+            # exclusion explicite, un commentaire HTML (notes internes,
+            # code commenté, IE conditional comments) fuite dans le texte
+            # extrait comme s'il s'agissait de contenu visible normal.
+            continue
         if isinstance(element, NavigableString):
             text = str(element).strip()
             if text:

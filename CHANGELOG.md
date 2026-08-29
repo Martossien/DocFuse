@@ -10,6 +10,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Non publié]
 
+### Corrigé (gravité moyenne, suite de l'audit extracteurs)
+
+- **HTML** : les commentaires HTML (`<!-- ... -->`) fuitaient dans le texte
+  extrait comme du contenu visible normal.
+- **MHTML** : le `alt` des images n'était jamais extrait (contrairement à
+  l'extracteur HTML).
+- **DOCX** : les zones de texte (text boxes) n'étaient en réalité **jamais**
+  extraites, sur aucun fichier (bug de casse dans la recherche XML) ; une
+  fois corrigé, celles des en-têtes/pieds de page restaient invisibles. Un
+  tableau imbriqué dans une cellule de tableau disparaissait aussi.
+- **XLSX** : une dimension de feuille mal déclarée par le fichier (bug
+  connu de certains générateurs tiers) pouvait tronquer silencieusement des
+  lignes/colonnes en fin de feuille. Les cellules fusionnées ne
+  propageaient pas leur valeur aux autres cellules de la plage.
+- **PDF** : le texte natif illisible (`(cid:...)`) qui déclenche l'OCR
+  polluait le corpus de bruit inutilisable quand aucun moteur OCR n'était
+  disponible, au lieu de simplement signaler une page vide.
+- **ODF (.odp)** : les notes d'orateur (jamais affichées à l'écran) étaient
+  mélangées indistinctement au contenu visible des diapos, sans séparation
+  entre diapos ni gestion structurée des tableaux.
+
 ### Technique
 
 - `ruff` épinglé sur une version exacte (`==0.16.5`) — dette identifiée en

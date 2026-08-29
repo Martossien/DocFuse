@@ -1261,6 +1261,99 @@ CI installe déjà via `pip install -e ".[dev]"`, donc aligné automatiquement
 - Prochaine mise à jour de `ruff` : un choix explicite (bump du pin +
   vérification locale), plus jamais une dérive silencieuse via la CI.
 
+### D-080 à D-087 : bugs de gravité moyenne de l'audit extracteurs, corrigés
+
+**Contexte** : suite de l'audit D-069 à D-076 — les bugs de gravité moyenne
+identifiés à l'époque (documentés dans `journal-avancement.md` § Reste à
+faire) sont traités ici, sur décision explicite de l'utilisateur. Même
+méthode : un test de non-régression par bug, construit avec la bibliothèque
+réelle du format (jamais un mock), reproduisant la structure exacte du bug
+avant de vérifier le correctif.
+
+- **D-080 — HTML, commentaires qui fuitent dans le texte extrait** :
+  `bs4.Comment` hérite de `NavigableString` — sans exclusion explicite, un
+  commentaire HTML (notes internes, IE conditional comments, code
+  commenté) apparaissait comme du contenu visible normal. Corrigé par une
+  exclusion explicite avant le test `NavigableString` générique dans
+  `_extract_elements`. `get_text()` (utilisé pour les conteneurs
+  génériques) exclut déjà correctement les commentaires par défaut — seul
+  le chemin manuel top-level était touché.
+- **D-081 — MHTML, `alt` des images jamais extrait** : contrairement à
+  `extractors/html.py`, `_html_to_text` de `mhtml.py` faisait un
+  `get_text()` brut sans jamais traiter les `<img>`. Corrigé en remplaçant
+  chaque `<img>` par un marqueur texte avant `get_text()`, même convention
+  que `html.py` (`[image: ...]` / `[image sans description]`).
+- **D-082 — DOCX, zones de texte : deux bugs corrigés ensemble** :
+  1. `_extract_textboxes` cherchait `find_all("w:txbxcontent")`
+     (minuscules) — le parseur XML de BeautifulSoup est sensible à la
+     casse et ne matchait donc **jamais** `<w:txbxContent>` (la casse
+     réelle produite par Word). Cette fonction n'a jamais rien trouvé, sur
+     aucun fichier, en dépit de son nom (I-19) — découvert en écrivant le
+     test de non-régression de ce chantier.
+  2. Une fois (1) corrigé : les en-têtes/pieds de page vivent dans des
+     parties ZIP séparées (`word/header1.xml`, `word/footer1.xml`, ...),
+     jamais lues (seul `document.xml` l'était) — une zone de texte dans un
+     en-tête (logo + bloc adresse en papier à en-tête) restait invisible.
+- **D-083 — DOCX, tableau imbriqué dans une cellule** : `_Cell.paragraphs`
+  ne liste que les paragraphes directs d'une cellule, jamais un tableau
+  imbriqué (fréquent dans les gabarits de rapports/formulaires complexes).
+  Corrigé en remplaçant la jointure de `cell.paragraphs` par un appel
+  récursif à `_iter_body_parts(cell._tc, ...)` — réutilise le même
+  parcours que le corps du document (paragraphes, tableaux, `w:sdt`
+  imbriqués), au lieu d'un traitement de cellule séparé et plus pauvre.
+- **D-084 — XLSX, dimension déclarée incorrecte → troncature silencieuse** :
+  en mode `read_only`, openpyxl fait confiance à l'élément XML
+  `<dimension>` déclaré par le fichier plutôt que de scanner le contenu
+  réel — documenté par openpyxl lui-même comme un risque si le générateur
+  tiers écrit une dimension trop petite. `iter_rows()` tronque alors les
+  lignes/colonnes en fin de feuille, sans erreur. Corrigé par
+  `reset_dimensions()` + `calculate_dimension(force=True)` avant lecture.
+  Édge case trouvé en testant : `calculate_dimension(force=True)` lève
+  `UnboundLocalError` sur une feuille réellement vide (bug openpyxl,
+  `cell` jamais assignée dans sa boucle) — capturé sans conséquence.
+- **D-085 — XLSX, cellules fusionnées non propagées** : seule la cellule
+  en haut à gauche d'une plage fusionnée porte une valeur (comportement
+  Excel normal) ; `ReadOnlyWorksheet` (mode `read_only=True`, utilisé
+  partout dans cet extracteur) n'expose même pas `merged_cells`. Sans
+  propagation, une ligne dont le titre fusionné s'étale sur plusieurs
+  colonnes perd tout contexte pour les cellules "creuses" qui suivent —
+  très fréquent dans les tableaux "présentables". Corrigé en lisant
+  `<mergeCell ref="...">` directement dans le XML de la feuille (`ws._worksheet_path`,
+  cohérent avec `read_only` — pas de second classeur non-read_only chargé
+  entièrement en mémoire) et en propageant la valeur en mémoire (grille
+  matérialisée), horizontalement et verticalement.
+- **D-086 — PDF, texte "poubelle" `(cid:...)` laissé tel quel si OCR
+  indisponible** : le texte natif illisible (glyphes non mappés) qui a
+  justement déclenché la classification `ocr` restait dans le corpus sans
+  moteur OCR disponible — pollution de bruit inutilisable plutôt qu'une
+  simple absence de contenu. Corrigé : ce texte est vidé (devient la page
+  vide standard `[[PAGE N: aucun texte extractible]]`) uniquement pour les
+  pages classées `ocr` à cause de la détection poubelle — une page `ocr`
+  pour texte simplement trop court (mais réel) reste inchangée.
+- **D-087 — ODF, `.odp` : notes d'orateur mélangées au contenu visible** :
+  aucun tag ne matche `office:text` dans une présentation
+  (`office:presentation` à la place) — le code tombait systématiquement
+  dans le "dernier fallback" document-wide (`text:p`/`text:h`), qui
+  mélangeait indistinctement le contenu visible des diapos ET les notes
+  d'orateur (`presentation:notes`, jamais affichées à l'écran — risque de
+  fuite de contenu non destiné à la diffusion), sans aucune séparation
+  entre diapos ni gestion structurée des tableaux. Corrigé par
+  `_extract_presentation()` : parcourt chaque `draw:page` séparément,
+  extrait et étiquette les notes à part (`[notes orateur diapo N]`), gère
+  les tableaux comme `office:text` (`_table_rows_to_parts()`, factorisée).
+
+**Non traités cette session** (gravité moyenne, mais effort plus important
+ou nécessitant un choix de conception) : DOCX `MERGEFIELD`/commentaires,
+PPTX SmartArt/texte des graphiques, PDF annotations/champs de formulaire,
+XLSX commentaires en `read_only`, HTML `title`/`alt` hors `<img>` — restent
+documentés dans `journal-avancement.md` § Reste à faire.
+
+**Vérification** : 388 tests passent (+11 depuis D-079), recette 7/7,
+`ruff check`/`format --check` propres, mypy --strict sans nouvelle erreur
+(2 attendues en plus, même classe pré-existante `bs4.NavigableString` non
+exportée — `html.py` l'avait déjà, `mhtml.py` l'acquiert avec le même
+import D-081).
+
 ---
 
 *Fin du journal des décisions — Session 14.*

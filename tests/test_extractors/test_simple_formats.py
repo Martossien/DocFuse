@@ -116,6 +116,25 @@ class TestHtmlExtractor:
         assert "Image A" in result.text
         assert "Image B" in result.text
 
+    def test_html_comments_do_not_leak_into_text(self, tmp_path: Path) -> None:
+        """D-080 : Comment hérite de NavigableString — sans exclusion
+        explicite, un commentaire HTML (notes internes, IE conditional
+        comments) fuite dans le texte extrait comme du contenu normal."""
+        f = tmp_path / "comment.html"
+        f.write_text(
+            "<html><body><p>Texte visible</p>"
+            "<!-- NOTE INTERNE SECRETE PAS POUR DIFFUSION -->"
+            "<div>Dans un div <!-- commentaire2 --> aussi</div>"
+            "</body></html>",
+            encoding="utf-8",
+        )
+
+        result = HtmlExtractor.extract(f, "comment.html")
+        assert result.status is FileStatus.READY
+        assert "Texte visible" in result.text
+        assert "NOTE INTERNE SECRETE" not in result.text
+        assert "commentaire2" not in result.text
+
     def test_accepts(self) -> None:
         assert HtmlExtractor.accepts(Path("test.html")) is True
         assert HtmlExtractor.accepts(Path("test.htm")) is True

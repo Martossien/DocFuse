@@ -50,6 +50,24 @@ iVBORw0KGgoAAAANSUhEUg==
         result = MhtmlExtractor.safe_extract(f, "nonexistent.mhtml")
         assert result.status is FileStatus.ERROR
 
+    def test_img_alt_text_is_extracted(self, tmp_path: Path) -> None:
+        """D-081 : le `alt` d'une image n'était jamais extrait (contrairement
+        à extractors/html.py) — une archive web a souvent des diagrammes/
+        captures d'écran dont le texte alternatif porte l'information utile."""
+        f = tmp_path / "with_image.mhtml"
+        mhtml = """From: <Saved by Blink>
+Subject: Test Page
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Texte avant.</p><img src="cid:img1" alt="Diagramme explicatif crucial"><p>Texte apres.</p></body></html>
+"""
+        f.write_text(mhtml, encoding="utf-8")
+
+        result = MhtmlExtractor.extract(f, "with_image.mhtml")
+        assert result.status is FileStatus.READY
+        assert "Diagramme explicatif crucial" in result.text
+
     def test_empty_mhtml(self, tmp_path: Path) -> None:
         f = tmp_path / "empty.mht"
         f.write_text(

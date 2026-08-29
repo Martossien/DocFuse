@@ -78,6 +78,81 @@ class TestXlsxExtractor:
         assert result.status is FileStatus.READY
         assert "=1+1" in result.text
 
+    def test_incorrect_declared_dimension_does_not_truncate_rows(self, tmp_path: Path) -> None:
+        """D-084 : en mode read_only, openpyxl fait confiance à l'élément XML
+        <dimension> déclaré par le fichier plutôt que de scanner le contenu
+        réel. Un générateur tiers qui écrit une dimension trop petite (bug
+        connu et documenté par openpyxl lui-même) faisait tronquer
+        silencieusement les lignes en fin de feuille."""
+        import zipfile
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for i in range(1, 11):
+            ws.cell(row=i, column=1, value=f"Row{i}")
+        f = tmp_path / "lied_dimension.xlsx"
+        wb.save(str(f))
+
+        # Mentir sur la dimension déclarée : A1:A10 -> A1:A3.
+        with zipfile.ZipFile(str(f)) as zin:
+            items = zin.infolist()
+            contents = {item.filename: zin.read(item.filename) for item in items}
+        sheet_xml = contents["xl/worksheets/sheet1.xml"].decode("utf-8")
+        sheet_xml = sheet_xml.replace('<dimension ref="A1:A10"/>', '<dimension ref="A1:A3"/>')
+        contents["xl/worksheets/sheet1.xml"] = sheet_xml.encode("utf-8")
+        with zipfile.ZipFile(str(f), "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in items:
+                zout.writestr(item, contents[item.filename])
+
+        result = XlsxExtractor.extract(f, "lied_dimension.xlsx")
+        assert result.status is FileStatus.READY
+        for i in range(1, 11):
+            assert f"Row{i}" in result.text
+
+    def test_merged_cells_value_is_propagated(self, tmp_path: Path) -> None:
+        """D-085 : seule la cellule en haut à gauche d'une plage fusionnée
+        porte une valeur (comportement Excel normal) — `ReadOnlyWorksheet`
+        n'expose même pas `merged_cells`. Sans propagation, une ligne dont
+        le titre fusionné s'étale sur plusieurs colonnes perd tout contexte
+        pour les cellules "creuses" qui suivent."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Titre fusionne"
+        ws.merge_cells("A1:C1")
+        ws["A2"] = "Alpha"
+        ws["B2"] = "Beta"
+        ws["C2"] = "Gamma"
+        f = tmp_path / "merged_horizontal.xlsx"
+        wb.save(str(f))
+
+        result = XlsxExtractor.extract(f, "merged_horizontal.xlsx")
+        assert result.status is FileStatus.READY
+        assert "Titre fusionne | Titre fusionne | Titre fusionne" in result.text
+
+    def test_merged_cells_vertical_value_is_propagated(self, tmp_path: Path) -> None:
+        """D-085, fusion verticale (sur plusieurs lignes plutôt que colonnes)."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Section"
+        ws.merge_cells("A1:A3")
+        ws["B1"] = "L1"
+        ws["B2"] = "L2"
+        ws["B3"] = "L3"
+        f = tmp_path / "merged_vertical.xlsx"
+        wb.save(str(f))
+
+        result = XlsxExtractor.extract(f, "merged_vertical.xlsx")
+        assert result.status is FileStatus.READY
+        assert "Section | L1" in result.text
+        assert "Section | L2" in result.text
+        assert "Section | L3" in result.text
+
     def test_truly_empty_cell_stays_empty(self, tmp_path: Path) -> None:
         """Non-régression : une cellule réellement vide (pas une formule non
         calculée) ne doit pas récupérer de faux marqueur de formule."""

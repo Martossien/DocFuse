@@ -70,13 +70,26 @@ class MhtmlExtractor(Extractor):
 
 
 def _html_to_text(html: str) -> str:
-    """Convertit un fragment HTML en texte simple."""
+    """Convertit un fragment HTML en texte simple.
+
+    D-081 : le `alt` des images n'était jamais extrait (contrairement à
+    `extractors/html.py`) — une archive web a souvent des diagrammes/
+    captures d'écran dont le texte alternatif porte l'information utile.
+    Remplace chaque `<img>` par un marqueur texte, même convention que
+    `html.py` (`[image: ...]` / `[image sans description]`), avant
+    `get_text()`.
+    """
     try:
-        from bs4 import BeautifulSoup
+        from bs4 import BeautifulSoup, NavigableString
 
         soup = BeautifulSoup(html, "lxml")
         for tag in soup.find_all(["script", "style", "noscript"]):
             tag.decompose()
+        for img in soup.find_all("img"):
+            alt_raw = img.get("alt", "")
+            alt = str(alt_raw).strip() if alt_raw else ""
+            placeholder = f"[image: {alt}]" if alt else "[image sans description]"
+            img.replace_with(NavigableString(placeholder))
         return soup.get_text(separator="\n", strip=True)
     except Exception:
         return html

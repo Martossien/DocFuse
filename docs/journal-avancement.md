@@ -1093,9 +1093,9 @@ détectés mais jamais réellement récupérés.
 |---|---|
 | Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
 | ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
-| mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
-| pytest | ✅ 377 passed, 39 skipped (tests OCR + 9 bugs corrigés + bruit JS/CSS + crash PDFium exécutés) |
-| Décisions archivées | 78 (D-001 à D-078) |
+| mypy --strict | ✅ 5 erreurs pré-existantes (même classe `bs4.NavigableString`/email `BytesParser`, aucune nouvelle catégorie) |
+| pytest | ✅ 388 passed, 39 skipped (tests OCR + 9 bugs forte gravité + bruit JS/CSS + crash PDFium + 8 bugs gravité moyenne + ruff pin exécutés) |
+| Décisions archivées | 87 (D-001 à D-087) |
 
 ### Reste à faire
 
@@ -1125,15 +1125,34 @@ détectés mais jamais réellement récupérés.
   jamais vision" (coût/réseau/latence). Piste alternative moins invasive
   évoquée mais pas implémentée : extraire les images en fichiers séparés
   (dossier `images/`) référencés dans le corpus texte, sans auto-captioning.
-- ⬜ **Bugs de gravité moyenne identifiés par l'audit, non corrigés cette
-  session** : DOCX (tableaux imbriqués dans une cellule, `MERGEFIELD` via
-  `w:fldSimple` déjà partiellement corrigé en bonus par D-069, zones de
-  texte dans en-têtes/pieds de page, commentaires non extraits), PPTX
-  (SmartArt — non exposé par python-pptx, texte des graphiques), XLSX
-  (cellules fusionnées, commentaires invisibles en `read_only`, dimensions
-  mal déclarées → troncature silencieuse), PDF (annotations/champs de
-  formulaire non lus, texte `(cid:...)` laissé tel quel si OCR
-  indisponible), HTML (commentaires qui fuitent dans le texte, attributs
-  `title`/`alt` hors `<img>`), MHTML (`alt` des images jamais extrait),
-  ODF (.odp : notes d'orateur mélangées au contenu visible sans étiquette).
+### Bugs de gravité moyenne de l'audit — 8 corrigés (D-080 à D-087) — ✅ Corrigé
+
+Sur décision explicite de l'utilisateur ("2 et 3" : bugs moyens + pin
+ruff). Même méthode que D-069 à D-076 : un test de non-régression par bug,
+construit avec la bibliothèque réelle, reproduisant la structure exacte
+avant de vérifier le correctif. Détail complet : `journal-decisions.md`
+D-080 à D-087.
+
+- **HTML** : commentaires qui fuitaient dans le texte extrait.
+- **MHTML** : `alt` des images jamais extrait.
+- **DOCX** : zones de texte — découverte en écrivant le test que
+  `_extract_textboxes` n'avait **jamais** rien trouvé, sur aucun fichier,
+  depuis son introduction (bug de casse XML, `w:txbxcontent` vs
+  `w:txbxContent`) ; une fois corrigé, celles des en-têtes/pieds de page
+  restaient invisibles (`document.xml` uniquement lu). Tableau imbriqué
+  dans une cellule.
+- **XLSX** : dimension de feuille mal déclarée → troncature silencieuse
+  (`reset_dimensions()` + `calculate_dimension(force=True)`, avec un edge
+  case découvert — `UnboundLocalError` d'openpyxl sur feuille vraiment
+  vide, capturé). Cellules fusionnées non propagées (lu directement dans
+  le XML de la feuille, pas de second classeur non-read_only).
+- **PDF** : texte poubelle `(cid:...)` laissé tel quel si OCR indisponible
+  — désormais vidé (devient la page vide standard) uniquement pour ce cas.
+- **ODF (.odp)** : notes d'orateur désormais séparées et étiquetées du
+  contenu visible des diapos, tableaux gérés comme `office:text`.
+
+Non corrigés cette session (effort plus important ou choix de conception
+à trancher) : DOCX `MERGEFIELD`/commentaires, PPTX SmartArt/texte des
+graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
+`read_only`, HTML `title`/`alt` hors `<img>`.
 
