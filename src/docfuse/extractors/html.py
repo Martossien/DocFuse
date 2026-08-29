@@ -68,8 +68,13 @@ def tag_text(tag: Any) -> str:
 
 
 def preformatted_text(tag: Any) -> str:
-    """Texte d'un `<pre>` : conserve retours à la ligne et indentation."""
-    return str(tag.get_text()).strip("\n")
+    """Texte d'un `<pre>` : conserve retours à la ligne et indentation.
+
+    Les fins de ligne sont normalisées en `\\n` (un HTML écrit sous Windows
+    contient des CRLF) — partout ailleurs `\\r` est déjà traité comme un
+    blanc par `tag_text`, le `<pre>` était la seule exception.
+    """
+    return str(tag.get_text()).replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
 
 @register(".html", ".htm")

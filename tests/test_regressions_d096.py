@@ -190,7 +190,9 @@ class TestPdfGarbagePages:
 
 class TestWriters:
     def test_pdf_writer_escapes_source_header(self, tmp_path: Path) -> None:
-        (tmp_path / "a<b>.txt").write_text("Ligne 1\nLigne 2\n", encoding="utf-8")
+        # `&` doit être échappé pour ReportLab ; `<`/`>` seraient un nom de
+        # fichier invalide sous Windows (CI), même chemin d'échappement.
+        (tmp_path / "a&b.txt").write_text("Ligne 1\nLigne 2\n", encoding="utf-8")
         result = run_analysis(tmp_path, context_limit=128000)
 
         assert generate_corpus(result, tmp_path / "corpus.pdf")
