@@ -975,4 +975,69 @@ secret et le numéro de ligne, jamais la valeur trouvée.
 
 ---
 
-*Fin du journal des décisions — Session 13.*
+## Session 14 — 29 août 2026
+
+### D-066 : Fichiers de développement traités comme texte brut
+
+**Décision** : nouvelle constante `constants.CODE_EXTENSIONS` (~60
+extensions : `.py`, `.js`/`.ts`, `.vba`, `.sh`/`.ps1`, `.sql`, `.css`,
+`.java`, `.c`/`.cpp`, `.go`, `.rs`, `.toml`, etc.), fusionnée dans
+`SUPPORTED_EXTENSIONS` avec la catégorie `"code"`, dispatchées vers
+`TextExtractor` (même détection d'encodage que `.txt`) — aucune extraction
+spécifique par langage, `file_type` reste l'extension elle-même (M-08).
+
+**Rationale** :
+- Trou fonctionnel réel identifié par l'utilisateur : envoyer une codebase à
+  une LLM est un cas d'usage courant, et ces fichiers étaient auparavant
+  silencieusement `IGNORED` (hors de `ALL_EXTENSIONS`).
+- Zéro nouvelle dépendance, zéro risque de portabilité : un fichier `.py`
+  est du texte, exactement comme un `.txt`.
+- Limite assumée et documentée (pas corrigée ici) : le dispatch de
+  `core/registry.py` se fait par **suffixe** (`Path.suffix`). Les fichiers
+  sans extension (`Dockerfile`, `Makefile`) ou dotfiles purs (`.gitignore`,
+  `.env`) ont un `suffix` vide en Python — ils restent hors périmètre. Un
+  dispatch par nom de fichier complet serait un changement plus large,
+  laissé pour une session future si le besoin se confirme.
+
+### D-067 : OCR des PDF scannés — build séparé `CorpusOne-OCR`
+
+**Décision** : nouveau package `core/ocr/` (même pattern que
+`core/tokenizers/` — registre, `is_available()`, jamais d'exception).
+Classification par page dans `extractors/pdf.py` (`native`/`ocr`/`blank`/
+`mixed`, à partir du texte déjà extrait par pdfminer — pas de seconde
+extraction), OCR via le binaire CLI Tesseract en `subprocess`
+(`pypdfium2` pour la rastérisation). Le binaire Tesseract + ses modèles de
+langue (~40-80 Mo, pas un paquet pip) ne sont **pas** embarqués dans
+`CorpusOne.exe` : un second exe, `CorpusOne-OCR.exe`
+(`CorpusOne-OCR.spec`, nouveau job CI `build-windows-ocr`), les embarque et
+est publié en parallèle sur la même Release GitHub. Détail complet :
+`docs/cahier-des-charges-docfuse.md` §9.5.
+
+**Rationale** :
+- Un PDF scanné était déjà **détecté** (`FileStatus.LOW_TEXT`) mais son
+  contenu n'était jamais récupéré — l'utilisateur a fourni un cahier des
+  charges add-on détaillé, adapté ici au code réel de DocFuse plutôt que
+  porté tel quel (le document source ciblait un serveur MCP).
+- **Décision produit tranchée explicitement avec l'utilisateur** (et non
+  supposée) : `CorpusOne.exe` classique garde sa taille et sa promesse
+  « zéro dépendance » inchangées ; l'embarquement de Tesseract est un choix
+  de build séparé, pas une évolution silencieuse de l'exe existant.
+- Invocation CLI via `subprocess` plutôt qu'une liaison native
+  (`tesserocr`) : chaque appel est déjà un process OS isolé avec son propre
+  `timeout=`, ce qui évite `ProcessPoolExecutor`/`multiprocessing` dans un
+  exécutable PyInstaller figé (respawn, `freeze_support()`) — risque connu
+  et documenté du document source, contourné par ce choix.
+- `pypdfium2` (Apache-2.0/BSD-3) choisi pour la rastérisation ; `PyMuPDF`
+  explicitement écarté (AGPL-3.0, contaminerait un livrable Apache-2.0).
+- Portée v1 = PDF uniquement. Fichiers image seuls et images intégrées
+  dans `.docx`/`.pptx` (soulevés par l'utilisateur) : notés pour une
+  itération suivante, pas abandonnés — même moteur `core/ocr/` réutilisable.
+- Vérifié en conditions réelles pendant la session (Tesseract 5.5 installé
+  localement) : un PDF image-only construit avec `reportlab` recouvre bien
+  son texte, le statut passe de `LOW_TEXT` à `READY`/`IMAGES`, et la
+  bascule automatique vers le comportement inchangé (note "OCR non
+  disponible") a été vérifiée en masquant Tesseract du PATH.
+
+---
+
+*Fin du journal des décisions — Session 14.*

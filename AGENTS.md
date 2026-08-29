@@ -199,21 +199,22 @@ Conventional Commits (sans scope obligatoire) :
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 13 — 0.1.3 beta)
+## 11. État actuel (Session 14 — 0.1.3, non re-publiée)
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source Python | 46 |
-| Tests collectés depuis un clone frais | 317 |
-| ruff | ✅ |
+| Fichiers source Python | 51 |
+| Tests collectés depuis un clone frais | 401 |
+| ruff | ✅ (dérive pré-existante non bloquante sur `test_acceptance.py`, cf. « Reste à faire » Session 13) |
 | mypy --strict | ✅ |
-| pytest | ✅ 278 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 363 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 65 (D-001 à D-065) |
-| Extracteurs | 13 formats |
+| Décisions archivées | 67 (D-001 à D-067) |
+| Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
-| Optimisations/alertes de transparence | 4 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets (D-062 à D-065) |
+| OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI non encore exécuté, D-067) |
+| Optimisations/alertes de transparence | 5 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets, OCR (D-062 à D-065, D-067) |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md, captures d'écran réelles |
 | Jeu de test + recette | ✅ tests/recette/ |

@@ -9,8 +9,37 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from docfuse.extractors.pdf import PdfExtractor
+import pytest
+
+from docfuse.core.ocr.tesseract import TesseractEngine
+from docfuse.extractors.pdf import PageKind, PdfExtractor, classify_page
 from docfuse.models.file_status import FileStatus
+
+_OCR_AVAILABLE = TesseractEngine().is_available()
+
+
+def _make_image_only_pdf(tmp_path: Path, lines: list[str]) -> Path:
+    """Construit un PDF « scanné » : une image de texte, aucune couche texte."""
+    from PIL import Image, ImageDraw
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    img = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(img)
+    y = 100
+    for line in lines:
+        draw.text((80, y), line, fill="black")
+        y += 60
+    png_path = tmp_path / "_scan_source.png"
+    img.save(png_path)
+
+    pdf_path = tmp_path / "scan.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=A4)
+    w, h = A4
+    c.drawImage(str(png_path), 0, 0, width=w, height=h)
+    c.showPage()
+    c.save()
+    return pdf_path
 
 
 class TestPdfExtractor:
@@ -126,3 +155,86 @@ class TestPdfExtractor:
         result = PdfExtractor.extract(f, "two_pages.pdf")
         assert "pdf_dedup" not in result.extra_metadata
         assert result.text.count("Pied de page repete") == 2
+
+
+class TestClassifyPage:
+    """Classification par page (native/ocr/blank/mixed) — pure, sans Tesseract."""
+
+    def test_enough_native_text_no_image_is_native(self) -> None:
+        assert classify_page("x" * 200, 200, has_image=False) is PageKind.NATIVE
+
+    def test_no_text_no_image_is_blank(self) -> None:
+        assert classify_page("", 0, has_image=False) is PageKind.BLANK
+
+    def test_no_text_with_image_is_ocr(self) -> None:
+        assert classify_page("", 0, has_image=True) is PageKind.OCR
+
+    def test_sparse_text_is_ocr(self) -> None:
+        assert classify_page("court", 5, has_image=False) is PageKind.OCR
+
+    def test_enough_text_with_image_is_mixed(self) -> None:
+        assert classify_page("x" * 200, 200, has_image=True) is PageKind.MIXED
+
+    def test_garbage_markers_force_ocr_even_with_many_chars(self) -> None:
+        text = "(cid:12)" * 30
+        assert classify_page(text, len(text), has_image=False) is PageKind.OCR
+
+
+class TestPdfOcr:
+    """OCR des PDF scannés — CorpusOne-OCR (moteur optionnel, jamais bloquant)."""
+
+    def test_scan_without_engine_falls_back_to_unchanged_behavior(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sans moteur OCR disponible, comportement identique à avant la fonctionnalité."""
+        import docfuse.extractors.pdf as pdf_module
+
+        monkeypatch.setattr(pdf_module, "resolve_ocr_engine", lambda: None)
+
+        pdf_path = _make_image_only_pdf(tmp_path, ["Texte scanne de test"])
+        result = PdfExtractor.extract(pdf_path, "scan.pdf")
+
+        assert "[[PAGE 1: aucun texte extractible]]" in result.text
+        assert "ocr" in result.extra_metadata
+        assert "pas disponible" in result.extra_metadata["ocr"]
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_scan_with_engine_recovers_text(self, tmp_path: Path) -> None:
+        pdf_path = _make_image_only_pdf(
+            tmp_path,
+            [
+                "Ceci est un document scanne de test.",
+                "Il ne contient aucune couche de texte native.",
+                "Ligne supplementaire pour depasser le seuil de caracteres.",
+            ],
+        )
+        result = PdfExtractor.extract(pdf_path, "scan.pdf")
+
+        assert "texte OCR" in result.text
+        assert "scanne" in result.text or "document" in result.text
+        assert "ocr" in result.extra_metadata
+        assert "reconnue" in result.extra_metadata["ocr"]
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_native_pdf_is_not_touched_by_ocr(self, tmp_path: Path) -> None:
+        """Un PDF avec du texte natif suffisant ne déclenche jamais l'OCR."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+        f = tmp_path / "native.pdf"
+        doc = SimpleDocTemplate(str(f), pagesize=A4)
+        styles = getSampleStyleSheet()
+        doc.build(
+            [
+                Paragraph(
+                    "Paragraphe natif avec largement assez de caracteres pour "
+                    "ne jamais etre classe comme une page a OCRiser ici.",
+                    styles["Normal"],
+                )
+            ]
+        )
+
+        result = PdfExtractor.extract(f, "native.pdf")
+        assert "ocr" not in result.extra_metadata
+        assert "texte OCR" not in result.text

@@ -8,6 +8,29 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [Non publié]
+
+### Ajouté
+
+- **Fichiers de développement traités comme texte brut** : `.py`, `.js`,
+  `.ts`, `.vba`, `.sh`, `.ps1`, `.sql`, `.css`, `.java`, `.c`/`.cpp`, `.go`,
+  `.rs` et une soixantaine d'autres extensions courantes (liste complète :
+  `constants.CODE_EXTENSIONS`) sont désormais reconnues et incluses dans le
+  corpus au lieu d'être ignorées silencieusement — cas d'usage LLM fréquent
+  (envoyer une codebase). Même détection d'encodage que `.txt`. Limite
+  connue : dispatch par extension, donc les fichiers sans extension
+  (`Dockerfile`, `Makefile`) ou dotfiles purs (`.gitignore`, `.env`) restent
+  hors périmètre.
+- **OCR des PDF scannés** (portée v1 : PDF uniquement) : un PDF scanné
+  était détecté (alerte « peu de texte ») mais son contenu n'était jamais
+  récupéré. Chaque page est désormais classée (texte natif suffisant / à
+  OCRiser / vide / mixte) et les pages qui en ont besoin sont reconnues via
+  Tesseract, si disponible. Jamais bloquant : sans Tesseract, le
+  comportement reste strictement identique à avant, avec une note
+  expliquant pourquoi. `CorpusOne.exe` n'embarque pas Tesseract (taille et
+  promesse « zéro dépendance » inchangées) — une variante distincte,
+  `CorpusOne-OCR.exe`, l'embarque pour un usage sans aucune installation.
+
 ## [0.1.3] - 2026-08-24 — Beta
 
 ### Ajouté

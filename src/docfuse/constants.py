@@ -43,6 +43,86 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".mht": "mhtml",
 }
 
+# Fichiers de développement traités comme texte brut (pas de parsing
+# spécifique, juste détection d'encodage puis passage tel quel — cas d'usage
+# LLM très courant : envoyer une codebase). Limite connue : dispatch par
+# extension (`registry.py`), donc les fichiers sans extension (Dockerfile,
+# Makefile) ou dotfiles purs (.gitignore, .env) restent hors périmètre.
+CODE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Langages
+        ".py",
+        ".pyw",
+        ".pyi",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".java",
+        ".kt",
+        ".kts",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".c",
+        ".h",
+        ".cpp",
+        ".cc",
+        ".cxx",
+        ".hpp",
+        ".hh",
+        ".cs",
+        ".scala",
+        ".lua",
+        ".pl",
+        ".pm",
+        ".r",
+        ".m",
+        ".mm",
+        ".dart",
+        ".vb",
+        ".vba",
+        ".bas",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ps1",
+        ".psm1",
+        ".bat",
+        ".cmd",
+        ".sql",
+        ".groovy",
+        ".clj",
+        ".hs",
+        ".fs",
+        ".fsx",
+        # Web / style
+        ".css",
+        ".scss",
+        ".sass",
+        ".less",
+        ".vue",
+        ".svelte",
+        # Config / infra / build
+        ".toml",
+        ".proto",
+        ".graphql",
+        ".gql",
+        ".tf",
+        ".tfvars",
+        ".conf",
+        ".properties",
+        # Documentation texte
+        ".rst",
+        ".tex",
+    }
+)
+SUPPORTED_EXTENSIONS.update(dict.fromkeys(CODE_EXTENSIONS, "code"))
+
 # I-22: Extensions d'images pures (CdC §7.4 — ignorées avec message spécifique)
 IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {
@@ -159,6 +239,37 @@ intégrée à retirer (évite de matcher de courtes chaînes accidentelles)."""
 DUPLICATE_MIN_CHARS: int = 50
 """Un fichier avec moins de caractères que ce seuil n'est jamais comparé pour
 déduplication (évite les faux positifs entre fichiers presque vides)."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OCR des PDF scannés (moteur optionnel, voir core/ocr/)
+# ──────────────────────────────────────────────────────────────────────────────
+
+PDF_OCR_MIN_CHARS_PER_PAGE: int = 80
+"""Une page avec moins de texte natif utile que ce seuil est candidate à
+l'OCR (classée "ocr" ou "mixed" selon la présence d'images)."""
+
+PDF_OCR_GARBAGE_MARKERS: tuple[str, ...] = ("(cid:", "�")
+"""Marqueurs de texte natif « poubelle » (polices cassées, glyphes non
+mappés) : une page qui en contient est traitée comme si elle n'avait pas de
+texte utile, même si `PDF_OCR_MIN_CHARS_PER_PAGE` caractères ont été extraits."""
+
+OCR_DPI: int = 200
+"""Résolution de rastérisation d'une page avant OCR (interactif ; 300 pour
+un CER trop élevé serait une optimisation v1.1)."""
+
+OCR_LANG: str = "fra+eng"
+"""Langues Tesseract (i18n FR/EN du projet)."""
+
+OCR_PAGE_TIMEOUT_S: int = 30
+"""Timeout par page OCR (raster + reconnaissance). Une page qui dépasse ce
+délai est marquée "failed", le fichier continue."""
+
+OCR_MAX_PAGES_PER_FILE: int = 200
+"""Plafond de pages OCRisables par fichier — protection contre un PDF hostile
+(bombe de rendu) ou simplement un scan de très grande taille."""
+
+OCR_MAX_PIXELS_PER_PAGE: int = 4000 * 4000
+"""Plafond largeur×hauteur d'une page rastérisée — protection mémoire."""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Performance

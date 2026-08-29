@@ -14,6 +14,7 @@ _EXTRA_METADATA_LABELS: list[tuple[str, str]] = [
     ("duplicate_of", "source_header.duplicate_of"),
     ("markdown_base64_stripped", "source_header.markdown_base64_stripped"),
     ("pdf_dedup", "source_header.pdf_dedup"),
+    ("ocr", "source_header.ocr"),
 ]
 
 

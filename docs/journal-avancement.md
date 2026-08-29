@@ -955,3 +955,73 @@ implémenter dans l'ordre puis à publier en `0.1.3 beta`.
   initiale (corrigé dans la foulée, tag/Release recréés). Envisager de
   pinner une plage de version plus stricte pour éviter la récidive.
 
+## Session 14 — 29 août 2026
+
+Deux chantiers demandés par l'utilisateur après relecture critique de sa
+propre roadmap ("j'ai fait un mauvais travail sur l'évolution de DocFuse") :
+des fichiers de développement silencieusement ignorés, et des PDF scannés
+détectés mais jamais réellement récupérés.
+
+### Fichiers de développement traités comme texte brut (D-066) — ✅ Livré
+
+- `constants.CODE_EXTENSIONS` (~60 extensions courantes) fusionné dans
+  `SUPPORTED_EXTENSIONS`, dispatché vers `TextExtractor` existant — aucune
+  nouvelle dépendance.
+- Limite documentée, pas corrigée : dispatch par suffixe uniquement, donc
+  `Dockerfile`/`Makefile`/`.gitignore`/`.env` restent hors périmètre
+  (`Path.suffix` est vide pour ces noms en Python — vérifié).
+
+### OCR des PDF scannés — build séparé `CorpusOne-OCR` (D-067) — ✅ Livré
+
+- L'utilisateur a fourni un document d'architecture détaillé (rédigé pour
+  un contexte serveur MCP) ; adapté au code réel de DocFuse plutôt que
+  porté tel quel, en plan mode avec validation explicite avant codage.
+- Nouveau package `core/ocr/` (même pattern que `core/tokenizers/` :
+  registre, `is_available()`, jamais d'exception). Classification par page
+  dans `extractors/pdf.py` réutilisant le texte déjà extrait par pdfminer
+  (`chars_per_page`, déjà calculé pour la dédup d'en-têtes v0.1.3) — pas de
+  seconde extraction. OCR via le binaire CLI Tesseract en `subprocess`
+  (isolation de process gratuite, pas de `ProcessPoolExecutor`),
+  rastérisation par `pypdfium2`.
+- **Décision produit tranchée explicitement avec l'utilisateur**
+  (AskUserQuestion) : `CorpusOne.exe` n'embarque pas Tesseract (~40-80 Mo,
+  pas un paquet pip) — un second exe, `CorpusOne-OCR.exe`
+  (`CorpusOne-OCR.spec`, nouveau job CI `build-windows-ocr`), l'embarque et
+  est publié en parallèle sur la même Release.
+- Vérifié en conditions réelles pendant la session (Tesseract 5.5 installé
+  localement sur la machine de dev) : un PDF image-only (construit avec
+  `reportlab`, aucune couche texte) recouvre bien son texte par OCR, statut
+  `LOW_TEXT` → `READY`/`IMAGES` ; bascule automatique et transparente
+  vérifiée en masquant Tesseract du PATH (note explicite, texte inchangé).
+- Portée v1 = PDF uniquement. Fichiers image seuls et images intégrées dans
+  `.docx`/`.pptx` (aussi soulevés par l'utilisateur) : notés pour une
+  itération suivante (même moteur réutilisable), pas abandonnés.
+- Job CI `build-windows-ocr` et binaires Windows Tesseract non testés dans
+  cette session (sandbox Linux, pas de runner Windows) — cf. "Reste à
+  faire" ci-dessous.
+
+### État après Session 14
+
+| Métrique | Valeur |
+|---|---|
+| Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
+| ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
+| mypy --strict | ✅ (aucune nouvelle erreur ; ajout override `pypdfium2.*`) |
+| pytest | ✅ 363 passed, 39 skipped (tests OCR exécutés, Tesseract présent en local) |
+| Décisions archivées | 67 (D-001 à D-067) |
+
+### Reste à faire
+
+- ⬜ Job CI `build-windows-ocr` et `CorpusOne-OCR.spec` : jamais buildés
+  réellement (pas de runner Windows disponible pendant la session). À
+  valider au premier déclenchement réel (`gh workflow run` / une Release) :
+  chemin d'installation Tesseract via `choco`, nom exact des DLL
+  embarquées, taille finale de l'exe.
+- ⬜ Décider si/quand cette fonctionnalité justifie une Release (v0.1.4 ?)
+  — non tranché cette session, seule l'implémentation a été demandée.
+- ⬜ v1.1 OCR envisagée : fichiers image seuls (`.jpg`/`.png`, aujourd'hui
+  toujours `IGNORED`) et images intégrées dans `.docx`/`.pptx`, en
+  réutilisant `core/ocr/`.
+- ⬜ (reporté de la Session 13) `ruff>=0.4.0` sans borne haute — toujours
+  pas pinné.
+

@@ -52,7 +52,9 @@ contrôle de plafond pour ne pas dépasser la fenêtre de contexte.
 - **Hors-ligne strict** : aucune connexion réseau, vérifié par test
   automatisé.
 - **Multi-format** : PDF, DOCX, PPTX, XLSX, RTF, HTML, Markdown, CSV/TSV,
-  ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML.
+  ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML, et une soixantaine
+  d'extensions de fichiers de développement (`.py`, `.js`/`.ts`, `.sh`,
+  `.sql`, `.css`, `.java`, `.c`/`.cpp`, `.go`, `.rs`, etc.).
 - **Compteur de contexte générique** : estimation tokens
   (`octets UTF-8 / 4`) + marge configurable (15 % par défaut).
 - **Moteurs de comptage précis en option** : tokens réels de Mistral ou
@@ -60,7 +62,11 @@ contrôle de plafond pour ne pas dépasser la fenêtre de contexte.
   sans réseau.
 - **Contrôle de plafond** : blocage si un fichier OU le total dépasse le
   plafond (128 000 tokens par défaut).
-- **Détection d'images et de scans** : alerte sans bloquer (pas d'OCR).
+- **Détection d'images et de scans**, avec **OCR optionnel des PDF
+  scannés** (Tesseract) : reconnaissance automatique si un moteur est
+  disponible, jamais bloquant sinon. `CorpusOne.exe` n'embarque pas
+  Tesseract (taille inchangée) ; une variante distincte, `CorpusOne-OCR.exe`,
+  l'embarque pour un usage sans aucune installation.
 - **Rapport d'exécution** : liste tous les fichiers (traités, ignorés,
   erreurs), exporté en Markdown et JSON.
 - **GUI CustomTkinter + CLI argparse + glisser-déposer** (drag-and-drop).
@@ -283,6 +289,11 @@ pip install pyinstaller
 pyinstaller --noconfirm CorpusOne.spec
 
 # Le binaire est dans dist/CorpusOne.exe (~40.6 Mo, autoportant)
+
+# Variante avec OCR bundlé (Tesseract) — nécessite Tesseract installé
+# localement au moment du build (voir CorpusOne-OCR.spec pour le détail) :
+choco install tesseract -y
+pyinstaller --noconfirm CorpusOne-OCR.spec
 ```
 
 ### Contribution
@@ -326,7 +337,9 @@ context window.
   DLL, no install, no admin rights. Runs from a USB stick or a network share.
 - **Strictly offline**: no network access, enforced by an automated test.
 - **Multi-format**: PDF, DOCX, PPTX, XLSX, RTF, HTML, Markdown, CSV/TSV,
-  ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML.
+  ODT/ODS/ODP, XML/JSON/YAML/INI, EML, MHTML, plus about sixty development
+  file extensions (`.py`, `.js`/`.ts`, `.sh`, `.sql`, `.css`, `.java`,
+  `.c`/`.cpp`, `.go`, `.rs`, etc.).
 - **Generic context counter**: tokens estimate (`UTF-8 bytes / 4`) +
   configurable margin (15% by default).
 - **Optional precise counting engines**: real token count for Mistral or
@@ -334,7 +347,11 @@ context window.
   network.
 - **Ceiling control**: blocks if a single file OR the total exceeds the
   ceiling (128,000 tokens by default).
-- **Image and scan detection**: warns but does not block (no OCR).
+- **Image and scan detection**, with **optional OCR for scanned PDFs**
+  (Tesseract): recognized automatically if an engine is available, never
+  blocking otherwise. `CorpusOne.exe` does not bundle Tesseract (unchanged
+  size); a separate variant, `CorpusOne-OCR.exe`, bundles it for a
+  zero-install experience.
 - **Run report**: lists every file (processed, ignored, errors), exported as
   Markdown and JSON.
 - **CustomTkinter GUI + argparse CLI + drag-and-drop**.
@@ -556,6 +573,11 @@ pip install pyinstaller
 pyinstaller --noconfirm CorpusOne.spec
 
 # The binary lands in dist/CorpusOne.exe (~40.6 MB, self-contained)
+
+# OCR-bundled variant (Tesseract) — requires Tesseract installed locally
+# at build time (see CorpusOne-OCR.spec for details):
+choco install tesseract -y
+pyinstaller --noconfirm CorpusOne-OCR.spec
 ```
 
 ### Contributing

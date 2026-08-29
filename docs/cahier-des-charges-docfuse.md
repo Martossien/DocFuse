@@ -289,6 +289,7 @@ Codes retour :
 | `.xml` `.json` `.yaml` `.yml` `.ini` `.cfg` | Texte / pretty-print |
 | `.eml` | En-têtes utiles + corps texte/html→texte |
 | `.mhtml` `.mht` | Corps HTML→texte si simple |
+| Fichiers de développement (`.py` `.js` `.ts` `.vba` `.sh` `.sql` `.css` `.java` `.c`/`.cpp` `.go` `.rs` etc. — liste complète : `constants.CODE_EXTENSIONS`) | Texte brut (même détection d'encodage que `.txt`) — cas d'usage LLM courant : envoyer une codebase. Limite : dispatch par extension, donc les fichiers sans extension (`Dockerfile`, `Makefile`) ou dotfiles purs (`.gitignore`, `.env`) restent hors périmètre (2026-08-29) |
 
 ### 7.4 Explicitement refusés en v1 (rapport, pas d’exception silencieuse)
 
@@ -377,7 +378,9 @@ le rapport signale systématiquement ce qui a été fait) :
 
 ## 9. Images et pauvreté de texte (deux niveaux)
 
-Pas d’OCR. Deux sévérités **cumulables** sur un même fichier.
+Deux sévérités **cumulables** sur un même fichier. Un PDF scanné peut
+être reconnu par OCR si un moteur est disponible (§9.5) — sinon le
+comportement ci-dessous (pas de texte récupéré) reste inchangé.
 
 ### 9.1 Warning — le document comporte des images
 
@@ -401,7 +404,11 @@ Ces seuils sont dans la conf (`scan.min_chars_file`, `scan.min_chars_per_page`, 
 
 **Effet** :
 - Pastille orange/rouge, plus visible que le warning.
-- Message : « Peu ou pas de texte extractible (probable scan ou diapo image). L’IA n’aura quasiment rien de ce fichier. OCR non disponible. »
+- Message : « Peu ou pas de texte extractible (probable scan ou diapo image). L’IA n’aura quasiment rien de ce fichier. » Pour un PDF, si un
+  moteur OCR est disponible (§9.5), le texte est reconnu **avant** ce
+  contrôle : un scan bien reconnu ressort donc `READY`/`IMAGES`, pas cette
+  alerte — qui ne reste déclenchée que si le texte est resté illisible
+  (ou si l'OCR n'était pas disponible).
 - Insertion de marqueurs de pages vides (voir 8.3) pour ne pas « avaler » le fichier sans trace.
 - **Ne bloque pas** la génération.
 
@@ -416,6 +423,45 @@ Un scan illustré = alerte importante (+ éventuellement compteur d’images). L
 - **PPTX** : `ppt/media/*` ; diapo sans `a:t` mais avec image → alerte importante pour cette diapo, agrégée au fichier.
 
 Ne pas alerter pour un minuscule logo si et seulement si le texte est abondant : c’est le **warning images**, pas l’alerte scan. C’est voulu (demande utilisateur : les deux).
+
+### 9.5 OCR des PDF scannés (moteur optionnel, `core/ocr/`)
+
+Portée v1 : **PDF uniquement**. Les fichiers image seuls (`.jpg`/`.png`,
+§7.4) et les images intégrées dans `.docx`/`.pptx` restent hors OCR pour
+l'instant — même moteur réutilisable plus tard, priorité au cas PDF scanné
+(le plus fréquent).
+
+**Classification par page** (`extractors/pdf.py::classify_page`), à partir
+du texte déjà extrait par pdfminer (pas de seconde extraction) :
+
+| Classe | Critère | Action |
+|---|---|---|
+| `native` | Texte utile ≥ seuil (`PDF_OCR_MIN_CHARS_PER_PAGE`), pas d'image | Rien, texte natif conservé tel quel |
+| `mixed` | Texte utile ≥ seuil **et** au moins une image sur la page | Texte natif conservé **et** OCR tenté, concaténés (jamais dédupliqués) |
+| `ocr` | Texte insuffisant, poubelle (glyphes non mappés `(cid:`/`�`), ou page avec une image et sans texte | OCR tenté |
+| `blank` | Aucun texte, aucune image | Rien — pas de texte fantôme |
+
+**Moteur** : Tesseract (Apache-2.0) via son binaire CLI en `subprocess`
+(`tesseract stdin stdout -l fra+eng`), jamais une liaison native — chaque
+appel est déjà un process isolé, avec son propre timeout par page
+(`OCR_PAGE_TIMEOUT_S`). Rastérisation par `pypdfium2` (Apache-2.0/BSD-3) ;
+`PyMuPDF` explicitement écarté (AGPL-3.0). Plafonds de sécurité :
+`OCR_MAX_PAGES_PER_FILE`, `OCR_MAX_PIXELS_PER_PAGE` (bombe de rendu PDF).
+
+**Disponibilité, jamais bloquante** : `core/ocr/registry.py::resolve_ocr_engine()`
+ne lève jamais d'exception — si Tesseract n'est trouvé ni bundlé ni sur le
+PATH système, le comportement est strictement identique à avant l'ajout de
+cette fonctionnalité (§9.2), plus une note de transparence expliquant
+pourquoi (`extra_metadata["ocr"]`, visible dans l'en-tête SOURCE et le
+rapport, jamais silencieux — CdC §8).
+
+**Distribution — deux exe** : `CorpusOne.exe` n'embarque jamais Tesseract
+(taille et promesse « zéro dépendance » inchangées). `CorpusOne-OCR.exe`
+(build séparé, `CorpusOne-OCR.spec`) l'embarque avec les modèles `fra`+`eng`
+(`tessdata_fast`) et fonctionne sans aucune installation sur la machine
+cible. Un utilisateur de `CorpusOne.exe` peut aussi installer Tesseract à
+part (ex. UB-Mannheim) : l'OCR s'active alors automatiquement, sans exe
+distinct.
 
 ---
 

@@ -9,12 +9,17 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from docfuse.constants import CODE_EXTENSIONS
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
+
+# .txt/.text/.log (CdC §7.2) + fichiers de développement (CODE_EXTENSIONS,
+# §7.3) : même traitement, un texte brut est un texte brut.
+_TEXT_LIKE_EXTENSIONS: frozenset[str] = frozenset({".txt", ".text", ".log"}) | CODE_EXTENSIONS
 
 
 def detect_encoding(data: bytes) -> tuple[str, bytes]:
@@ -68,15 +73,15 @@ def detect_encoding(data: bytes) -> tuple[str, bytes]:
     return "latin-1", data
 
 
-@register(".txt", ".text", ".log")
+@register(*_TEXT_LIKE_EXTENSIONS)
 class TextExtractor(Extractor):
-    """Extracteur pour les fichiers texte brut."""
+    """Extracteur pour les fichiers texte brut (dont les fichiers de développement)."""
 
     file_type = "text"
 
     @classmethod
     def accepts(cls, path: Path) -> bool:
-        return path.suffix.lower() in (".txt", ".text", ".log")
+        return path.suffix.lower() in _TEXT_LIKE_EXTENSIONS
 
     @classmethod
     def extract(cls, path: Path, relative_path: str) -> ExtractedFile:

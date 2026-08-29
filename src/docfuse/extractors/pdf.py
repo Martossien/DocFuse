@@ -9,20 +9,39 @@ CdC §14.3 — pdfminer.six (MIT) pour extraction + détection images ;
 Inspiré de MarkItDown PdfConverter :
 - extract_pages() pour traiter page-par-page (libération mémoire).
 - extract_text() en fallback si le rendu est trop pauvre.
+
+OCR (v1, PDF scannés) — voir `core/ocr/` : chaque page est classée
+native/ocr/blank/mixed à partir du texte déjà extrait par pdfminer (pas de
+seconde passe d'extraction). Seules les pages classées ocr/mixed sont
+rastérisées (pypdfium2) puis passées à Tesseract, si disponible — sinon le
+comportement est strictement identique à avant l'ajout de cette
+fonctionnalité (voir `core/ocr/registry.py::resolve_ocr_engine`).
 """
 
 from __future__ import annotations
 
+import io
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from docfuse.constants import (
+    MAX_WORKERS,
+    OCR_DPI,
+    OCR_LANG,
+    OCR_MAX_PAGES_PER_FILE,
+    OCR_MAX_PIXELS_PER_PAGE,
     PDF_BOILERPLATE_MAX_LINE_LEN,
     PDF_BOILERPLATE_MIN_OCCURRENCES,
     PDF_BOILERPLATE_MIN_PAGES,
     PDF_BOILERPLATE_MIN_RATIO,
+    PDF_OCR_GARBAGE_MARKERS,
+    PDF_OCR_MIN_CHARS_PER_PAGE,
 )
+from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
 from docfuse.i18n import t
@@ -32,9 +51,24 @@ from docfuse.models.file_status import FileStatus
 logger = logging.getLogger(__name__)
 
 
+class PageKind(str, Enum):
+    """Classification d'une page PDF pour décider si l'OCR est utile.
+
+    Simplification assumée par rapport à une détection par couverture
+    d'image (ratio surface image / surface page) : DocFuse ne dispose que
+    d'un compte d'images par page (pdfminer), pas de leurs dimensions —
+    même logique booléenne que `core/image_detector.py` (image_count > 0).
+    """
+
+    NATIVE = "native"
+    OCR = "ocr"
+    BLANK = "blank"
+    MIXED = "mixed"
+
+
 @register(".pdf")
 class PdfExtractor(Extractor):
-    """Extracteur PDF via pdfminer.six + pypdf."""
+    """Extracteur PDF via pdfminer.six + pypdf, avec OCR optionnel des pages scannées."""
 
     file_type = "pdf"
 
@@ -59,13 +93,27 @@ class PdfExtractor(Extractor):
                 )
 
             # 2. Extraction texte page-par-page avec pdfminer
-            pages_text, chars_per_page, image_count, page_count = _extract_pages_pdfminer(path)
+            pages_text, chars_per_page, image_count, page_count, image_count_per_page = (
+                _extract_pages_pdfminer(path)
+            )
 
             # 2b. Déduplication des en-têtes/pieds de page répétés sur chaque page.
             # Recalcule chars_per_page à partir du texte dédupliqué : la densité de
             # texte utile pour la détection de pauvreté (image_detector.py) doit
             # refléter le contenu réel, pas le bruit répété.
             pages_text, dedup_note = _dedupe_page_boilerplate(pages_text)
+            chars_per_page = [len(p.strip()) for p in pages_text]
+
+            extra_metadata: dict[str, str] = {}
+            if dedup_note:
+                extra_metadata["pdf_dedup"] = dedup_note
+
+            # 2c. OCR des pages scannées (moteur optionnel, jamais bloquant).
+            pages_text, ocr_note = _apply_ocr(
+                path, pages_text, chars_per_page, image_count_per_page
+            )
+            if ocr_note:
+                extra_metadata["ocr"] = ocr_note
             chars_per_page = [len(p.strip()) for p in pages_text]
 
             # 3. Construction du texte avec marqueurs de pages vides
@@ -79,10 +127,6 @@ class PdfExtractor(Extractor):
                     parts.append(text)
 
             full_text = "\n\n".join(parts)
-
-            extra_metadata: dict[str, str] = {}
-            if dedup_note:
-                extra_metadata["pdf_dedup"] = dedup_note
 
             return ExtractedFile(
                 path=path,
@@ -116,17 +160,19 @@ def _check_encrypted(path: Path) -> bool:
 
 def _extract_pages_pdfminer(
     path: Path,
-) -> tuple[list[str], list[int], int, int]:
+) -> tuple[list[str], list[int], int, int, list[int]]:
     """Extrait le texte et les images page par page via pdfminer.six.
 
     Returns:
-        Tuple (textes par page, caractères par page, nombre d'images, nombre de pages).
+        Tuple (textes par page, caractères par page, nombre d'images total,
+        nombre de pages, nombre d'images par page).
     """
     from pdfminer.high_level import extract_pages
     from pdfminer.layout import LTFigure, LTImage, LTTextContainer
 
     pages_text: list[str] = []
     chars_per_page: list[int] = []
+    image_count_per_page: list[int] = []
     total_images = 0
     page_count = 0
 
@@ -151,6 +197,7 @@ def _extract_pages_pdfminer(
                 page_images += _count_images_in_figure(element)
 
         total_images += page_images
+        image_count_per_page.append(page_images)
         page_text = "\n".join(page_text_parts)
         pages_text.append(page_text)
         chars_per_page.append(len(page_text.strip()))
@@ -158,7 +205,7 @@ def _extract_pages_pdfminer(
         # Libération mémoire (inspiré de MarkItDown PdfConverter:566)
         # pdfminer gère la mémoire page-par-page avec extract_pages()
 
-    return pages_text, chars_per_page, total_images, page_count
+    return pages_text, chars_per_page, total_images, page_count, image_count_per_page
 
 
 def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | None]:
@@ -249,3 +296,170 @@ def _count_images_in_figure(figure: Any) -> int:
         return count
 
     return _count_recursive(figure)
+
+
+def _has_garbage_text(text: str) -> bool:
+    """Détecte un texte natif « poubelle » (polices cassées, glyphes non mappés)."""
+    return any(marker in text for marker in PDF_OCR_GARBAGE_MARKERS)
+
+
+def classify_page(text: str, char_count: int, has_image: bool) -> PageKind:
+    """Classe une page pour décider si l'OCR lui serait utile.
+
+    Args:
+        text: Texte natif de la page (avant dédup, peu importe ici).
+        char_count: Caractères utiles déjà comptés (`chars_per_page[i]`).
+        has_image: Au moins une image détectée sur cette page (pdfminer).
+
+    Returns:
+        `NATIVE` (texte natif suffisant, rien à faire), `BLANK` (page
+        réellement vide — pas de texte fantôme), `OCR` (pas de texte natif
+        utile, qu'il n'y en ait jamais eu ou qu'il soit illisible/poubelle),
+        ou `MIXED` (texte natif utile + une image sur la page).
+
+    Une page « poubelle » (glyphes non mappés) a du contenu visible même si
+    rien n'est extractible : ce n'est jamais `BLANK`, seulement une page
+    sans image (`char_count == 0` et pas de glyphes poubelle) l'est.
+    """
+    useful_chars = 0 if _has_garbage_text(text) else char_count
+    if useful_chars == 0:
+        if char_count == 0 and not has_image:
+            return PageKind.BLANK
+        return PageKind.OCR
+    if useful_chars < PDF_OCR_MIN_CHARS_PER_PAGE:
+        return PageKind.OCR
+    return PageKind.MIXED if has_image else PageKind.NATIVE
+
+
+def _apply_ocr(
+    path: Path,
+    pages_text: list[str],
+    chars_per_page: list[int],
+    image_count_per_page: list[int],
+) -> tuple[list[str], str | None]:
+    """Classe chaque page et lance l'OCR sur celles qui en ont besoin.
+
+    Ne modifie jamais une page classée `native` ou `blank`. Si aucun moteur
+    OCR n'est disponible, le texte n'est pas modifié — seule une note de
+    transparence est ajoutée si des pages semblaient scannées.
+
+    Returns:
+        Tuple (pages de texte éventuellement enrichies de texte OCR, note
+        de transparence ou None si rien à signaler).
+    """
+    page_count = len(pages_text)
+    if page_count == 0:
+        return pages_text, None
+
+    kinds = [
+        classify_page(text, chars, images > 0)
+        for text, chars, images in zip(
+            pages_text, chars_per_page, image_count_per_page, strict=True
+        )
+    ]
+
+    ocr_indices = [i for i, k in enumerate(kinds) if k in (PageKind.OCR, PageKind.MIXED)]
+    if not ocr_indices:
+        return pages_text, None
+
+    engine = resolve_ocr_engine()
+    if engine is None:
+        return pages_text, t("ocr.unavailable_note", pages=len(ocr_indices))
+
+    ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine)
+
+    new_pages = list(pages_text)
+    pages_ocr = pages_mixed = pages_failed = 0
+    for idx in ocr_indices:
+        text, ok = ocr_results.get(idx, ("", False))
+        kind = kinds[idx]
+        if not ok or not text.strip():
+            pages_failed += 1
+            continue
+        marker = f"[[PAGE {idx + 1} — texte OCR (tesseract, {OCR_LANG})]]\n{text.strip()}"
+        if kind is PageKind.MIXED and new_pages[idx].strip():
+            new_pages[idx] = f"{new_pages[idx]}\n\n{marker}"
+            pages_mixed += 1
+        else:
+            new_pages[idx] = marker
+            pages_ocr += 1
+
+    note = t(
+        "ocr.applied_note",
+        pages_ocr=pages_ocr,
+        pages_mixed=pages_mixed,
+        pages_failed=pages_failed,
+        pages_total=page_count,
+        lang=OCR_LANG,
+    )
+    return new_pages, note
+
+
+def _ocr_pages(
+    path: Path,
+    page_indices: list[int],
+    lang: str,
+    engine: OcrEngine,
+) -> dict[int, tuple[str, bool]]:
+    """Rastérise puis reconnaît une sélection de pages (0-indexées).
+
+    Rastérisation séquentielle (un seul `PdfDocument`, un pixmap jeté après
+    chaque page — jamais tout le PDF en mémoire à la fois) ; la
+    reconnaissance Tesseract, elle, est parallélisée (chaque appel est déjà
+    un process OS isolé via `subprocess`, donc thread-safe côté appelant).
+
+    Returns:
+        Dict {index page: (texte reconnu, succès)}. Jamais d'exception :
+        une page en échec (raster impossible, page trop grande, timeout)
+        a `succès=False` et un texte vide.
+    """
+    results: dict[int, tuple[str, bool]] = {}
+    capped = page_indices[:OCR_MAX_PAGES_PER_FILE]
+    for skipped in page_indices[OCR_MAX_PAGES_PER_FILE:]:
+        results[skipped] = ("", False)
+    if not capped:
+        return results
+
+    import pypdfium2 as pdfium
+
+    pngs: dict[int, bytes] = {}
+    try:
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            for idx in capped:
+                try:
+                    page = pdf[idx]
+                    bitmap = page.render(scale=OCR_DPI / 72)
+                    pil_image = bitmap.to_pil()
+                    if pil_image.width * pil_image.height <= OCR_MAX_PIXELS_PER_PAGE:
+                        buf = io.BytesIO()
+                        pil_image.save(buf, format="PNG")
+                        pngs[idx] = buf.getvalue()
+                except Exception:
+                    logger.warning(
+                        "Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True
+                    )
+        finally:
+            pdf.close()
+    except Exception:
+        logger.warning("Ouverture PDFium impossible pour l'OCR : %s", path, exc_info=True)
+
+    for idx in capped:
+        if idx not in pngs:
+            results[idx] = ("", False)
+
+    if pngs:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(engine.ocr_image, png, lang): idx for idx, png in pngs.items()
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    text = future.result()
+                except Exception:
+                    logger.warning("Échec OCR page %d de %s", idx + 1, path, exc_info=True)
+                    text = ""
+                results[idx] = (text, bool(text.strip()))
+
+    return results

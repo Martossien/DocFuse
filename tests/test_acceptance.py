@@ -144,6 +144,8 @@ class TestLicenseCompliance:
             "tiktoken",  # moteur de comptage précis "mistral" (core/tokenizers/mistral.py)
             "regex",  # dep of tiktoken
             "requests",  # dep of tiktoken (jamais appelé par notre code, cf. tests offline)
+            "pypdfium2",  # rastérisation PDF pour l'OCR (core/ocr/, extractors/pdf.py)
+            "pillow",  # encodage PNG des pages rastérisées avant OCR
         ]
 
         for pkg_name in runtime_deps:

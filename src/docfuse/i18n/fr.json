@@ -148,5 +148,10 @@
   "source_header.secrets_detected": "alerte_secret",
   "source_header.duplicate_of": "doublon_de",
   "source_header.markdown_base64_stripped": "images_base64_retirees",
-  "source_header.pdf_dedup": "notes"
+  "source_header.pdf_dedup": "notes",
+  "source_header.ocr": "ocr",
+
+  "ocr.tesseract": "Tesseract",
+  "ocr.applied_note": "{pages_ocr} page(s) scannée(s) reconnue(s) par OCR, {pages_mixed} page(s) mixte(s) (texte + OCR), {pages_failed} page(s) restée(s) illisible(s), sur {pages_total} page(s) ({lang})",
+  "ocr.unavailable_note": "{pages} page(s) semblent scannée(s) mais l'OCR n'est pas disponible sur cette machine (voir la variante CorpusOne-OCR, ou installez Tesseract)"
 }

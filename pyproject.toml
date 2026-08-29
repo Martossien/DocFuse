@@ -41,6 +41,8 @@ dependencies = [
     "customtkinter>=5.2.0",
     "tkinterdnd2>=0.3.2",
     "tiktoken>=0.7.0",
+    "pypdfium2>=4.30.0",
+    "pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -129,6 +131,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "lxml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pypdfium2.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
