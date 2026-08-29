@@ -1109,8 +1109,9 @@ détectés mais jamais réellement récupérés.
 - ⬜ v1.1 OCR envisagée : fichiers image seuls (`.jpg`/`.png`, aujourd'hui
   toujours `IGNORED`) et images intégrées dans `.docx`/`.pptx`, en
   réutilisant `core/ocr/`.
-- ⬜ (reporté de la Session 13) `ruff>=0.4.0` sans borne haute — toujours
-  pas pinné.
+- ✅ (reporté de la Session 13) `ruff>=0.4.0` sans borne haute — **corrigé**
+  (D-079) : épinglé sur `==0.16.5`, local remis à niveau, tout le dépôt
+  reformaté/relinté proprement avec cette version.
 - ⬜ **Ordre de lecture pdfminer non garanti** (retour utilisateur,
   2026-08-29) : sur des mises en page complexes, l'ordre des blocs de texte
   restitué par pdfminer peut différer de l'ordre visuel (en-tête/pied mal

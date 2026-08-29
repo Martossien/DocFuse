@@ -1237,6 +1237,30 @@ pendant tout accès à `pypdfium2` (`PdfDocument`, `page.render()`,
   uniquement l'ouverture/rendu de page (rapide), pas l'OCR Tesseract
   lui-même (qui reste parallélisé, isolé par process via `subprocess`).
 
+### D-079 : `ruff` épinglé sur une version exacte
+
+**Décision** : `ruff>=0.4.0` → `ruff==0.16.5` dans `pyproject.toml` (dev).
+CI installe déjà via `pip install -e ".[dev]"`, donc aligné automatiquement
+— aucun changement séparé nécessaire dans `ci.yml`.
+
+**Rationale** :
+- Dette technique identifiée en Session 13 : la CI installait `ruff` sans
+  borne haute, dérivant vers la dernière version (0.16.4 à l'époque) alors
+  que l'environnement local restait sur 0.8.0 — deux versions avec des avis
+  de formatage différents sur un `assert` multi-lignes, faisant échouer
+  `ruff format --check` en CI sur du code déjà passé en local. Avait cassé
+  la publication initiale de la Release `v0.1.3`.
+- `ruff` ne suit pas un contrat de stabilité strict sur le comportement du
+  formatter/linter entre versions mineures (contrairement à son API CLI) —
+  une plage `>=`/`<` resterait exposée à la même classe de dérive à chaque
+  nouvelle version publiée. Seul un épinglage exact élimine le risque.
+- Local remis à niveau (0.16.5) et vérifié : `ruff check`/`ruff format
+  --check` propres sur tout le dépôt. Une seule règle nouvelle déclenchée
+  (`UP042`, `PageKind(str, Enum)` → `PageKind(StrEnum)`, cohérent avec
+  `FileStatus` qui utilise déjà `StrEnum`) — corrigée.
+- Prochaine mise à jour de `ruff` : un choix explicite (bump du pin +
+  vérification locale), plus jamais une dérive silencieuse via la CI.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

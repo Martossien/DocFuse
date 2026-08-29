@@ -10,6 +10,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Non publié]
 
+### Technique
+
+- `ruff` épinglé sur une version exacte (`==0.16.5`) — dette identifiée en
+  v0.1.3 (dérive local/CI ayant cassé la publication initiale de cette
+  Release), corrigée pour de bon.
+
 ### Corrigé (critique)
 
 - **Crash du processus entier (SIGSEGV) lors de l'OCR de plusieurs PDF en

@@ -24,7 +24,7 @@ import io
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 _PDFIUM_LOCK = threading.Lock()
 
 
-class PageKind(str, Enum):
+class PageKind(StrEnum):
     """Classification d'une page PDF pour décider si l'OCR est utile.
 
     Simplification assumée par rapport à une détection par couverture
