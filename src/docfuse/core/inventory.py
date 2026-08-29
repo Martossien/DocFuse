@@ -96,26 +96,7 @@ def scan_directory(
     Returns:
         Liste triée selon le mode choisi.
     """
-    if extensions is None:
-        extensions = ALL_EXTENSIONS
-
-    exclude_globs = exclude_globs or []
-    found: list[Path] = []
-
-    if not root.is_dir():
-        raise NotADirectoryError(f"Le chemin n'est pas un dossier: {root}")
-
-    if recursive:
-        for dirpath, dirnames, filenames in _walk_with_depth(root, max_depth):
-            # Filtrer les dossiers à ignorer (mutation in-place de dirnames)
-            dirnames[:] = [d for d in dirnames if not _should_ignore_dir(d)]
-            for filename in filenames:
-                if _matches_file(filename, extensions, exclude_globs):
-                    found.append(Path(dirpath) / filename)
-    else:
-        for entry in root.iterdir():
-            if entry.is_file() and _matches_file(entry.name, extensions, exclude_globs):
-                found.append(entry)
+    found, _ignored = _walk_source(root, recursive, extensions, exclude_globs, max_depth)
 
     # Tri selon le mode choisi (CdC §8.1 — sort: name | mtime | type)
     if sort == "mtime":
@@ -125,6 +106,69 @@ def scan_directory(
     else:  # name (défaut)
         found.sort(key=lambda p: natural_sort_key(str(p.relative_to(root))))
     return found
+
+
+def _walk_source(
+    root: Path,
+    recursive: bool,
+    extensions: frozenset[str] | None,
+    exclude_globs: list[str] | None,
+    max_depth: int,
+) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Un seul parcours d'un dossier source → (fichiers retenus, ignorés).
+
+    D-098 : `scan_directory` et `list_ignored` parcouraient chacun tout
+    l'arbre (2× les appels système) et `collect_inputs` re-triait ensuite
+    des entrées déjà triées. Les deux fonctions publiques restent
+    disponibles (et triées) pour les appelants/tests existants ; le
+    pipeline passe par ce parcours unique, non trié (le tri final se fait
+    une fois dans `collect_inputs`).
+    """
+    from docfuse.i18n import t
+
+    if extensions is None:
+        extensions = ALL_EXTENSIONS
+    exclude_globs = exclude_globs or []
+
+    if not root.is_dir():
+        raise NotADirectoryError(f"Le chemin n'est pas un dossier: {root}")
+
+    found: list[Path] = []
+    ignored: list[tuple[Path, str]] = []
+
+    if recursive:
+        for dirpath, dirnames, filenames in _walk_with_depth(root, max_depth):
+            # D-096 : un dossier élagué (`node_modules/`, `build/`, `dist/`,
+            # `.git/`, `__MACOSX/`…) n'apparaissait ni dans le corpus ni dans
+            # le rapport — invisible, contraire au CdC §7.1 (« tout fichier
+            # rencontré et non retenu est listé »). `build/` ou `dist/` sont
+            # aussi des noms de dossiers documentaires ordinaires : on
+            # signale le dossier élagué, une ligne par dossier.
+            kept_dirs = []
+            for d in dirnames:
+                if _should_ignore_dir(d):
+                    ignored.append((Path(dirpath) / d, t("inventory.ignored_dir")))
+                else:
+                    kept_dirs.append(d)
+            dirnames[:] = kept_dirs
+            for filename in filenames:
+                filepath = Path(dirpath) / filename
+                reason = _ignored_reason(filename, extensions, exclude_globs)
+                if reason is None:
+                    found.append(filepath)
+                else:
+                    ignored.append((filepath, reason))
+    else:
+        for entry in root.iterdir():
+            if not entry.is_file():
+                continue
+            reason = _ignored_reason(entry.name, extensions, exclude_globs)
+            if reason is None:
+                found.append(entry)
+            else:
+                ignored.append((entry, reason))
+
+    return found, ignored
 
 
 def _walk_with_depth(root: Path, max_depth: int) -> Iterator[tuple[str, list[str], list[str]]]:
@@ -266,42 +310,7 @@ def list_ignored(
     Returns:
         Liste de (chemin, raison) pour chaque fichier ignoré.
     """
-    from docfuse.i18n import t
-
-    if extensions is None:
-        extensions = ALL_EXTENSIONS
-
-    exclude_globs = exclude_globs or []
-    ignored: list[tuple[Path, str]] = []
-
-    if recursive:
-        for dirpath, dirnames, filenames in _walk_with_depth(root, max_depth):
-            # D-096 : un dossier élagué (`node_modules/`, `build/`, `dist/`,
-            # `.git/`, `__MACOSX/`…) n'apparaissait ni dans le corpus ni dans
-            # le rapport — invisible, contraire au CdC §7.1 (« tout fichier
-            # rencontré et non retenu est listé »). `build/` ou `dist/` sont
-            # aussi des noms de dossiers documentaires ordinaires : on
-            # signale le dossier élagué, une ligne par dossier.
-            kept_dirs = []
-            for d in dirnames:
-                if _should_ignore_dir(d):
-                    ignored.append((Path(dirpath) / d, t("inventory.ignored_dir")))
-                else:
-                    kept_dirs.append(d)
-            dirnames[:] = kept_dirs
-            for filename in filenames:
-                filepath = Path(dirpath) / filename
-                reason = _ignored_reason(filename, extensions, exclude_globs)
-                if reason:
-                    ignored.append((filepath, reason))
-    else:
-        for entry in root.iterdir():
-            if not entry.is_file():
-                continue
-            reason = _ignored_reason(entry.name, extensions, exclude_globs)
-            if reason:
-                ignored.append((entry, reason))
-
+    _found, ignored = _walk_source(root, recursive, extensions, exclude_globs, max_depth)
     return ignored
 
 
@@ -347,23 +356,11 @@ def collect_inputs(
 
     for source in selection.paths:
         if source.is_dir():
-            paths = scan_directory(
-                source,
-                recursive=recursive,
-                exclude_globs=exclude_globs,
-                extensions=extensions,
-                sort=sort,
-                max_depth=max_depth,
+            # D-098 : un seul parcours par source, tri unique plus bas.
+            paths, source_ignored = _walk_source(
+                source, recursive, extensions, exclude_globs, max_depth
             )
-            ignored.extend(
-                list_ignored(
-                    source,
-                    recursive=recursive,
-                    exclude_globs=exclude_globs,
-                    extensions=extensions,
-                    max_depth=max_depth,
-                )
-            )
+            ignored.extend(source_ignored)
             for path in paths:
                 relative = path.relative_to(source)
                 preferred = str(Path(source.name) / relative) if multiple_sources else str(relative)

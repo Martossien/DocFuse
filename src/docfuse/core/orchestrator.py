@@ -88,6 +88,9 @@ class OrchestratorResult:
         self.margin = margin
         self.engine = engine
         self._base_statuses = [file.status for file in files]
+        # D-098 : estimations déjà calculées, par moteur — un aller-retour
+        # de menu (approx → Mistral → approx) ne re-tokenise plus tout.
+        self._estimates_by_engine: dict[str, list[TokenEstimate]] = {self.engine_id: estimates}
         self.blocking_files: list[ExtractedFile] = []
         self.is_blocked = False
         self.block_reason: str | None = None
@@ -155,12 +158,23 @@ class OrchestratorResult:
         from docfuse.output.source_header import estimate_source_context
 
         engine = resolve_engine(engine_id)
-        new_estimates: list[TokenEstimate] = []
-        for file, base_status in zip(self.files, self._base_statuses, strict=True):
-            if base_status.is_extracted():
-                new_estimates.append(estimate_source_context(file, self.margin, engine))
-            else:
-                new_estimates.append(TokenEstimate(0, 0, 0))
+        cached = self._estimates_by_engine.get(engine.info.id)
+        if cached is not None:
+            new_estimates = cached
+        else:
+            new_estimates = []
+            for file, base_status in zip(self.files, self._base_statuses, strict=True):
+                if base_status.is_extracted():
+                    # D-098 : estimer avec le statut d'analyse, pas avec un
+                    # éventuel TOO_LARGE posé par le blocage — sinon la ligne
+                    # `- alerte:` manque de l'en-tête compté et le calcul
+                    # n'est plus idempotent (recompute_blocking le remet
+                    # juste après).
+                    file.status = base_status
+                    new_estimates.append(estimate_source_context(file, self.margin, engine))
+                else:
+                    new_estimates.append(TokenEstimate(0, 0, 0))
+            self._estimates_by_engine[engine.info.id] = new_estimates
 
         self.engine = engine
         self.estimates = new_estimates
@@ -188,18 +202,24 @@ class OrchestratorResult:
             return False
 
         removed = self.files.pop(index)
-        self.estimates.pop(index)
         self._base_statuses.pop(index)
+        # D-098 : toutes les listes d'estimations en cache restent alignées
+        # sur `files` (celle du moteur courant est `self.estimates`).
+        for cached in self._estimates_by_engine.values():
+            cached.pop(index)
         if reason is not None and all(path_key(item) != key for item, _ in self.ignored):
             self.ignored.append((removed.path, reason))
 
-        self._promote_duplicate_of(removed)
+        if self._promote_duplicate_of(removed):
+            # Le texte d'un fichier a changé : seules les estimations du
+            # moteur courant ont été recalculées, les autres sont périmées.
+            self._estimates_by_engine = {self.engine_id: self.estimates}
 
         self.total = aggregate_tokens(self.estimates, self.margin, self.engine)
         self.recompute_blocking(self.context_limit)
         return True
 
-    def _promote_duplicate_of(self, removed: ExtractedFile) -> None:
+    def _promote_duplicate_of(self, removed: ExtractedFile) -> bool:
         """Si `removed` servait d'original à des doublons, promeut le premier
         d'entre eux pour que le contenu reste dans le corpus (D-096).
 
@@ -208,6 +228,9 @@ class OrchestratorResult:
         le fichier TOO_LARGE que l'utilisateur enlève pour débloquer, D-045)
         laissait uniquement la note dans le corpus — le contenu réel
         disparaissait sans aucune trace, en violation de la règle 12.4.
+
+        Returns:
+            True si un fichier a été promu (son texte a changé).
         """
         from docfuse.output.source_header import estimate_source_context
 
@@ -215,7 +238,7 @@ class OrchestratorResult:
             f for f in self.files if f.extra_metadata.get("duplicate_of") == removed.relative_path
         ]
         if not duplicates:
-            return
+            return False
 
         promoted = duplicates[0]
         promoted.text = removed.text
@@ -228,6 +251,7 @@ class OrchestratorResult:
         if self._base_statuses[index].is_extracted():
             promoted.status = self._base_statuses[index]
             self.estimates[index] = estimate_source_context(promoted, self.margin, self.engine)
+        return True
 
 
 def run_analysis(

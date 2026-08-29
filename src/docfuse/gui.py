@@ -53,6 +53,9 @@ def _try_import_dnd() -> tuple[bool, Any]:
 
 _DND_AVAILABLE, _dnd_mod = _try_import_dnd()
 
+# D-098 : délai sans frappe avant d'appliquer un nouveau plafond saisi.
+_LIMIT_DEBOUNCE_MS = 250
+
 
 def _load_tkdnd(root: Any) -> bool:
     """Charge le paquet Tcl `tkdnd` dans l'interpréteur de `root` (D-096).
@@ -142,6 +145,7 @@ class DocFuseGUI:
         self._analysis_thread: threading.Thread | None = None
         self._analysis_error: str | None = None
         self._pending_status_labels: dict[str, Any] = {}
+        self._limit_after_id: str | None = None
 
         self._build_ui()
 
@@ -699,8 +703,20 @@ class DocFuseGUI:
             return self.config.context_limit
 
     def _on_context_limit_changed(self, *_args: str) -> None:
-        """Recalcule instantanément le blocage sans ré-extraire les documents."""
+        """Recalcule le blocage sans ré-extraire, après une courte pause de
+        saisie (D-098).
 
+        La trace `write` se déclenche à chaque caractère tapé ; chaque
+        déclenchement reconstruisait TOUTE la table (7 widgets CTk par
+        fichier) — taper « 200000 » = 6 reconstructions. On attend
+        `_LIMIT_DEBOUNCE_MS` sans nouvelle frappe avant d'appliquer.
+        """
+        if self._limit_after_id is not None:
+            self.root.after_cancel(self._limit_after_id)
+        self._limit_after_id = self.root.after(_LIMIT_DEBOUNCE_MS, self._apply_context_limit)
+
+    def _apply_context_limit(self) -> None:
+        self._limit_after_id = None
         if self.result is None:
             return
         try:

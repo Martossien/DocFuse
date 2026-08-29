@@ -50,6 +50,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   encodage exotique. Fichiers ASCII (code, logs, CSV) : réparation
   court-circuitée, 2,4 s économisées sur 200 000 lignes.
 
+### Performance
+
+- **Audit qualité, lot 3 — vitesse à sortie identique** (D-098), chaque
+  gain mesuré et le corpus généré vérifié **identique byte à byte** avant/
+  après :
+  - OCR des images intégrées (DOCX, PPTX, XLSX, ODF) exécuté en parallèle
+    à l'intérieur d'un fichier, résultats remis dans l'ordre du document :
+    une présentation de 44 images passe de 21,0 s à 3,0 s.
+  - Nombre de processus Tesseract borné globalement (images + pages PDF) ;
+    nombre de workers dérivé du processeur. Dossier de 120 fichiers :
+    28,4 s → 10,6 s.
+  - XLSX : la feuille n'est plus décompressée 7 fois ; DOCX : plus de
+    re-parse du document par BeautifulSoup ; PDF : fichier non recopié en
+    mémoire pour la détection de chiffrement.
+  - Interface : changer de moteur de comptage ne re-tokenise plus tout le
+    corpus (cache) ; la saisie du plafond ne reconstruit plus la table à
+    chaque frappe. Inventaire parcouru une seule fois par source.
+
 ## [0.1.5] - 2026-08-29 — Beta
 
 ### Corrigé

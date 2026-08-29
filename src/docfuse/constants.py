@@ -5,6 +5,7 @@ CdC §7, §9, §10, §12.
 
 from __future__ import annotations
 
+import os
 import re
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -285,9 +286,19 @@ un CER trop élevé serait une optimisation v1.1)."""
 OCR_LANG: str = "fra+eng"
 """Langues Tesseract (i18n FR/EN du projet)."""
 
-OCR_PAGE_TIMEOUT_S: int = 30
-"""Timeout par page OCR (raster + reconnaissance). Une page qui dépasse ce
-délai est marquée "failed", le fichier continue."""
+OCR_PAGE_TIMEOUT_S: int = 60
+"""Timeout d'un appel Tesseract (une page rastérisée ou une image intégrée).
+Un appel qui dépasse ce délai est marqué "failed", le fichier continue.
+D-098 : constante enfin câblée (elle documentait 30 s mais le code en dur
+appliquait 60 s — la valeur réelle est conservée)."""
+
+OCR_MAX_CONCURRENCY: int = max(2, min(8, os.cpu_count() or 4))
+"""Nombre maximal de processus Tesseract simultanés pour tout le processus
+(D-098). Tesseract est mono-thread par processus (non lié à OpenMP dans les
+binaires embarqués/testés) : le débit croît linéairement avec ce nombre,
+jusqu'au nombre de cœurs. Sémaphore global partagé entre l'OCR des pages
+PDF et celui des images intégrées — auparavant jusqu'à MAX_WORKERS ×
+MAX_WORKERS processus non bornés."""
 
 OCR_MAX_PAGES_PER_FILE: int = 200
 """Plafond de pages OCRisables par fichier — protection contre un PDF hostile
@@ -332,8 +343,13 @@ un rejet — un petit fichier avec un ratio élevé n'est jamais dangereux."""
 # Performance
 # ──────────────────────────────────────────────────────────────────────────────
 
-MAX_WORKERS: int = 4
-"""Nombre maximum de threads d'extraction parallèle (IO-bound)."""
+MAX_WORKERS: int = max(2, min(8, os.cpu_count() or 4))
+"""Nombre maximum de threads d'extraction parallèle (D-098). L'extraction est
+CPU-bound (pdfminer, parseurs XML) + sous-processus Tesseract — pas
+« IO-bound » comme l'ancienne docstring l'affirmait. Dérivé du nombre de
+cœurs, borné à [2, 8] : mesuré 29 s → 26 s sur 120 fichiers réels en
+passant de 4 à 8, aucun gain au-delà (le chemin critique est un seul
+fichier, voir OCR_MAX_CONCURRENCY)."""
 
 MAX_TRAVERSAL_DEPTH: int = 12
 """Profondeur maximale de parcours des dossiers (CdC §16)."""

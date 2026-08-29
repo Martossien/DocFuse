@@ -1959,4 +1959,74 @@ recette 7/7.
 
 ---
 
+### D-098 : audit qualité — lot 3, performance à sortie strictement identique
+
+**Contexte** : référence mesurée avant le lot — ~/Documents (120 fichiers)
+en **28,4 s** ; le seul PPTX de 44 images en **21,0 s** (OCR séquentiel,
+~0,5 s par image). Tesseract est mono-thread par processus et non lié à
+OpenMP (vérifié `ldd`) : le parallélisme par processus scale linéairement
+(8 appels : 2,0 s → 1,0 s). Contrainte posée par l'utilisateur : « sans
+dégradation » — prouvée, pas affirmée : le `corpus.md` généré sur
+~/Documents avant/après le lot (ligne d'horodatage normalisée) est
+**identique byte à byte**, avec le même nombre d'images exportées (111).
+
+**Décisions** (tests dans `tests/test_regressions_d098.py`) :
+- **OCR des images intégrées parallélisé à l'intérieur d'un fichier**
+  (`core/embedded_images.py::ImageBatch`). Les extracteurs docx/pptx/xlsx/
+  odf **collectent** les images pendant leur parcours (`batch.add(tag,
+  octets)` renvoie un jeton `\x00IMG:n\x00` posé à la place du futur
+  marqueur), puis `batch.run()` fait l'OCR de tout le fichier via un
+  `ThreadPoolExecutor` et `batch.apply(parts)` substitue les marqueurs
+  **dans l'ordre du document** (les résultats sont rangés par index, pas
+  par ordre d'arrivée — testé avec un moteur factice qui répond dans le
+  désordre). Un marqueur vide (OCR sans texte, export désactivé) retire
+  son jeton, ce qui conserve la règle « diapo/cellule sans texte » telle
+  qu'avant (`apply` par diapo pour PPTX/ODF, par feuille pour XLSX ;
+  `take()` pour la cellule DOCX qui résout localement). Ce helper remplace
+  les 4 copies de la logique tag→OCR→marqueur→`EmbeddedImage`. Mesuré :
+  PPTX de 44 images **21,0 s → 3,0 s** (44 marqueurs identiques).
+- **Un seul plafond global de processus Tesseract** :
+  `core/ocr/registry.py::OCR_SLOTS` (`BoundedSemaphore(OCR_MAX_CONCURRENCY)`)
+  et `ocr_with_slot()` partagés par `ImageBatch` et `pdf._ocr_pages`. Avant,
+  4 workers × 4 pages OCR pouvaient lancer 16 processus non bornés.
+  `OCR_MAX_CONCURRENCY = max(2, min(8, cpu_count))` ; `OCR_PAGE_TIMEOUT_S`
+  (documenté mais jamais lu) remplace le délai en dur de `tesseract.py`.
+- **`MAX_WORKERS` dérivé du CPU** (4 → `max(2, min(8, cpu_count))`) —
+  docstring corrigée : le travail est CPU-bound, pas IO-bound (mesuré seul
+  29 s → 26 s ; le vrai gain vient du chemin critique libéré par le point
+  précédent). Total ~/Documents : **28,4 s → 10,6 s**.
+- **XLSX : la feuille XML était décompressée et parsée 7 fois par feuille**
+  (mesuré en instrumentant `ZipFile.open`). Le XML brut, déjà lu pour
+  `_merge_ranges`, est lu une fois et réutilisé ; s'il ne contient aucun
+  `<f>`/`<f ` /`<f/`, `ws_formulas` n'est pas consulté pour cette feuille
+  — identique par construction : seules les cellules `None` le consultent,
+  et sans balise `<f` il ne peut rendre que `None`. `closing()` sur les
+  deux classeurs (fuite sur le chemin d'erreur).
+- **DOCX : ZIP ouvert 6 fois et `document.xml` re-parsé par BeautifulSoup**
+  (≈10× plus lent que le parse lxml déjà en mémoire). Zones de texte,
+  notes de bas de page/fin et en-têtes sont parcourus sur les arbres lxml
+  chargés par python-docx (`doc.part.package.iter_parts()`) ; bs4 disparaît
+  de `docx.py` — et c'est le même code que le correctif D-096 des zones de
+  texte dupliquées.
+- **PDF : `PdfReader(str(path))` recopiait tout le fichier en mémoire**
+  (vérifié dans pypdf 6.16) pour lire `/Encrypt` → `with path.open("rb")`.
+- **GUI : cache des estimations par moteur** (`OrchestratorResult.
+  _estimates_by_engine`) — changer le moteur de comptage re-tokenisait tout
+  le corpus sur le thread Tk (≈11 Mo/s pour Mistral → gel). Le cache est
+  aligné sur `files` dans `remove_file` (et purgé quand un doublon est
+  promu, D-096). **Saisie du plafond débouncée** (`_LIMIT_DEBOUNCE_MS` =
+  250 ms) : la table n'est plus reconstruite à chaque frappe.
+- **Inventaire : un seul parcours** (`inventory._walk_source`) renvoyant
+  `(trouvés, ignorés)` là où `scan_directory` + `list_ignored` marchaient
+  et triaient chaque source deux fois (`stat()` ×2 en tri par date).
+
+**Rejeté** : mise à jour en place des lignes de la table GUI et génération
+dans un thread worker — gains réels sur de grands dossiers mais intrusifs,
+notés « Reste à faire » (v1.1).
+
+**Vérification** : 513 tests (6 nouveaux), ruff/mypy --strict propres,
+recette 7/7, corpus ~/Documents identique byte à byte, 111 = 111 images.
+
+---
+
 *Fin du journal des décisions — Session 14.*

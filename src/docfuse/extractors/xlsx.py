@@ -14,14 +14,12 @@ import zipfile
 from contextlib import closing
 from pathlib import Path
 
-from docfuse.constants import OCR_LANG
-from docfuse.core.embedded_images import build_image_marker, build_image_tag
-from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted, is_zip_bomb
 from docfuse.i18n import t
-from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
+from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -71,9 +69,9 @@ class XlsxExtractor(Extractor):
 
             # D-093 : OCR/export des images intégrées, seulement si utile
             # (export demandé ou OCR disponible) — sinon zéro coût ajouté.
-            engine = resolve_ocr_engine()
-            want_export = extract_images
-            embedded_images: list[EmbeddedImage] = []
+            # D-098 : jetons collectés par feuille, OCR parallèle unique.
+            batch = ImageBatch(resolve_ocr_engine(), extract_images)
+            sheets: list[tuple[str, str, list[str]]] = []
 
             from openpyxl import load_workbook
 
@@ -93,6 +91,7 @@ class XlsxExtractor(Extractor):
             parts: list[str] = []
 
             with wb as wb_values, wb_formulas as wb_f, zipfile.ZipFile(str(path)) as zf:
+                names = set(zf.namelist())
                 sheet_count = len(wb_values.sheetnames)
                 for sheet in wb_values.sheetnames:
                     ws = wb_values[sheet]
@@ -102,11 +101,18 @@ class XlsxExtractor(Extractor):
                     # mettait TOUT le classeur en ERROR, données perdues.
                     # Signalée explicitement, jamais silencieuse.
                     if not hasattr(ws, "iter_rows"):
-                        parts.append(
-                            f"### Feuille : {sheet}\n\n[Feuille graphique — pas de cellules]"
-                        )
+                        sheets.append((sheet, "[Feuille graphique — pas de cellules]", []))
                         continue
-                    ws_formulas = wb_f[sheet] if sheet in wb_f.sheetnames else None
+                    # D-098 : le XML brut de la feuille est lu une fois et
+                    # sert trois usages (plages fusionnées D-085, présence de
+                    # formules, images). Sans aucun élément `<f>`, le second
+                    # classeur (formules, D-076) n'est pas consulté pour cette
+                    # feuille : il ne peut renvoyer que `None` pour les cellules
+                    # vides — sortie identique, deux parses complets évités.
+                    merge_path = getattr(ws, "_worksheet_path", "").lstrip("/")
+                    sheet_xml = zf.read(merge_path) if merge_path in names else b""
+                    has_formulas = b"<f>" in sheet_xml or b"<f " in sheet_xml or b"<f/" in sheet_xml
+                    ws_formulas = wb_f[sheet] if has_formulas and sheet in wb_f.sheetnames else None
                     if ws_formulas is not None and not hasattr(ws_formulas, "iter_rows"):
                         ws_formulas = None
 
@@ -163,9 +169,8 @@ class XlsxExtractor(Extractor):
                     # tout contexte pour les cellules "creuses" qui suivent
                     # — très fréquent dans les tableaux "présentables"
                     # (rapports, tableaux de bord).
-                    merge_path = getattr(ws, "_worksheet_path", "").lstrip("/")
-                    if merge_path and merge_path in zf.namelist():
-                        _apply_merged_cells(grid, _merge_ranges(zf, merge_path))
+                    if sheet_xml:
+                        _apply_merged_cells(grid, _merge_ranges(sheet_xml))
 
                     for cells in grid:
                         if any(c.strip() for c in cells):
@@ -177,15 +182,20 @@ class XlsxExtractor(Extractor):
                     # D-093 : images intégrées ancrées sur cette feuille —
                     # regroupées en fin de feuille plutôt qu'à la cellule
                     # d'ancrage exacte (voir docstring de `_extract_sheet_images`).
-                    if merge_path and merge_path in zf.namelist():
-                        sheet_markers, sheet_images = _extract_sheet_images(
-                            zf, merge_path, sheet, relative_path, engine, want_export
-                        )
-                        if sheet_markers:
-                            sheet_text += "\n\n" + "\n\n".join(sheet_markers)
-                        embedded_images.extend(sheet_images)
+                    tokens = (
+                        _extract_sheet_images(zf, names, merge_path, sheet, relative_path, batch)
+                        if sheet_xml and batch.active
+                        else []
+                    )
+                    sheets.append((sheet, sheet_text, tokens))
 
-                    parts.append(f"### Feuille : {sheet}\n\n{sheet_text}")
+            batch.run()
+            for sheet, sheet_text, tokens in sheets:
+                markers = batch.apply(tokens)
+                if markers:
+                    sheet_text += "\n\n" + "\n\n".join(markers)
+                parts.append(f"### Feuille : {sheet}\n\n{sheet_text}")
+            embedded_images = batch.images
 
             text = "\n\n".join(parts)
 
@@ -205,7 +215,7 @@ class XlsxExtractor(Extractor):
             return error_result(path, relative_path, cls.file_type, exc)
 
 
-def _merge_ranges(zf: zipfile.ZipFile, worksheet_path: str) -> list[tuple[int, int, int, int]]:
+def _merge_ranges(sheet_xml: bytes) -> list[tuple[int, int, int, int]]:
     """Plages fusionnées `(min_col, min_row, max_col, max_row)` d'une feuille.
 
     Lu directement dans le XML de la feuille : `ReadOnlyWorksheet` (mode
@@ -216,10 +226,7 @@ def _merge_ranges(zf: zipfile.ZipFile, worksheet_path: str) -> list[tuple[int, i
     """
     from openpyxl.utils import range_boundaries
 
-    try:
-        xml = zf.read(worksheet_path).decode("utf-8", errors="replace")
-    except KeyError:
-        return []
+    xml = sheet_xml.decode("utf-8", errors="replace")
 
     ranges: list[tuple[int, int, int, int]] = []
     for ref in _MERGE_CELL_REF_RE.findall(xml):
@@ -235,13 +242,13 @@ def _merge_ranges(zf: zipfile.ZipFile, worksheet_path: str) -> list[tuple[int, i
 
 def _extract_sheet_images(
     zf: zipfile.ZipFile,
+    names: set[str],
     sheet_path: str,
     sheet_name: str,
     relative_path: str,
-    engine: OcrEngine | None,
-    want_export: bool,
-) -> tuple[list[str], list[EmbeddedImage]]:
-    """Images intégrées ancrées sur une feuille XLSX (D-093).
+    batch: ImageBatch,
+) -> list[str]:
+    """Jetons des images intégrées ancrées sur une feuille XLSX (D-093, D-098).
 
     `openpyxl` en mode `read_only=True` (obligatoire ici pour supporter de
     gros classeurs) n'expose pas du tout les dessins/images — on lit donc
@@ -259,45 +266,40 @@ def _extract_sheet_images(
     d'ancrage serait trompeuse.
 
     Returns:
-        Tuple (marqueurs à ajouter au texte de la feuille, images à
-        exporter). N'échoue jamais : toute relation manquante ou XML
-        illisible donne simplement une liste vide.
+        Jetons de position (un par image, dans l'ordre des ancres), à
+        résoudre via `batch.apply` après `batch.run`. N'échoue jamais :
+        toute relation manquante ou XML illisible donne une liste vide.
     """
-    markers: list[str] = []
-    images: list[EmbeddedImage] = []
-    if not want_export and engine is None:
-        return markers, images
+    tokens: list[str] = []
 
     sheet_rels_path = posixpath.join(
         posixpath.dirname(sheet_path), "_rels", posixpath.basename(sheet_path) + ".rels"
     )
-    if sheet_rels_path not in zf.namelist():
-        return markers, images
+    if sheet_rels_path not in names:
+        return tokens
 
     try:
         drawing_target = _find_target_by_type(zf.read(sheet_rels_path), "/drawing")
     except Exception:
-        return markers, images
+        return tokens
     if not drawing_target:
-        return markers, images
+        return tokens
 
     drawing_path = _resolve_rel_target(sheet_path, drawing_target)
-    if drawing_path not in zf.namelist():
-        return markers, images
+    if drawing_path not in names:
+        return tokens
 
     drawing_rels_path = posixpath.join(
         posixpath.dirname(drawing_path), "_rels", posixpath.basename(drawing_path) + ".rels"
     )
     try:
         drawing_rels = (
-            _parse_relationships(zf.read(drawing_rels_path))
-            if drawing_rels_path in zf.namelist()
-            else {}
+            _parse_relationships(zf.read(drawing_rels_path)) if drawing_rels_path in names else {}
         )
         image_rids = _parse_drawing_images(zf.read(drawing_path))
     except Exception:
         logger.warning("Lecture du dessin %s échouée", drawing_path, exc_info=True)
-        return markers, images
+        return tokens
 
     count = 0
     for rid in image_rids:
@@ -312,23 +314,11 @@ def _extract_sheet_images(
 
         count += 1
         ext = media_path.rsplit(".", 1)[-1] if "." in media_path else "png"
-        tag = build_image_tag(relative_path, f"sheet_{sheet_name}", count, ext)
+        tokens.append(
+            batch.add(build_image_tag(relative_path, f"sheet_{sheet_name}", count, ext), data)
+        )
 
-        ocr_text = ""
-        if engine is not None:
-            try:
-                ocr_text = engine.ocr_image(data, OCR_LANG)
-            except Exception:
-                logger.warning("Échec OCR image %s", tag, exc_info=True)
-
-        marker = build_image_marker(tag if want_export else None, ocr_text, OCR_LANG)
-        if not marker:
-            continue
-        markers.append(marker)
-        if want_export:
-            images.append(EmbeddedImage(filename=tag, data=data))
-
-    return markers, images
+    return tokens
 
 
 def _resolve_rel_target(owner_part: str, target: str) -> str:

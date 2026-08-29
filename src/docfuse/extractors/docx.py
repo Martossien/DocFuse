@@ -12,14 +12,12 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from docfuse.constants import OCR_LANG
-from docfuse.core.embedded_images import build_image_marker, build_image_tag
-from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted, is_zip_bomb
 from docfuse.i18n import t
-from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
+from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -77,12 +75,8 @@ class DocxExtractor(Extractor):
             # D-091 : détection des images intégrées (a:blip[@r:embed]) dans le
             # corps du document, seulement si utile (export demandé ou OCR
             # disponible) — sinon le chemin reste strictement identique à avant.
-            engine = resolve_ocr_engine()
-            collector = (
-                _ImageCollector(doc, relative_path, extract_images, engine)
-                if extract_images or engine is not None
-                else None
-            )
+            batch = ImageBatch(resolve_ocr_engine(), extract_images)
+            collector = _ImageCollector(doc, relative_path, batch) if batch.active else None
 
             # BUG FIX: extraire paragraphes ET tableaux dans l'ordre du document
             # python-docx n'expose pas l'ordre directement, on itère sur les enfants
@@ -130,6 +124,10 @@ class DocxExtractor(Extractor):
             if textbox_text:
                 parts.append(f"[zones de texte]\n{textbox_text}")
 
+            # D-098 : OCR de toutes les images en parallèle, puis marqueurs
+            # substitués aux jetons dans l'ordre du document. Les jetons dans
+            # les cellules de tableau (joints tôt) : voir `_iter_body_parts`.
+            parts = batch.resolve(parts)
             text = "\n\n".join(parts)
 
             return ExtractedFile(
@@ -141,7 +139,7 @@ class DocxExtractor(Extractor):
                 text=text,
                 status=FileStatus.READY,
                 image_count=image_count,
-                embedded_images=collector.images if collector else [],
+                embedded_images=batch.images,
             )
         except Exception as exc:
             logger.exception("Erreur extraction DOCX %s", path)
@@ -207,30 +205,24 @@ def _paragraphs_text(container: Any) -> str:
 
 
 class _ImageCollector:
-    """Accumule les images intégrées rencontrées dans l'ordre du document (D-091).
+    """Accumule les images intégrées rencontrées dans l'ordre du document
+    (D-091), résolues via `doc.part.rels` (relation ZIP → média).
 
-    Résout chaque `rId` via `doc.part.rels` (relation ZIP → média), applique
-    l'OCR si un moteur est disponible, et construit le marqueur inline à
-    insérer au point d'apparition — jamais d'exception : une image dont la
-    relation ou l'OCR échoue est simplement ignorée (pas de perte pour le
-    reste du texte).
+    D-098 : ne fait plus l'OCR au fil du parcours — chaque image enregistrée
+    dans l'`ImageBatch` renvoie un jeton de position ; l'OCR de toutes les
+    images du fichier est lancé en parallèle en fin d'extraction, et les
+    jetons sont remplacés par les marqueurs dans l'ordre du document.
+    Jamais d'exception : une image dont la relation échoue est ignorée.
     """
 
-    def __init__(
-        self,
-        doc: Any,
-        relative_path: str,
-        want_export: bool,
-        engine: OcrEngine | None,
-    ) -> None:
+    def __init__(self, doc: Any, relative_path: str, batch: ImageBatch) -> None:
         self._doc = doc
         self._relative_path = relative_path
-        self._want_export = want_export
-        self._engine = engine
+        self.batch = batch
         self._count = 0
-        self.images: list[EmbeddedImage] = []
 
-    def marker_for(self, rid: str) -> str:
+    def token_for(self, rid: str) -> str:
+        """Jeton de position de l'image `rid`, ou "" si irrésoluble."""
         rel = self._doc.part.rels.get(rid)
         if rel is None or "image" not in rel.reltype:
             return ""
@@ -243,33 +235,38 @@ class _ImageCollector:
 
         self._count += 1
         tag = build_image_tag(self._relative_path, None, self._count, ext)
-
-        ocr_text = ""
-        if self._engine is not None:
-            try:
-                ocr_text = self._engine.ocr_image(data, OCR_LANG)
-            except Exception:
-                logger.warning("Échec OCR image intégrée %s", rid, exc_info=True)
-
-        marker = build_image_marker(tag if self._want_export else None, ocr_text, OCR_LANG)
-        if self._want_export and marker:
-            self.images.append(EmbeddedImage(filename=tag, data=data))
-        return marker
+        return self.batch.add(tag, data)
 
 
-def _scan_paragraph_images(p_element: object, collector: _ImageCollector) -> str:
-    """Détecte les images intégrées (`a:blip[@r:embed]`) d'un paragraphe et
-    renvoie leurs marqueurs concaténés, dans l'ordre d'apparition (D-091)."""
-    markers: list[str] = []
+def _resolve_cell(collector: _ImageCollector | None, cell_parts: list[str]) -> list[str]:
+    """Résout immédiatement les jetons d'une cellule de tableau (rare :
+    image dans une cellule) avec un lot dédié, pour que la cellule reste une
+    chaîne finale au moment de la jointure `a | b` (D-098)."""
+    if collector is None or not any(p.startswith("\x00") for p in cell_parts):
+        return cell_parts
+    local = ImageBatch(collector.batch.engine, collector.batch.want_export)
+    remapped: list[str] = []
+    for part in cell_parts:
+        candidate = collector.batch.take(part)
+        remapped.append(local.add(candidate.tag, candidate.data) if candidate else part)
+    resolved = local.resolve(remapped)
+    collector.batch.images.extend(local.images)
+    return resolved
+
+
+def _scan_paragraph_images(p_element: object, collector: _ImageCollector) -> list[str]:
+    """Jetons des images intégrées (`a:blip[@r:embed]`) d'un paragraphe,
+    dans l'ordre d'apparition (D-091, D-098)."""
+    tokens: list[str] = []
     for el in p_element.iter():  # type: ignore[attr-defined]
         if not el.tag.endswith("}blip"):
             continue
         rid = next((v for k, v in el.attrib.items() if k.endswith("}embed")), None)
         if rid:
-            marker = collector.marker_for(rid)
-            if marker:
-                markers.append(marker)
-    return "\n\n".join(markers)
+            token = collector.token_for(rid)
+            if token:
+                tokens.append(token)
+    return tokens
 
 
 def _iter_body_parts(
@@ -302,14 +299,19 @@ def _iter_body_parts(
             if text.strip():
                 parts.append(text)
             if collector is not None:
-                image_markers = _scan_paragraph_images(child, collector)
-                if image_markers:
-                    parts.append(image_markers)
+                parts.extend(_scan_paragraph_images(child, collector))
         elif child.tag.endswith("}tbl"):
             table = table_cls(child, doc)
             for row in table.rows:
+                # D-098 : une cellule est jointe tout de suite ; ses images
+                # sont résolues ici (OCR de la cellule seule) pour garder les
+                # marqueurs à l'intérieur de la ligne `a | b`, comme avant.
                 cells = [
-                    "\n".join(_iter_body_parts(cell._tc, doc, table_cls, collector)).strip()
+                    "\n".join(
+                        _resolve_cell(
+                            collector, _iter_body_parts(cell._tc, doc, table_cls, collector)
+                        )
+                    ).strip()
                     for cell in row.cells
                 ]
                 parts.append(" | ".join(cells))

@@ -28,6 +28,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
+from docfuse.constants import OCR_PAGE_TIMEOUT_S
 from docfuse.core.ocr.base import OcrEngine, OcrEngineInfo
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ class TesseractEngine(OcrEngine):
                 [binary, "stdin", "stdout", "-l", lang],
                 input=image_bytes,
                 capture_output=True,
-                timeout=_OCR_SUBPROCESS_TIMEOUT_S,
+                timeout=OCR_PAGE_TIMEOUT_S,
                 check=False,
                 env=_subprocess_env(binary),
             )
@@ -61,9 +62,6 @@ class TesseractEngine(OcrEngine):
             logger.warning("tesseract a renvoyé le code %d", result.returncode)
             return ""
         return result.stdout.decode("utf-8", errors="replace")
-
-
-_OCR_SUBPROCESS_TIMEOUT_S = 60
 
 
 def _bundled_binary_path() -> Path | None:

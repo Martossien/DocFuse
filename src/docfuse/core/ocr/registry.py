@@ -6,10 +6,30 @@ d'autres sans changer l'appelant.
 
 from __future__ import annotations
 
+import threading
+
+from docfuse.constants import OCR_MAX_CONCURRENCY
 from docfuse.core.ocr.base import OcrEngine, OcrEngineInfo
 from docfuse.core.ocr.tesseract import TesseractEngine
 
 _ENGINES: list[OcrEngine] = [TesseractEngine()]
+
+# D-098 : borne globale du nombre de processus OCR simultanés, partagée par
+# l'OCR des pages PDF (`extractors/pdf.py`) et celui des images intégrées
+# (`core/embedded_images.py`). Sans elle, MAX_WORKERS fichiers en parallèle
+# lançant chacun leurs propres appels donnaient jusqu'à MAX_WORKERS² processus
+# Tesseract (sur-souscription CPU + mémoire ×N).
+OCR_SLOTS = threading.BoundedSemaphore(OCR_MAX_CONCURRENCY)
+
+
+def ocr_with_slot(engine: OcrEngine, image_bytes: bytes, lang: str) -> str:
+    """`engine.ocr_image` sous le sémaphore global — jamais d'exception
+    (un échec vaut texte vide, comme le moteur lui-même)."""
+    with OCR_SLOTS:
+        try:
+            return engine.ocr_image(image_bytes, lang)
+        except Exception:
+            return ""
 
 
 def resolve_ocr_engine() -> OcrEngine | None:

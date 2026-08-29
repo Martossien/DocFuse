@@ -29,9 +29,9 @@ from pathlib import Path
 from typing import Any
 
 from docfuse.constants import (
-    MAX_WORKERS,
     OCR_DPI,
     OCR_LANG,
+    OCR_MAX_CONCURRENCY,
     OCR_MAX_PAGES_PER_FILE,
     OCR_MAX_PIXELS_PER_PAGE,
     PDF_BOILERPLATE_MAX_LINE_LEN,
@@ -42,7 +42,7 @@ from docfuse.constants import (
     PDF_OCR_MIN_CHARS_PER_PAGE,
 )
 from docfuse.core.ocr.base import OcrEngine
-from docfuse.core.ocr.registry import resolve_ocr_engine
+from docfuse.core.ocr.registry import ocr_with_slot, resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result
 from docfuse.i18n import t
@@ -170,10 +170,15 @@ def _check_encrypted(path: Path) -> bool:
     try:
         from pypdf import PasswordType, PdfReader
 
-        reader = PdfReader(str(path))
-        if not reader.is_encrypted:
-            return False
-        return reader.decrypt("") == PasswordType.NOT_DECRYPTED
+        # D-098 : avec un chemin, pypdf recopie TOUT le fichier en mémoire
+        # (`BytesIO(fh.read())`, vérifié dans pypdf 6.16) rien que pour lire
+        # `/Encrypt` — un scan de 500 Mo × MAX_WORKERS fichiers en parallèle.
+        # Avec un objet fichier, pypdf navigue par `seek`, sans copie.
+        with path.open("rb") as fh:
+            reader = PdfReader(fh)
+            if not reader.is_encrypted:
+                return False
+            return reader.decrypt("") == PasswordType.NOT_DECRYPTED
     except Exception:
         # Si pypdf échoue, on continue avec pdfminer
         return False
@@ -543,17 +548,15 @@ def _ocr_pages(
             results[idx] = ("", False)
 
     if pngs:
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # D-098 : borné par le sémaphore global `OCR_SLOTS` (partagé avec
+        # les images intégrées), plus de MAX_WORKERS² processus Tesseract.
+        with ThreadPoolExecutor(max_workers=min(OCR_MAX_CONCURRENCY, len(pngs))) as executor:
             futures = {
-                executor.submit(engine.ocr_image, png, lang): idx for idx, png in pngs.items()
+                executor.submit(ocr_with_slot, engine, png, lang): idx for idx, png in pngs.items()
             }
             for future in as_completed(futures):
                 idx = futures[future]
-                try:
-                    text = future.result()
-                except Exception:
-                    logger.warning("Échec OCR page %d de %s", idx + 1, path, exc_info=True)
-                    text = ""
+                text = future.result()
                 results[idx] = (text, bool(text.strip()))
 
     return results

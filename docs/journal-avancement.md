@@ -1446,3 +1446,25 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   charset déclaré : fin des devinettes `johab`/`windows-1250`.
 - 8 tests, 507 verts, ruff/mypy stricts, recette 7/7.
 
+### Audit qualité — lot 3 « performance sans dégradation » (D-098) — ✅ Livré
+
+- Méthode : référence mesurée AVANT (cProfile sur ~/Documents, micro-bench
+  Tesseract), puis chaque gain re-mesuré sur le même jeu, et preuve
+  « sans dégradation » par comparaison byte à byte du `corpus.md` généré
+  avant/après (horodatage normalisé) : **identique**, 111 images exportées
+  des deux côtés.
+- Cible n°1 : l'OCR des images intégrées était séquentiel par fichier
+  (0,5 s/image). `ImageBatch` collecte les images pendant le parcours
+  (jetons à la place des marqueurs), OCR de tout le fichier en parallèle,
+  substitution dans l'ordre du document — PPTX de 44 images : 21,0 s →
+  3,0 s. Sémaphore global sur les processus Tesseract (images + PDF) et
+  `MAX_WORKERS` dérivé du CPU : ~/Documents 28,4 s → 10,6 s.
+- Gains secondaires : XLSX parsé 1× par feuille au lieu de 7, DOCX sans
+  re-parse BeautifulSoup (bs4 retiré du module), PDF non recopié en
+  mémoire, cache des estimations par moteur + debounce de saisie côté GUI,
+  inventaire parcouru une fois.
+- Leçon : le parallélisme par fichier (workers) ne suffit pas quand un
+  seul fichier porte tout le chemin critique — il faut paralléliser à
+  l'intérieur du fichier, en verrouillant l'ordre de sortie par des tests.
+- 6 tests, 513 verts, ruff/mypy stricts, recette 7/7.
+

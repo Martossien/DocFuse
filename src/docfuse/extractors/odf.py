@@ -12,15 +12,13 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from docfuse.constants import OCR_LANG
-from docfuse.core.embedded_images import build_image_marker, build_image_tag
-from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_zip_bomb
 from docfuse.extractors.html import tag_text
 from docfuse.i18n import t
-from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
+from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -55,9 +53,8 @@ class OdfExtractor(Extractor):
 
             # D-093 : OCR/export des images intégrées (odt/odp), seulement
             # si utile — sinon zéro coût ajouté par rapport à avant.
-            engine = resolve_ocr_engine()
-            want_export = extract_images
-            embedded_images: list[EmbeddedImage] = []
+            # D-098 : jetons pendant le parcours, OCR parallèle unique.
+            batch = ImageBatch(resolve_ocr_engine(), extract_images)
 
             with zipfile.ZipFile(str(path), "r") as zf:
                 # Compter les images
@@ -98,17 +95,15 @@ class OdfExtractor(Extractor):
                 office_spreadsheet = soup.find("office:spreadsheet")
                 office_text = soup.find("office:text")
                 if isinstance(office_presentation, BTag):
-                    presentation_parts, presentation_images = _extract_presentation(
-                        office_presentation, zf, relative_path, engine, want_export
+                    parts.extend(
+                        _extract_presentation(office_presentation, zf, relative_path, batch)
                     )
-                    parts.extend(presentation_parts)
-                    embedded_images.extend(presentation_images)
                 elif isinstance(office_spreadsheet, BTag):
                     parts.extend(_extract_spreadsheet(office_spreadsheet))
                 elif isinstance(office_text, BTag):
-                    ctx = _ImageContext(zf, relative_path, engine, want_export)
+                    ctx = _ImageContext(zf, relative_path, batch)
                     parts.extend(_extract_text_children(office_text, ctx))
-                    embedded_images.extend(ctx.images)
+                    parts = batch.resolve(parts)
                 else:
                     # Dernier repli (document sans corps reconnu) : tout le
                     # texte, sans coller les mots.
@@ -135,7 +130,7 @@ class OdfExtractor(Extractor):
                     text=full_text,
                     status=FileStatus.READY,
                     image_count=image_count,
-                    embedded_images=embedded_images,
+                    embedded_images=batch.images,
                 )
         except Exception as exc:
             logger.exception("Erreur extraction ODF %s", path)
@@ -167,25 +162,17 @@ def _materialize_whitespace(soup: Any) -> None:
 
 
 class _ImageContext:
-    """État partagé du parcours d'un `.odt` : images collectées + compteur."""
+    """État partagé du parcours d'un `.odt` : lot d'images + compteur."""
 
-    def __init__(
-        self,
-        zf: zipfile.ZipFile,
-        relative_path: str,
-        engine: OcrEngine | None,
-        want_export: bool,
-    ) -> None:
+    def __init__(self, zf: zipfile.ZipFile, relative_path: str, batch: ImageBatch) -> None:
         self.zf = zf
         self.relative_path = relative_path
-        self.engine = engine
-        self.want_export = want_export
+        self.batch = batch
         self.count = 0
-        self.images: list[EmbeddedImage] = []
 
     @property
     def active(self) -> bool:
-        return self.want_export or self.engine is not None
+        return self.batch.active
 
 
 def _extract_text_children(container: Any, ctx: _ImageContext) -> list[str]:
@@ -238,13 +225,9 @@ def _extract_text_children(container: Any, ctx: _ImageContext) -> list[str]:
         if ctx.active and name not in ("section", "text-box"):
             for href in _iter_image_hrefs(child):
                 ctx.count += 1
-                marker, embedded = _image_marker(
-                    ctx.zf, href, ctx.relative_path, None, ctx.count, ctx.engine, ctx.want_export
-                )
-                if marker:
-                    parts.append(marker)
-                if embedded:
-                    ctx.images.append(embedded)
+                token = _image_token(ctx.zf, href, ctx.relative_path, None, ctx.count, ctx.batch)
+                if token:
+                    parts.append(token)
     return parts
 
 
@@ -281,12 +264,8 @@ def _table_rows_to_parts(table_tag: Any) -> list[str]:
 
 
 def _extract_presentation(
-    office_presentation: Any,
-    zf: zipfile.ZipFile,
-    relative_path: str,
-    engine: OcrEngine | None,
-    want_export: bool,
-) -> tuple[list[str], list[EmbeddedImage]]:
+    office_presentation: Any, zf: zipfile.ZipFile, relative_path: str, batch: ImageBatch
+) -> list[str]:
     """Contenu d'un `office:presentation` (.odp), diapo par diapo (D-087).
 
     Corrige deux problèmes du fallback générique (`text:p`/`text:h`
@@ -306,8 +285,7 @@ def _extract_presentation(
     """
     from bs4 import Tag as BTag
 
-    parts: list[str] = []
-    embedded_images: list[EmbeddedImage] = []
+    slides: list[tuple[list[str], list[str]]] = []
     for i, page in enumerate(office_presentation.find_all("draw:page", recursive=False), 1):
         notes_texts: list[str] = []
         for notes in page.find_all("presentation:notes"):
@@ -318,15 +296,11 @@ def _extract_presentation(
 
         slide_parts: list[str] = []
 
-        if want_export or engine is not None:
+        if batch.active:
             for slide_image_index, href in enumerate(_iter_image_hrefs(page), 1):
-                marker, embedded = _image_marker(
-                    zf, href, relative_path, f"slide{i}", slide_image_index, engine, want_export
-                )
-                if marker:
-                    slide_parts.append(marker)
-                if embedded:
-                    embedded_images.append(embedded)
+                token = _image_token(zf, href, relative_path, f"slide{i}", slide_image_index, batch)
+                if token:
+                    slide_parts.append(token)
 
         # Tables d'abord, puis retirées de l'arbre — sinon le texte de leurs
         # cellules serait aussi capté par la recherche text:p/text:h plus
@@ -345,11 +319,19 @@ def _extract_presentation(
             if text:
                 slide_parts.append(text)
 
-        if slide_parts:
-            parts.append(f"## Diapo {i}\n" + "\n".join(slide_parts))
+        slides.append((slide_parts, notes_texts))
+
+    # D-098 : OCR de toutes les diapos en parallèle, puis assemblage par
+    # diapo (un jeton sans marqueur disparaît, comme avant — sortie identique).
+    batch.run()
+    parts: list[str] = []
+    for i, (slide_parts, notes_texts) in enumerate(slides, 1):
+        resolved = batch.apply(slide_parts)
+        if resolved:
+            parts.append(f"## Diapo {i}\n" + "\n".join(resolved))
         if notes_texts:
             parts.append(f"[notes orateur diapo {i}]\n" + "\n".join(notes_texts))
-    return parts, embedded_images
+    return parts
 
 
 def _iter_image_hrefs(tag: Any) -> list[str]:
@@ -388,35 +370,22 @@ def _iter_image_hrefs(tag: Any) -> list[str]:
     return hrefs
 
 
-def _image_marker(
+def _image_token(
     zf: zipfile.ZipFile,
     href: str,
     relative_path: str,
     location: str | None,
     index: int,
-    engine: OcrEngine | None,
-    want_export: bool,
-) -> tuple[str, EmbeddedImage | None]:
-    """Construit le marqueur inline (et l'image à exporter) d'une image ODF
-    (D-093). N'échoue jamais : une image illisible est ignorée."""
+    batch: ImageBatch,
+) -> str:
+    """Enregistre une image ODF dans le lot et renvoie son jeton de position
+    (D-093, D-098). N'échoue jamais : une image illisible est ignorée."""
     try:
         data = zf.read(href)
     except KeyError:
-        return "", None
-
+        return ""
     ext = href.rsplit(".", 1)[-1] if "." in href else "png"
-    tag = build_image_tag(relative_path, location, index, ext)
-
-    ocr_text = ""
-    if engine is not None:
-        try:
-            ocr_text = engine.ocr_image(data, OCR_LANG)
-        except Exception:
-            logger.warning("Échec OCR image %s", tag, exc_info=True)
-
-    marker = build_image_marker(tag if want_export else None, ocr_text, OCR_LANG)
-    embedded = EmbeddedImage(filename=tag, data=data) if want_export and marker else None
-    return marker, embedded
+    return batch.add(build_image_tag(relative_path, location, index, ext), data)
 
 
 def _extract_master_headers_footers(styles_xml: bytes) -> list[str]:
