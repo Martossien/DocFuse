@@ -1218,3 +1218,37 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   problème décrit, à clarifier avec l'utilisateur (autre fichier ?
   diapo précise ?) avant de dimensionner ce chantier.
 
+### OCR des images intégrées DOCX/PPTX + export pour description LLM (D-091) — ✅ Corrigé
+
+- Suite directe du retour Windows ci-dessus : discussion avec l'utilisateur
+  pour transformer la piste « pptx mal extraits » en chantier concret. Deux
+  besoins tranchés ensemble : (1) OCR automatique des images intégrées
+  (corrige le bug signalé, même moteur Tesseract que le PDF, aucune case à
+  cocher) et (2) export optionnel de l'image + tag de position dans le
+  corpus, pour qu'un LLM externe multimodal puisse décrire l'image et
+  savoir où placer sa description — désactivé par défaut (seule
+  fonctionnalité DocFuse à écrire des fichiers en plus).
+- Planifié en amont (plan écrit et approuvé avant implémentation, vu
+  l'ampleur : nouveau module `core/embedded_images.py`, changement de
+  signature sur les 13 extracteurs, nouveau champ modèle, nouveau writer,
+  fil de config CLI/GUI complet).
+- Simplification découverte en explorant le code : contrairement à l'OCR
+  PDF (rastérisation `pypdfium2` nécessaire), les images DOCX/PPTX sont
+  déjà des fichiers image bruts dans le ZIP — envoyées directement à
+  Tesseract sans conversion. **Zéro nouvelle dépendance.**
+- Vérifié sur le fichier réel cité par l'utilisateur
+  (`atelier_camelia_managers_V0.4.pptx`) : l'image de la diapo 7 (214 Ko,
+  une capture d'écran de conversation) était totalement invisible avant
+  D-091 — l'OCR en extrait maintenant le texte automatiquement, et
+  l'export produit `atelier_camelia_managers_V0.4__slide7__img1.png` avec
+  le tag `[[IMAGE: ...]]` au bon endroit dans le corpus généré, testé
+  bout-en-bout via `run_analysis()` + `generate_corpus()`.
+- 22 nouveaux tests (pur nommage/marqueurs, extracteurs DOCX/PPTX avec et
+  sans export, OCR réel sous `skipif` Tesseract absent — Tesseract étant
+  installé dans cet environnement, l'OCR a été réellement exercé, pas
+  seulement testé en mock), plomberie CLI `--extract-images` bout-en-bout.
+  417 passed / 39 skipped, ruff/mypy --strict propres, recette 7/7.
+- Portée v1 = DOCX + PPTX seulement, XLSX explicitement exclu (images
+  ancrées via XML de dessin séparé, non exposé par `openpyxl` en mode
+  `read_only`) — noté comme extension v1.1 possible, pas abandonné.
+

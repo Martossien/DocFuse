@@ -93,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=t("cli.no_recursive"),
     )
     parser.add_argument(
+        "--extract-images",
+        action="store_true",
+        default=None,
+        help=t("cli.extract_images"),
+    )
+    parser.add_argument(
         "--include-ext",
         action="append",
         help=t("cli.include_ext"),
@@ -272,6 +278,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     exclude_globs = args.exclude_glob if args.exclude_glob is not None else config.exclude_globs
     output_format = args.format if args.format is not None else config.format
+    extract_embedded_images = (
+        args.extract_images if args.extract_images is not None else config.extract_embedded_images
+    )
 
     # M-11: Avertissement au-delà de 1 000 000 tokens (CdC §10.3)
     if context_limit > 1_000_000:
@@ -352,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         sort=config.sort,
         max_depth=config.max_depth,
         tokenizer_engine=tokenizer_engine,
+        extract_embedded_images=extract_embedded_images,
     )
 
     # Aucun fichier supporté

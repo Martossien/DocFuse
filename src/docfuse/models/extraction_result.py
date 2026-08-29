@@ -13,6 +13,19 @@ from pathlib import Path
 from docfuse.models.file_status import FileStatus
 
 
+@dataclass(frozen=True)
+class EmbeddedImage:
+    """Image intégrée exportée (D-091), en mémoire jusqu'à la génération du corpus.
+
+    Attributes:
+        filename: Nom de fichier prêt à écrire (voir `core/embedded_images.py`).
+        data: Octets bruts de l'image (format d'origine, PNG/JPEG/...).
+    """
+
+    filename: str
+    data: bytes
+
+
 @dataclass
 class ExtractedFile:
     """Résultat de l'extraction d'un fichier.
@@ -32,6 +45,8 @@ class ExtractedFile:
         encoding: Encodage détecté pour les fichiers texte (ex: "utf-8", "cp1252").
         chars_per_page: Liste du nombre de caractères extraits par page (PDF uniquement).
         extra_metadata: Métadonnées supplémentaires libres (titre, auteur, etc.).
+        embedded_images: Images intégrées exportées (DOCX/PPTX, D-091), vide
+            si l'export n'a pas été demandé.
     """
 
     path: Path
@@ -47,6 +62,7 @@ class ExtractedFile:
     encoding: str | None = None
     chars_per_page: list[int] = field(default_factory=list)
     extra_metadata: dict[str, str] = field(default_factory=dict)
+    embedded_images: list[EmbeddedImage] = field(default_factory=list)
 
     @property
     def text_length(self) -> int:

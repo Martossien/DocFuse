@@ -91,19 +91,28 @@ class Extractor(ABC):
 
     @classmethod
     @abstractmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         """Extrait le texte et les métadonnées d'un fichier.
 
         Ne doit JAMAIS lever d'exception. Utiliser ``error_result()``
         pour construire un résultat d'erreur en cas d'échec.
+
+        Args:
+            path: Chemin absolu du fichier source.
+            relative_path: Chemin relatif au dossier d'entrée.
+            extract_images: Exporter les images intégrées trouvées (D-091,
+                voir `core/embedded_images.py`). Ignoré par les extracteurs
+                qui n'ont pas d'images intégrées à exporter (défaut `False`).
         """
         ...
 
     @classmethod
-    def safe_extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def safe_extract(
+        cls, path: Path, relative_path: str, extract_images: bool = False
+    ) -> ExtractedFile:
         """Wrapper défensif : appelle extract() et capture toute exception non gérée."""
         try:
-            result = cls.extract(path, relative_path)
+            result = cls.extract(path, relative_path, extract_images)
             if result.status is FileStatus.ERROR and not result.error_message:
                 from docfuse.i18n import t as _t
 

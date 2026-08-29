@@ -27,6 +27,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **GUI : fenêtre par défaut élargie** (900×720 → 1050×720, minsize
   700×600 → 900×600) — les boutons du bas (Générer, Rapport, Annuler)
   pouvaient déborder de la fenêtre par défaut sous Windows.
+- **OCR automatique des images intégrées DOCX/PPTX** — même moteur
+  Tesseract que les PDF scannés, sans réglage à activer. Corrige les
+  fichiers `.pptx`/`.docx` dont le contenu est capturé dans une image
+  (schéma, capture d'écran) plutôt qu'en texte natif.
+- **Export optionnel des images intégrées pour description par IA**
+  (désactivé par défaut — CLI `--extract-images`, GUI, config JSON) :
+  chaque image DOCX/PPTX est écrite dans `<sortie>_images/` avec un nom
+  explicite (document + emplacement), et un tag `[[IMAGE: nom.png]]` est
+  inséré dans le corpus au point d'apparition, pour qu'un LLM multimodal
+  externe sache où positionner sa description.
 
 ## [0.1.4] - 2026-08-29 — Beta
 

@@ -6,10 +6,36 @@ Diapo sans texte → [[DIAPO N: aucun texte extractible]].
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import pytest
+
+from docfuse.core.ocr.tesseract import TesseractEngine
 from docfuse.extractors.pptx import PptxExtractor
 from docfuse.models.file_status import FileStatus
+
+_OCR_AVAILABLE = TesseractEngine().is_available()
+
+
+def _pptx_with_image(tmp_path: Path, name: str, image_bytes: bytes) -> Path:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    f = tmp_path / name
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_picture(io.BytesIO(image_bytes), Inches(1), Inches(1), Inches(2), Inches(2))
+    prs.save(str(f))
+    return f
+
+
+def _red_square_png() -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+    return buf.getvalue()
 
 
 class TestPptxExtractor:
@@ -92,3 +118,44 @@ class TestPptxExtractor:
         assert result.status is FileStatus.READY
         assert "TEXTE_DANS_GROUPE_1" in result.text
         assert "TEXTE_DANS_GROUPE_2" in result.text
+
+    def test_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
+        """D-091 : export actif -> l'image est capturée avec un nom explicite
+        (incluant le numéro de diapo) et un tag `[[IMAGE: ...]]` est inséré
+        au point d'apparition."""
+        f = _pptx_with_image(tmp_path, "with_image.pptx", _red_square_png())
+
+        result = PptxExtractor.extract(f, "with_image.pptx", extract_images=True)
+        assert result.status is FileStatus.READY
+        assert len(result.embedded_images) == 1
+        image = result.embedded_images[0]
+        assert image.filename.startswith("with_image__slide1__img1")
+        assert image.data
+        assert f"[[IMAGE: {image.filename}]]" in result.text
+
+    def test_embedded_image_export_disabled_by_default(self, tmp_path: Path) -> None:
+        """D-091 : sans `extract_images`, aucune image capturée, texte inchangé
+        (non-régression stricte vis-à-vis du comportement pré-D-091)."""
+        f = _pptx_with_image(tmp_path, "with_image2.pptx", _red_square_png())
+
+        result = PptxExtractor.extract(f, "with_image2.pptx")
+        assert result.embedded_images == []
+        assert "[[IMAGE" not in result.text
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_embedded_image_ocr_extracts_text_automatically(self, tmp_path: Path) -> None:
+        """D-091 : corrige le bug signalé par l'utilisateur (PPTX où le texte
+        est dans une image) — OCR automatique, sans avoir besoin d'activer
+        l'export."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (600, 150), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 50), "Bonjour le monde", fill="black")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        f = _pptx_with_image(tmp_path, "with_text_image.pptx", buf.getvalue())
+
+        result = PptxExtractor.extract(f, "with_text_image.pptx")
+        assert "onjour" in result.text or "monde" in result.text
+        assert result.embedded_images == []

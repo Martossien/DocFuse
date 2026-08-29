@@ -204,18 +204,19 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 433 |
+| Tests collectés depuis un clone frais | 456 |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 395 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 417 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 90 (D-001 à D-090) |
+| Décisions archivées | 91 (D-001 à D-091) |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
-| Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie) |
+| Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM) |
 | Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
 | OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |
+| OCR images intégrées DOCX/PPTX | Optionnel (même moteur `core/ocr/`), automatique sans réglage (D-091). Export image + tag `[[IMAGE: ...]]` en option désactivée par défaut (CLI `--extract-images`, GUI, config JSON) — écrit `<sortie>_images/`. XLSX hors périmètre v1. |
 | Optimisations/alertes de transparence | 5 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets, OCR (D-062 à D-065, D-067) |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md, captures d'écran réelles |

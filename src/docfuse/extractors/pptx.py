@@ -12,10 +12,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from docfuse.constants import OCR_LANG
+from docfuse.core.embedded_images import build_image_marker, build_image_tag
+from docfuse.core.ocr.base import OcrEngine
+from docfuse.core.ocr.registry import resolve_ocr_engine
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted
 from docfuse.i18n import t
-from docfuse.models.extraction_result import ExtractedFile
+from docfuse.models.extraction_result import EmbeddedImage, ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
@@ -32,7 +36,7 @@ class PptxExtractor(Extractor):
         return path.suffix.lower() == ".pptx"
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(cls, path: Path, relative_path: str, extract_images: bool = False) -> ExtractedFile:
         try:
             # D-089 : un .pptx protégé par mot de passe à l'ouverture est un
             # conteneur OLE2, plus un ZIP — sans cette détection, python-pptx
@@ -50,8 +54,16 @@ class PptxExtractor(Extractor):
                 )
 
             from pptx import Presentation
+            from pptx.enum.shapes import MSO_SHAPE_TYPE
 
             image_count = _count_media_images(path)
+
+            # D-091 : OCR/export des images intégrées, seulement si utile
+            # (export demandé ou OCR disponible) — sinon zéro coût ajouté,
+            # comportement strictement identique à avant.
+            engine = resolve_ocr_engine()
+            want_export = extract_images
+            embedded_images: list[EmbeddedImage] = []
 
             prs = Presentation(str(path))
             parts: list[str] = []
@@ -60,6 +72,7 @@ class PptxExtractor(Extractor):
             for i, slide in enumerate(prs.slides, 1):
                 slide_count += 1
                 slide_text: list[str] = []
+                slide_image_index = 0
 
                 # D-074 : descend dans les formes groupées (GroupShape) —
                 # sans ça, tout texte/tableau dans un groupe (schémas,
@@ -67,6 +80,18 @@ class PptxExtractor(Extractor):
                 # est invisible : shape.has_text_frame/has_table renvoient
                 # False pour le conteneur groupe lui-même.
                 for shape in _iter_shapes(slide.shapes):
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        if want_export or engine is not None:
+                            slide_image_index += 1
+                            marker, embedded = _process_picture(
+                                shape, relative_path, i, slide_image_index, want_export, engine
+                            )
+                            if marker:
+                                slide_text.append(marker)
+                            if embedded:
+                                embedded_images.append(embedded)
+                        continue
+
                     if shape.has_text_frame:
                         for para in shape.text_frame.paragraphs:
                             text = para.text.strip()
@@ -102,10 +127,44 @@ class PptxExtractor(Extractor):
                 status=FileStatus.READY,
                 image_count=image_count,
                 page_count=slide_count,
+                embedded_images=embedded_images,
             )
         except Exception as exc:
             logger.exception("Erreur extraction PPTX %s", path)
             return error_result(path, relative_path, cls.file_type, exc)
+
+
+def _process_picture(
+    shape: Any,
+    relative_path: str,
+    slide_no: int,
+    index: int,
+    want_export: bool,
+    engine: OcrEngine | None,
+) -> tuple[str, EmbeddedImage | None]:
+    """Construit le marqueur inline (et l'image à exporter) d'une forme image
+    d'une diapo (D-091). N'échoue jamais : une image illisible est ignorée
+    plutôt que de faire échouer toute l'extraction de la diapo."""
+    try:
+        image = shape.image
+        data = image.blob
+        ext = image.ext
+    except Exception:
+        logger.warning("Lecture de l'image slide %d échouée", slide_no, exc_info=True)
+        return "", None
+
+    tag = build_image_tag(relative_path, f"slide{slide_no}", index, ext)
+
+    ocr_text = ""
+    if engine is not None:
+        try:
+            ocr_text = engine.ocr_image(data, OCR_LANG)
+        except Exception:
+            logger.warning("Échec OCR image slide %d", slide_no, exc_info=True)
+
+    marker = build_image_marker(tag if want_export else None, ocr_text, OCR_LANG)
+    embedded = EmbeddedImage(filename=tag, data=data) if want_export and marker else None
+    return marker, embedded
 
 
 def _iter_shapes(shapes: Any) -> Any:

@@ -20,6 +20,7 @@ from typing import Any
 
 from docfuse.constants import (
     DEFAULT_CONTEXT_LIMIT,
+    DEFAULT_EXTRACT_EMBEDDED_IMAGES,
     DEFAULT_FORMAT,
     DEFAULT_LANG,
     DEFAULT_MARGIN,
@@ -64,6 +65,7 @@ class Config:
     exclude_globs: list[str] = field(default_factory=list)
     max_depth: int = 12  # I-04: CdC §16 — profondeur max configurable, défaut 12
     tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE
+    extract_embedded_images: bool = DEFAULT_EXTRACT_EMBEDDED_IMAGES
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -192,6 +194,8 @@ def _merge_config(base: Config, data: dict[str, Any]) -> Config:
         base.max_depth = int(data["max_depth"])
     if "tokenizer_engine" in data:
         base.tokenizer_engine = str(data["tokenizer_engine"])
+    if "extract_embedded_images" in data:
+        base.extract_embedded_images = bool(data["extract_embedded_images"])
     if "scan" in data and isinstance(data["scan"], dict):
         scan_data: dict[str, Any] = data["scan"]
         if "min_chars_file" in scan_data:

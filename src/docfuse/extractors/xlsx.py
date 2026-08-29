@@ -33,7 +33,9 @@ class XlsxExtractor(Extractor):
         return path.suffix.lower() == ".xlsx"
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             # D-089 : un .xlsx protégé par mot de passe à l'ouverture est un
             # conteneur OLE2, plus un ZIP — sans cette détection, openpyxl

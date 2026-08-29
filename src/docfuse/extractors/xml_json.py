@@ -27,7 +27,9 @@ class JsonExtractor(Extractor):
         return path.suffix.lower() == ".json"
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
             encoding, data = detect_encoding(raw)
@@ -60,7 +62,9 @@ class XmlExtractor(Extractor):
         return path.suffix.lower() == ".xml"
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
             encoding, data = detect_encoding(raw)
@@ -95,7 +99,9 @@ class YamlIniExtractor(Extractor):
         return path.suffix.lower() in (".yaml", ".yml", ".ini", ".cfg")
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
             encoding, data = detect_encoding(raw)

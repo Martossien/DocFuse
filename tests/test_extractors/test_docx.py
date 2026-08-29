@@ -5,10 +5,35 @@ CdC §8.3 — Body, tableaux, headers/footers, footnotes, endnotes.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import pytest
+
+from docfuse.core.ocr.tesseract import TesseractEngine
 from docfuse.extractors.docx import DocxExtractor
 from docfuse.models.file_status import FileStatus
+
+_OCR_AVAILABLE = TesseractEngine().is_available()
+
+
+def _docx_with_image(tmp_path: Path, name: str, image_bytes: bytes) -> Path:
+    from docx import Document
+
+    f = tmp_path / name
+    doc = Document()
+    doc.add_paragraph("Texte avant image.")
+    doc.add_picture(io.BytesIO(image_bytes))
+    doc.save(str(f))
+    return f
+
+
+def _red_square_png() -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _inject_textbox(docx_path: Path, part_name: str, before_closing_tag: str, text: str) -> None:
@@ -216,3 +241,42 @@ class TestDocxExtractor:
         assert result.status is FileStatus.READY
         assert "TEXTE_CELLULE_EXTERNE" in result.text
         assert "TEXTE_TABLEAU_IMBRIQUE" in result.text
+
+    def test_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
+        """D-091 : export actif -> l'image est capturée avec un nom explicite
+        et un tag `[[IMAGE: ...]]` est inséré au point d'apparition."""
+        f = _docx_with_image(tmp_path, "with_image.docx", _red_square_png())
+
+        result = DocxExtractor.extract(f, "with_image.docx", extract_images=True)
+        assert result.status is FileStatus.READY
+        assert len(result.embedded_images) == 1
+        image = result.embedded_images[0]
+        assert image.filename.startswith("with_image__img1")
+        assert image.data
+        assert f"[[IMAGE: {image.filename}]]" in result.text
+
+    def test_embedded_image_export_disabled_by_default(self, tmp_path: Path) -> None:
+        """D-091 : sans `extract_images`, aucune image capturée, texte inchangé
+        (non-régression stricte vis-à-vis du comportement pré-D-091)."""
+        f = _docx_with_image(tmp_path, "with_image2.docx", _red_square_png())
+
+        result = DocxExtractor.extract(f, "with_image2.docx")
+        assert result.embedded_images == []
+        assert "[[IMAGE" not in result.text
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_embedded_image_ocr_extracts_text_automatically(self, tmp_path: Path) -> None:
+        """D-091 : l'OCR d'une image intégrée est automatique (comme pour les
+        PDF scannés), sans avoir besoin d'activer l'export."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (600, 150), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 50), "Bonjour le monde", fill="black")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        f = _docx_with_image(tmp_path, "with_text_image.docx", buf.getvalue())
+
+        result = DocxExtractor.extract(f, "with_text_image.docx")
+        assert "onjour" in result.text or "monde" in result.text
+        assert result.embedded_images == []

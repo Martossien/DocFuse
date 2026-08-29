@@ -108,6 +108,32 @@ class TestGenerateCorpus:
         assert report_md.exists()
         assert report_json.exists()
 
+    def test_embedded_images_exported_end_to_end(self, tmp_path: Path) -> None:
+        """D-091 : `extract_embedded_images=True` bout-en-bout — l'image
+        capturée à l'extraction survit jusqu'à `generate_corpus()`, qui
+        l'écrit dans `corpus_images/` à côté du corpus."""
+        import io
+
+        from PIL import Image
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        buf = io.BytesIO()
+        Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+        slide.shapes.add_picture(buf, Inches(1), Inches(1), Inches(2), Inches(2))
+        prs.save(str(tmp_path / "deck.pptx"))
+
+        result = run_analysis(tmp_path, context_limit=128000, extract_embedded_images=True)
+        assert len(result.files[0].embedded_images) == 1
+
+        output = tmp_path / "corpus.md"
+        assert generate_corpus(result, output, 128000, 0.15)
+        images_dir = tmp_path / "corpus_images"
+        assert images_dir.is_dir()
+        assert len(list(images_dir.iterdir())) == 1
+
 
 class TestTokenizerEngineIntegration:
     """Bout-en-bout avec un moteur de comptage précis (CdC §10 étendu)."""

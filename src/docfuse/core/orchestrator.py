@@ -210,6 +210,7 @@ def run_analysis(
     sort: str = "name",
     max_depth: int = 12,
     tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE,
+    extract_embedded_images: bool = False,
 ) -> OrchestratorResult:
     """Lance l'analyse complète : inventaire → extraction → comptage.
 
@@ -225,6 +226,9 @@ def run_analysis(
         tokenizer_engine: Identifiant du moteur de comptage ("approx" par
             défaut). Un id inconnu ou indisponible retombe sur "approx"
             (voir core/tokenizers/registry.py) — n'échoue jamais.
+        extract_embedded_images: Exporter les images intégrées (DOCX/PPTX,
+            D-091) en fichiers séparés, avec un tag de position dans le
+            texte. Désactivé par défaut (écrit des fichiers en plus).
 
     Returns:
         OrchestratorResult avec les fichiers, estimations, statut de blocage.
@@ -302,7 +306,9 @@ def run_analysis(
                 error_message=t("error.no_extractor", ext=path.suffix),
             )
         else:
-            result = extractor_cls.safe_extract(path, relative_path)
+            result = extractor_cls.safe_extract(
+                path, relative_path, extract_images=extract_embedded_images
+            )
 
         if emitter:
             emitter.emit(
@@ -430,6 +436,12 @@ def generate_corpus(
         write_pdf_corpus(result, output_path, margin)
     else:
         raise ValueError(f"Format de sortie non supporté : {ext}")
+
+    from docfuse.output.image_writer import write_embedded_images
+
+    images_written = write_embedded_images(result.files, output_path)
+    if images_written:
+        logger.info("%d image(s) intégrée(s) exportée(s) à côté de %s", images_written, output_path)
 
     _write_report_only(result, output_path, context_limit, margin)
     logger.info("Corpus généré : %s", output_path)

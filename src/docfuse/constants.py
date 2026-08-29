@@ -189,6 +189,11 @@ DEFAULT_RECURSIVE: bool = True
 DEFAULT_SORT: str = "name"
 DEFAULT_OPEN_OUTPUT_FOLDER: bool = True
 
+DEFAULT_EXTRACT_EMBEDDED_IMAGES: bool = False
+"""Export des images intégrées DOCX/PPTX en fichiers séparés (D-091) —
+désactivé par défaut : c'est la seule fonctionnalité de DocFuse qui écrit des
+fichiers en plus du corpus/rapport."""
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Seuils de détection scans / pauvreté de texte (CdC §9.2, §12)
 # ──────────────────────────────────────────────────────────────────────────────

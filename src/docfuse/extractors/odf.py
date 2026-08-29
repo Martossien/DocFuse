@@ -31,7 +31,9 @@ class OdfExtractor(Extractor):
         return path.suffix.lower() in (".odt", ".ods", ".odp")
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             from bs4 import BeautifulSoup
 

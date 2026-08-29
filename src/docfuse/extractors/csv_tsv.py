@@ -27,7 +27,9 @@ class CsvTsvExtractor(Extractor):
         return path.suffix.lower() in (".csv", ".tsv")
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             raw = path.read_bytes()
             encoding, data = detect_encoding(raw)

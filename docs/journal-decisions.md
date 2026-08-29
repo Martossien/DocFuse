@@ -1449,6 +1449,61 @@ testable sans ouvrir de fenêtre). Fenêtre par défaut `900x720`/`minsize
   marge supplémentaire est une mitigation de bon sens, pas une correction
   vérifiée à l'identique du bug original — à confirmer par l'utilisateur.
 
+### D-091 : OCR des images intégrées DOCX/PPTX + export optionnel pour description LLM
+
+**Décision** : deux fonctionnalités liées, tranchées séparément avec
+l'utilisateur —
+1. **OCR automatique** des images intégrées (`w:drawing//a:blip` DOCX,
+   formes `PICTURE` PPTX), même moteur Tesseract que l'OCR PDF
+   (`core/ocr/`), sans réglage à activer — dès que Tesseract est
+   disponible, ça marche.
+2. **Export optionnel** (`extract_embedded_images`, désactivé par défaut —
+   CLI `--extract-images`, GUI case à cocher, config JSON) : chaque image
+   est écrite dans `<sortie>_images/`, nommée
+   `{doc_stem}__{emplacement}__img{n}.{ext}` (ex.
+   `atelier_camelia_managers_V0.4__slide7__img1.png`), avec un tag inline
+   `[[IMAGE: nom.png]]` (+ texte OCR s'il y en a) au point d'apparition
+   dans le corpus — pour qu'un LLM multimodal externe reçoive à la fois le
+   corpus texte et les images, et sache où positionner sa description.
+
+Nouveau module pur `core/embedded_images.py` (nommage/marqueur), nouveau
+`ExtractedFile.embedded_images` (`EmbeddedImage(filename, data)`, en
+mémoire jusqu'à la génération du corpus), nouveau `output/image_writer.py`
+(écriture différée, dossier créé seulement s'il y a au moins une image).
+
+**Rationale** :
+- Retour utilisateur (test machine Windows réelle, v0.1.4) : PPTX avec
+  texte dans une image (capture d'écran) mal extraits — « quasiement que
+  les titres ». Confirmé sur le fichier cité par l'utilisateur
+  (`atelier_camelia_managers_V0.4.pptx`, slide 7) : 214 Ko d'image
+  contenant une conversation captée à l'écran, invisible avant D-091.
+- Simplification trouvée en explorant le code : contrairement à l'OCR PDF
+  (doit *rendre* une page vectorielle via `pypdfium2`), les images
+  DOCX/PPTX sont déjà des fichiers image bruts dans le ZIP — aucune
+  rastérisation nécessaire, les octets vont directement à
+  `TesseractEngine.ocr_image()` (Tesseract/Leptonica détecte le format
+  automatiquement). **Aucune nouvelle dépendance.**
+- OCR automatique (pas de case à cocher) choisi pour rester cohérent avec
+  l'OCR PDF déjà en place — le bug signalé se corrige sans que
+  l'utilisateur ait à découvrir un nouveau réglage. L'export d'image, lui,
+  écrit des fichiers en plus du corpus (seule fonctionnalité de DocFuse à
+  le faire) — décision explicite de l'utilisateur de le garder désactivé
+  par défaut.
+- Portée v1 = DOCX + PPTX seulement. XLSX exclu : ses images sont ancrées
+  via un XML de dessin séparé (`xl/drawings/`), jamais exposé par
+  `openpyxl` en mode `read_only` (utilisé partout dans `extractors/xlsx.py`
+  pour les gros classeurs) — surcoût disproportionné pour des images
+  généralement décoratives (logos). Noté comme extension v1.1 possible.
+- `Extractor.extract()`/`safe_extract()` gagnent un paramètre
+  `extract_images: bool = False` (mécanique, comme D-089 sur 3
+  extracteurs) — les 11 extracteurs qui ne l'utilisent pas reçoivent le
+  paramètre sous un nom préfixé `_` (convention ruff ARG003 pour un
+  argument volontairement ignoré) sans que cela gêne mypy --strict sur la
+  compatibilité de signature avec la classe abstraite.
+- Petit polish en passant : `OcrEngine.ocr_image(png_bytes, ...)` renommé
+  en `image_bytes` — le nom suggérait à tort un format unique, alors que
+  Tesseract/Leptonica accepte déjà PNG/JPEG/BMP/TIFF par ce même chemin.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

@@ -39,7 +39,9 @@ class EmlExtractor(Extractor):
         return path.suffix.lower() == ".eml"
 
     @classmethod
-    def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
+    def extract(
+        cls, path: Path, relative_path: str, _extract_images: bool = False
+    ) -> ExtractedFile:
         try:
             with open(path, "rb") as f:
                 msg = BytesParser(policy=policy.default).parse(f)

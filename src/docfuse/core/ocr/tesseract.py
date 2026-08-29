@@ -41,14 +41,14 @@ class TesseractEngine(OcrEngine):
     def is_available(self) -> bool:
         return _resolve_binary() is not None
 
-    def ocr_image(self, png_bytes: bytes, lang: str) -> str:
+    def ocr_image(self, image_bytes: bytes, lang: str) -> str:
         binary = _resolve_binary()
         if binary is None:
             return ""
         try:
             result = subprocess.run(
                 [binary, "stdin", "stdout", "-l", lang],
-                input=png_bytes,
+                input=image_bytes,
                 capture_output=True,
                 timeout=_OCR_SUBPROCESS_TIMEOUT_S,
                 check=False,

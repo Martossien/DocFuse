@@ -291,6 +291,31 @@ class TestCLIExitCodes:
         ret = main(["-i", str(tmp_path), "--yes", "-o", str(tmp_path / "corpus.md")])
         assert ret == 3
 
+    def test_extract_images_flag_exports_embedded_images(self, tmp_path: Path) -> None:
+        """D-091 : `--extract-images` en CLI écrit bien les images intégrées
+        dans `<sortie>_images/` à côté du corpus généré."""
+        import io
+
+        from PIL import Image
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        from docfuse.cli import main
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        buf = io.BytesIO()
+        Image.new("RGB", (50, 50), "red").save(buf, format="PNG")
+        slide.shapes.add_picture(buf, Inches(1), Inches(1), Inches(2), Inches(2))
+        prs.save(str(tmp_path / "deck.pptx"))
+
+        output = tmp_path / "corpus.md"
+        ret = main(["-i", str(tmp_path), "--extract-images", "--yes", "-o", str(output)])
+        assert ret == 0
+        images_dir = tmp_path / "corpus_images"
+        assert images_dir.is_dir()
+        assert len(list(images_dir.iterdir())) == 1
+
 
 class TestOrchestratorSortAndDepth:
     """sort et max_depth passés à run_analysis."""

@@ -185,6 +185,14 @@ class DocFuseGUI:
             options_frame, text=t("gui.open_output_folder"), variable=self.open_folder_var
         ).grid(row=2, column=2, columnspan=2, padx=10, pady=(5, 10), sticky="w")
 
+        # D-091 : export des images intégrées DOCX/PPTX (+ tag de position) —
+        # désactivé par défaut, seule fonctionnalité qui écrit des fichiers
+        # en plus du corpus/rapport.
+        self.extract_images_var = ctk.BooleanVar(value=self.config.extract_embedded_images)
+        ctk.CTkCheckBox(
+            options_frame, text=t("gui.extract_embedded_images"), variable=self.extract_images_var
+        ).grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 10), sticky="w")
+
         # Moteur de comptage : "Approximation" (défaut) ou un moteur précis
         # (ex: Mistral) si disponible dans cet environnement.
         ctk.CTkLabel(options_frame, text=t("gui.tokenizer_engine")).grid(
@@ -469,6 +477,7 @@ class DocFuseGUI:
         selection = self.input_selection
         context_limit = self._get_current_limit()
         recursive = bool(self.recursive_var.get())
+        extract_embedded_images = bool(self.extract_images_var.get())
         # Lu sur le thread principal : StringVar.get() n'est pas thread-safe.
         tokenizer_engine = resolve_tokenizer_choice(
             self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
@@ -493,7 +502,7 @@ class DocFuseGUI:
 
         self._analysis_thread = threading.Thread(
             target=self._run_analysis_thread,
-            args=(selection, context_limit, recursive, tokenizer_engine),
+            args=(selection, context_limit, recursive, tokenizer_engine, extract_embedded_images),
             daemon=True,
         )
         self._analysis_thread.start()
@@ -506,6 +515,7 @@ class DocFuseGUI:
         context_limit: int,
         recursive: bool,
         tokenizer_engine: str,
+        extract_embedded_images: bool,
     ) -> None:
         """Thread d'analyse."""
         try:
@@ -518,6 +528,7 @@ class DocFuseGUI:
                 emitter=self.emitter,
                 scan_config=self.config.scan,
                 tokenizer_engine=tokenizer_engine,
+                extract_embedded_images=extract_embedded_images,
             )
         except Exception as exc:
             logger.exception("Échec de l'analyse")

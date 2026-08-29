@@ -34,11 +34,12 @@ class OcrEngine(ABC):
         """Indique si le moteur peut être utilisé dans cet environnement."""
 
     @abstractmethod
-    def ocr_image(self, png_bytes: bytes, lang: str) -> str:
-        """Reconnaît le texte d'une image PNG.
+    def ocr_image(self, image_bytes: bytes, lang: str) -> str:
+        """Reconnaît le texte d'une image (PNG, JPEG, BMP, TIFF...).
 
         Args:
-            png_bytes: Image PNG encodée (une page rastérisée).
+            image_bytes: Image encodée (page rastérisée ou image intégrée
+                DOCX/PPTX — Tesseract/Leptonica détecte le format automatiquement).
             lang: Code(s) langue Tesseract (ex: "fra+eng").
 
         Returns:
