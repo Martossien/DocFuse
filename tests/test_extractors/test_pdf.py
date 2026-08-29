@@ -241,6 +241,41 @@ class TestPdfOcr:
         assert "ocr" in result.extra_metadata
         assert "reconnue" in result.extra_metadata["ocr"]
 
+    def test_ocr_pages_holds_pdfium_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-078 : PDFium (pypdfium2) n'est pas thread-safe entre PdfDocument
+        distincts chargés depuis des threads différents — vérifié en
+        conditions réelles : un dossier avec plusieurs PDF nécessitant l'OCR
+        traités en parallèle (ThreadPoolExecutor de l'orchestrateur)
+        provoquait une corruption de tas native puis un SIGSEGV qui tuait
+        tout le processus. `_ocr_pages` doit tenir `_PDFIUM_LOCK` pendant
+        tout accès à PDFium — vérifié ici en observant l'état du verrou
+        depuis l'intérieur d'un `PdfDocument` factice, plutôt que de
+        dépendre d'une vraie course native (non déterministe en test)."""
+        import docfuse.extractors.pdf as pdf_module
+        from docfuse.core.ocr.tesseract import TesseractEngine
+
+        lock_was_held: list[bool] = []
+
+        class _FakePdfDocument:
+            def __init__(self, path: str) -> None:  # noqa: ARG002
+                lock_was_held.append(pdf_module._PDFIUM_LOCK.locked())
+
+            def close(self) -> None:
+                pass
+
+            def __getitem__(self, idx: int) -> None:
+                raise AssertionError("pas besoin d'aller plus loin pour ce test")
+
+        fake_pdfium = type("FakeModule", (), {"PdfDocument": _FakePdfDocument})
+        monkeypatch.setitem(__import__("sys").modules, "pypdfium2", fake_pdfium)
+
+        pdf_module._ocr_pages(tmp_path / "x.pdf", [0], "fra", TesseractEngine())
+
+        assert lock_was_held == [True]
+        assert not pdf_module._PDFIUM_LOCK.locked()  # relâché après l'appel
+
     @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
     def test_native_pdf_is_not_touched_by_ocr(self, tmp_path: Path) -> None:
         """Un PDF avec du texte natif suffisant ne déclenche jamais l'OCR."""

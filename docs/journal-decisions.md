@@ -1190,6 +1190,53 @@ concernée (jamais un mock).
   `*.min.js`/`*.min.css` disparaissent de l'inventaire, le reste
   (`.pptx`, `.pdf`, `.html`) reste inchangé. 376 tests passent, recette 7/7.
 
+### D-078 : verrou global sur PDFium — corruption mémoire native / crash du processus entier
+
+**Décision** : `extractors/pdf.py::_ocr_pages()` tient désormais
+`_PDFIUM_LOCK` (verrou global au niveau du processus, pas par fichier)
+pendant tout accès à `pypdfium2` (`PdfDocument`, `page.render()`,
+`pdf.close()`).
+
+**Rationale** :
+- Trouvé en testant DocFuse sur `~/Téléchargements` (741 fichiers,
+  `--no-recursive`) : `python3 -m docfuse.cli` s'est terminé par un
+  **SIGSEGV** (`systemd-coredump` confirmé, `coredumpctl info`). Trace :
+  crash natif dans `libpdfium.so`
+  (`CPDF_ColorSpace::CreateBufAndSetDefaultColor` ← `FPDF_LoadPage`),
+  provoqué par l'appel OCR (`_ocr_pages`, D-067).
+- **Cause racine confirmée par reproduction isolée** : PDFium (via
+  `pypdfium2`) n'est **pas thread-safe entre `PdfDocument` distincts**
+  chargés depuis des threads différents. Un script minimal ouvrant/rendant
+  plusieurs PDF réels différents en parallèle (`ThreadPoolExecutor(max_workers=4)`,
+  même pattern que l'orchestrateur) reproduit de façon fiable une
+  corruption de tas (`malloc(): unsorted double linked list corrupted`)
+  puis un abort/SIGSEGV — sur les mêmes fichiers, en séquentiel, aucun
+  problème. L'orchestrateur (`orchestrator.py`) traite les fichiers d'un
+  dossier en parallèle (`ThreadPoolExecutor`, `MAX_WORKERS`), donc
+  plusieurs PDF nécessitant l'OCR simultanément déclenchent la course.
+- Ma protection D-067 ("un seul `PdfDocument`, séquentiel") ne couvrait
+  que l'intérieur d'UN fichier — pas l'accès concurrent à PDFium **entre**
+  fichiers différents traités par des threads différents, qui est la
+  vraie source du problème.
+- Gravité maximale : un SIGSEGV natif tue **tout le processus** — pas
+  seulement le fichier en cours (contrairement à une exception Python,
+  qu'un `try/except` aurait pu absorber). Un dossier avec ne serait-ce que
+  2 PDF nécessitant l'OCR peut faire échouer la génération de tout le
+  corpus, sans message d'erreur exploitable pour l'utilisateur.
+- Correction vérifiée par reproduction : le même script de test
+  (ouverture/rendu concurrents de tous les PDF réels d'un dossier) passe
+  sans erreur une fois le verrou en place ; la commande CLI qui avait
+  crashé (741 fichiers) se termine proprement (bloquée seulement par le
+  plafond de contexte, pas par un crash).
+- Test de non-régression déterministe plutôt que dépendant d'une vraie
+  course native (non fiable en CI) : un `PdfDocument` factice observe
+  l'état de `_PDFIUM_LOCK.locked()` à l'appel — vérifié qu'il échoue si le
+  verrou est retiré (`with _PDFIUM_LOCK:` → `if True:`).
+- Coût : rastérisation PDFium sérialisée process-wide (pas de parallélisme
+  entre fichiers pour cette étape spécifique). Acceptable : c'est
+  uniquement l'ouverture/rendu de page (rapide), pas l'OCR Tesseract
+  lui-même (qui reste parallélisé, isolé par process via `subprocess`).
+
 ---
 
 *Fin du journal des décisions — Session 14.*

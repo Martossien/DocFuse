@@ -10,6 +10,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Non publié]
 
+### Corrigé (critique)
+
+- **Crash du processus entier (SIGSEGV) lors de l'OCR de plusieurs PDF en
+  parallèle** : PDFium (`pypdfium2`) n'est pas thread-safe entre documents
+  distincts chargés depuis des threads différents — un dossier avec
+  plusieurs PDF scannés traités en parallèle pouvait corrompre la mémoire
+  native et tuer tout le processus, sans message d'erreur exploitable.
+  Trouvé en testant sur un vrai dossier de 741 fichiers. Corrigé par un
+  verrou global sérialisant l'accès à PDFium.
+
 ### Corrigé
 
 - **Texte imbriqué dans un Form XObject (PDF) silencieusement ignoré** :

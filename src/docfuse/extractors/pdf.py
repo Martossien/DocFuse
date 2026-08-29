@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from pathlib import Path
@@ -49,6 +50,13 @@ from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
 logger = logging.getLogger(__name__)
+
+# D-078 : PDFium (pypdfium2) n'est pas thread-safe entre PdfDocument
+# distincts chargés depuis des threads différents — voir le docstring de
+# `_ocr_pages`. Verrou global au niveau du processus (pas par fichier :
+# c'est justement l'accès concurrent ENTRE fichiers différents qui corrompt
+# le tas natif de PDFium).
+_PDFIUM_LOCK = threading.Lock()
 
 
 class PageKind(str, Enum):
@@ -444,9 +452,17 @@ def _ocr_pages(
     """Rastérise puis reconnaît une sélection de pages (0-indexées).
 
     Rastérisation séquentielle (un seul `PdfDocument`, un pixmap jeté après
-    chaque page — jamais tout le PDF en mémoire à la fois) ; la
-    reconnaissance Tesseract, elle, est parallélisée (chaque appel est déjà
-    un process OS isolé via `subprocess`, donc thread-safe côté appelant).
+    chaque page — jamais tout le PDF en mémoire à la fois), et **protégée
+    par `_PDFIUM_LOCK`** (D-078) : PDFium n'est pas thread-safe entre
+    `PdfDocument` distincts chargés depuis des threads différents — vérifié
+    en conditions réelles, un dossier avec plusieurs PDF nécessitant l'OCR
+    traités en parallèle (`ThreadPoolExecutor` de l'orchestrateur) produit
+    une corruption de tas native (`malloc(): unsorted double linked list
+    corrupted`) puis un SIGSEGV qui tue tout le processus — pas seulement
+    le fichier en cours. Un verrou global sérialise l'accès à PDFium pour
+    tout le processus ; la reconnaissance Tesseract, elle, reste
+    parallélisée (chaque appel est déjà un process OS isolé via
+    `subprocess`, donc thread-safe côté appelant, hors du verrou).
 
     Returns:
         Dict {index page: (texte reconnu, succès)}. Jamais d'exception :
@@ -463,26 +479,27 @@ def _ocr_pages(
     import pypdfium2 as pdfium
 
     pngs: dict[int, bytes] = {}
-    try:
-        pdf = pdfium.PdfDocument(str(path))
+    with _PDFIUM_LOCK:
         try:
-            for idx in capped:
-                try:
-                    page = pdf[idx]
-                    bitmap = page.render(scale=OCR_DPI / 72)
-                    pil_image = bitmap.to_pil()
-                    if pil_image.width * pil_image.height <= OCR_MAX_PIXELS_PER_PAGE:
-                        buf = io.BytesIO()
-                        pil_image.save(buf, format="PNG")
-                        pngs[idx] = buf.getvalue()
-                except Exception:
-                    logger.warning(
-                        "Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True
-                    )
-        finally:
-            pdf.close()
-    except Exception:
-        logger.warning("Ouverture PDFium impossible pour l'OCR : %s", path, exc_info=True)
+            pdf = pdfium.PdfDocument(str(path))
+            try:
+                for idx in capped:
+                    try:
+                        page = pdf[idx]
+                        bitmap = page.render(scale=OCR_DPI / 72)
+                        pil_image = bitmap.to_pil()
+                        if pil_image.width * pil_image.height <= OCR_MAX_PIXELS_PER_PAGE:
+                            buf = io.BytesIO()
+                            pil_image.save(buf, format="PNG")
+                            pngs[idx] = buf.getvalue()
+                    except Exception:
+                        logger.warning(
+                            "Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True
+                        )
+            finally:
+                pdf.close()
+        except Exception:
+            logger.warning("Ouverture PDFium impossible pour l'OCR : %s", path, exc_info=True)
 
     for idx in capped:
         if idx not in pngs:

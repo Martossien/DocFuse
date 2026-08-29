@@ -1063,6 +1063,30 @@ détectés mais jamais réellement récupérés.
   Corrigé : exclusion de `*.min.js`/`*.min.css` et des dossiers
   `node_modules/vendor/dist/build`.
 
+### Test en conditions réelles sur ~/Téléchargements — crash processus trouvé et corrigé (D-078) — ✅ Corrigé
+
+- Suite au signal de l'utilisateur ("beaucoup de fichiers dans
+  Téléchargements aussi"), test sur `~/Téléchargements` (741 fichiers
+  supportés au premier niveau). `python3 -m docfuse.cli` s'est terminé par
+  un **SIGSEGV** — bien plus grave que les bugs de perte silencieuse
+  précédents, un crash tue tout le processus.
+- Diagnostic via `coredumpctl` : crash natif dans `libpdfium.so`
+  (`pypdfium2`), déclenché par l'OCR (D-067). Cause racine confirmée par
+  reproduction isolée : **PDFium n'est pas thread-safe entre `PdfDocument`
+  distincts chargés depuis des threads différents** — plusieurs PDF
+  nécessitant l'OCR traités en parallèle par l'orchestrateur
+  (`ThreadPoolExecutor`) corrompent la mémoire native. Reproduit de façon
+  fiable avec un script minimal sur les PDF réels du dossier ; le même
+  script protégé par un verrou global passe sans erreur sur les mêmes
+  fichiers.
+- Corrigé : `_PDFIUM_LOCK` (verrou global process-wide) autour de tout
+  accès `pypdfium2` dans `_ocr_pages()`. Vérifié par re-run exact de la
+  commande qui avait crashé : se termine proprement (741 fichiers,
+  seulement bloquée par le plafond de contexte, plus de crash).
+- Test de non-régression déterministe (observe l'état du verrou via un
+  `PdfDocument` factice) plutôt que dépendant d'une vraie course native —
+  vérifié qu'il détecte bien la régression si le verrou est retiré.
+
 ### État après Session 14
 
 | Métrique | Valeur |
@@ -1070,8 +1094,8 @@ détectés mais jamais réellement récupérés.
 | Version | 0.1.3 (non bumpée — aucune Release demandée cette session) |
 | ruff | ✅ (fichiers modifiés ; dérive pré-existante documentée sur `test_acceptance.py` non touchée) |
 | mypy --strict | ✅ 4 erreurs pré-existantes (8 → 4, `eml.py` nettoyé au passage) |
-| pytest | ✅ 376 passed, 39 skipped (tests OCR + 9 bugs corrigés + bruit JS/CSS exécutés) |
-| Décisions archivées | 77 (D-001 à D-077) |
+| pytest | ✅ 377 passed, 39 skipped (tests OCR + 9 bugs corrigés + bruit JS/CSS + crash PDFium exécutés) |
+| Décisions archivées | 78 (D-001 à D-078) |
 
 ### Reste à faire
 
