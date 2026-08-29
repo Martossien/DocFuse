@@ -8,77 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
-## [Non publié]
-
-### Corrigé (gravité moyenne, suite de l'audit extracteurs)
-
-- **HTML** : les commentaires HTML (`<!-- ... -->`) fuitaient dans le texte
-  extrait comme du contenu visible normal.
-- **MHTML** : le `alt` des images n'était jamais extrait (contrairement à
-  l'extracteur HTML).
-- **DOCX** : les zones de texte (text boxes) n'étaient en réalité **jamais**
-  extraites, sur aucun fichier (bug de casse dans la recherche XML) ; une
-  fois corrigé, celles des en-têtes/pieds de page restaient invisibles. Un
-  tableau imbriqué dans une cellule de tableau disparaissait aussi.
-- **XLSX** : une dimension de feuille mal déclarée par le fichier (bug
-  connu de certains générateurs tiers) pouvait tronquer silencieusement des
-  lignes/colonnes en fin de feuille. Les cellules fusionnées ne
-  propageaient pas leur valeur aux autres cellules de la plage.
-- **PDF** : le texte natif illisible (`(cid:...)`) qui déclenche l'OCR
-  polluait le corpus de bruit inutilisable quand aucun moteur OCR n'était
-  disponible, au lieu de simplement signaler une page vide.
-- **ODF (.odp)** : les notes d'orateur (jamais affichées à l'écran) étaient
-  mélangées indistinctement au contenu visible des diapos, sans séparation
-  entre diapos ni gestion structurée des tableaux.
-
-### Technique
-
-- `ruff` épinglé sur une version exacte (`==0.16.5`) — dette identifiée en
-  v0.1.3 (dérive local/CI ayant cassé la publication initiale de cette
-  Release), corrigée pour de bon.
-
-### Corrigé (critique)
-
-- **Crash du processus entier (SIGSEGV) lors de l'OCR de plusieurs PDF en
-  parallèle** : PDFium (`pypdfium2`) n'est pas thread-safe entre documents
-  distincts chargés depuis des threads différents — un dossier avec
-  plusieurs PDF scannés traités en parallèle pouvait corrompre la mémoire
-  native et tuer tout le processus, sans message d'erreur exploitable.
-  Trouvé en testant sur un vrai dossier de 741 fichiers. Corrigé par un
-  verrou global sérialisant l'accès à PDFium.
-
-### Corrigé
-
-- **Texte imbriqué dans un Form XObject (PDF) silencieusement ignoré** :
-  certains PDF (ex. générés par TCPDF — filigranes, tampons, contenu
-  fusionné) placent du texte réel dans un objet `LTFigure` imbriqué, jamais
-  vu par l'extraction au premier niveau de la page. Jusqu'à ~2500
-  caractères par page pouvaient disparaître silencieusement — un document
-  pouvait sembler presque vide (page "peu de texte") alors que son contenu
-  était parfaitement extractible. Corrigé (extraction récursive + réglage
-  de mise en page pdfminer adapté).
-- **Audit systématique de tous les extracteurs — 9 bugs de perte
-  silencieuse corrigés** (même classe que le bug PDF ci-dessus, trouvés en
-  vérifiant les bugs connus de chaque bibliothèque d'extraction) :
-  - **DOCX** : texte inséré en suivi des modifications (`w:ins`) et
-    contrôles de contenu Word (`w:sdt`) invisibles.
-  - **EML** : email transféré en pièce jointe (`message/rfc822`) —
-    sujet et corps totalement perdus.
-  - **PDF** : mot de passe utilisateur vide (juste des permissions
-    restreintes) rejeté comme un fichier totalement illisible.
-  - **ODF (.odt)** : en-têtes/pieds de page (`styles.xml`) jamais lus.
-  - **HTML** : `<meta charset>` jamais consulté → charabia total et
-    silencieux pour tout encodage legacy non latin (cyrillique, etc.).
-  - **PPTX** : formes groupées — texte/tableaux dans un groupe invisibles.
-  - **RTF** : texte de repli des objets OLE incrustés (tableau Excel collé
-    en objet) perdu.
-  - **XLSX** : formules jamais calculées (fichier généré par script) →
-    cellule vide sans aucune trace qu'un calcul existait.
-- **Bruit de bibliothèques JS/CSS tierces exclu des « fichiers de
-  développement »** : trouvé en testant sur un vrai dossier de page web
-  sauvegardée par un navigateur — `*.min.js`/`*.min.css` (jQuery, etc.)
-  représentaient 91 % du corpus généré. Désormais exclus (`*.min.js`,
-  `*.min.css`, dossiers `node_modules/`, `vendor/`, `dist/`, `build/`).
+## [0.1.4] - 2026-08-29 — Beta
 
 ### Ajouté
 
@@ -100,6 +30,67 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   expliquant pourquoi. `CorpusOne.exe` n'embarque pas Tesseract (taille et
   promesse « zéro dépendance » inchangées) — une variante distincte,
   `CorpusOne-OCR.exe`, l'embarque pour un usage sans aucune installation.
+
+### Corrigé (critique)
+
+- **Crash du processus entier (SIGSEGV) lors de l'OCR de plusieurs PDF en
+  parallèle** : PDFium (`pypdfium2`) n'est pas thread-safe entre documents
+  distincts chargés depuis des threads différents — un dossier avec
+  plusieurs PDF scannés traités en parallèle pouvait corrompre la mémoire
+  native et tuer tout le processus, sans message d'erreur exploitable.
+  Trouvé en testant sur un vrai dossier de 741 fichiers. Corrigé par un
+  verrou global sérialisant l'accès à PDFium.
+
+### Corrigé — audit systématique des extracteurs, 17 bugs de perte silencieuse/qualité
+
+Deux vagues de correctifs, chacun avec un test de non-régression construit
+avec la bibliothèque réelle du format (jamais un mock), reproduisant la
+structure exacte du bug avant de vérifier le correctif :
+
+- **Texte imbriqué dans un Form XObject (PDF) silencieusement ignoré** :
+  certains PDF (ex. générés par TCPDF — filigranes, tampons, contenu
+  fusionné) placent du texte réel dans un objet `LTFigure` imbriqué, jamais
+  vu par l'extraction au premier niveau de la page. Jusqu'à ~2500
+  caractères par page pouvaient disparaître silencieusement — un document
+  pouvait sembler presque vide (page "peu de texte") alors que son contenu
+  était parfaitement extractible.
+- **DOCX** : texte inséré en suivi des modifications (`w:ins`) et
+  contrôles de contenu Word (`w:sdt`) invisibles ; zones de texte (bug de
+  casse XML — n'avaient en réalité **jamais** fonctionné, sur aucun
+  fichier) et celles des en-têtes/pieds de page ; tableau imbriqué dans une
+  cellule.
+- **EML** : email transféré en pièce jointe (`message/rfc822`) — sujet et
+  corps totalement perdus.
+- **PDF** : mot de passe utilisateur vide (juste des permissions
+  restreintes) rejeté comme un fichier totalement illisible ; texte
+  poubelle `(cid:...)` laissé tel quel dans le corpus quand l'OCR est
+  indisponible au lieu de signaler une page vide.
+- **ODF** : en-têtes/pieds de page (`.odt`, `styles.xml`) jamais lus ;
+  notes d'orateur (`.odp`) mélangées indistinctement au contenu visible des
+  diapos, sans séparation entre diapos ni gestion structurée des tableaux.
+- **HTML** : `<meta charset>` jamais consulté → charabia total et
+  silencieux pour tout encodage legacy non latin (cyrillique, etc.) ;
+  commentaires HTML qui fuitaient dans le texte extrait.
+- **MHTML** : `alt` des images jamais extrait.
+- **PPTX** : formes groupées — texte/tableaux dans un groupe invisibles.
+- **RTF** : texte de repli des objets OLE incrustés (tableau Excel collé en
+  objet) perdu.
+- **XLSX** : formules jamais calculées (fichier généré par script) →
+  cellule vide sans aucune trace qu'un calcul existait ; dimension de
+  feuille mal déclarée par le fichier pouvant tronquer silencieusement des
+  lignes/colonnes ; cellules fusionnées non propagées aux autres cellules
+  de la plage.
+- **Bruit de bibliothèques JS/CSS tierces exclu des « fichiers de
+  développement »** : trouvé en testant sur un vrai dossier de page web
+  sauvegardée par un navigateur — `*.min.js`/`*.min.css` (jQuery, etc.)
+  représentaient 91 % du corpus généré. Désormais exclus (`*.min.js`,
+  `*.min.css`, dossiers `node_modules/`, `vendor/`, `dist/`, `build/`).
+
+### Technique
+
+- `ruff` épinglé sur une version exacte (`==0.16.5`) — dette identifiée en
+  v0.1.3 (dérive local/CI ayant cassé la publication initiale de cette
+  Release), corrigée pour de bon.
 
 ## [0.1.3] - 2026-08-24 — Beta
 
@@ -263,6 +254,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.1.4]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.1

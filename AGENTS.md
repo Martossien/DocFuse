@@ -199,7 +199,7 @@ Conventional Commits (sans scope obligatoire) :
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 14 — 0.1.3, non re-publiée)
+## 11. État actuel (Session 14 — 0.1.4 beta)
 
 | Métrique | Valeur |
 |---|---|
@@ -223,7 +223,7 @@ Conventional Commits (sans scope obligatoire) :
 | Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer, retrait instantané, changement de moteur instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
 | Build Windows | ✅ PyInstaller **`--onefile`** (un seul .exe autoportant, GUI + CLI) |
-| Publication Windows | ✅ automatique sur les Releases GitHub (`.zip` + `.sha256`) à chaque Release publiée — voir §13 |
+| Publication Windows | ✅ automatique sur les Releases GitHub (`.zip` + `.sha256` × 2 : `CorpusOne` et `CorpusOne-OCR`) à chaque Release publiée — voir §13 |
 | Testé sur documents réels | ✅ 65 fichiers synthétiques + 14 documents utilisateur variés, 0 erreur |
 | Régressions connues sur la suite versionnée | 0 |
 | Working tree | clean |
@@ -289,11 +289,15 @@ sur `main`, en local (pas de branche de release séparée à ce stade).
    gh release create vX.Y.Z --title "CorpusOne X.Y.Z beta" \
      --notes-file docs/releases/vX.Y.Z.md
    ```
-   Publier la Release déclenche automatiquement le job `build-windows` de
-   `.github/workflows/ci.yml` (`github.event_name == 'release'`), qui zippe
-   `dist/CorpusOne.exe`, calcule son SHA-256, et attache les deux fichiers à
-   la Release (`gh release upload ... --clobber`) — voir D-061 dans
-   `docs/journal-decisions.md`. Aucune étape manuelle d'upload.
+   Publier la Release déclenche automatiquement deux jobs indépendants de
+   `.github/workflows/ci.yml` (`github.event_name == 'release'`) :
+   `build-windows` (zippe `dist/CorpusOne.exe`) et `build-windows-ocr`
+   (zippe `dist/CorpusOne-OCR.exe`, Tesseract embarqué — D-067/D-078).
+   Chacun calcule son SHA-256 et attache ses deux fichiers à la Release
+   (`gh release upload ... --clobber`) — voir D-061 dans
+   `docs/journal-decisions.md`. Aucune étape manuelle d'upload. Les deux
+   jobs sont indépendants : un échec de `build-windows-ocr` n'empêche pas
+   `CorpusOne.exe` d'être publié normalement.
 9. **Vérifier** : `gh run list --branch main --limit 1` jusqu'à
    `completed`/`success`, puis `gh release view vX.Y.Z --json assets` pour
    confirmer que le `.zip` et le `.sha256` sont bien attachés.

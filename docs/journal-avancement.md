@@ -1099,13 +1099,16 @@ détectés mais jamais réellement récupérés.
 
 ### Reste à faire
 
-- ⬜ Job CI `build-windows-ocr` et `CorpusOne-OCR.spec` : jamais buildés
-  réellement (pas de runner Windows disponible pendant la session). À
-  valider au premier déclenchement réel (`gh workflow run` / une Release) :
-  chemin d'installation Tesseract via `choco`, nom exact des DLL
-  embarquées, taille finale de l'exe.
-- ⬜ Décider si/quand cette fonctionnalité justifie une Release (v0.1.4 ?)
-  — non tranché cette session, seule l'implémentation a été demandée.
+- ✅ Job CI `build-windows-ocr` et `CorpusOne-OCR.spec` : jamais buildés
+  réellement en local (pas de runner Windows disponible pendant la
+  session) — **premier déclenchement réel via la publication de la
+  Release v0.1.4** (utilisateur : « tu peux créer la version 0.1.4 »).
+  Voir le résultat du run CI pour confirmer chemin d'installation
+  Tesseract via `choco`, nom exact des DLL embarquées, taille finale de
+  l'exe.
+- ✅ Décider si/quand cette fonctionnalité justifie une Release — tranché :
+  v0.1.4 publiée dans la foulée de l'audit, sur demande explicite de
+  l'utilisateur.
 - ⬜ v1.1 OCR envisagée : fichiers image seuls (`.jpg`/`.png`, aujourd'hui
   toujours `IGNORED`) et images intégrées dans `.docx`/`.pptx`, en
   réutilisant `core/ocr/`.
