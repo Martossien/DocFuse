@@ -215,7 +215,7 @@ Conventional Commits (sans scope obligatoire) :
 | Test conditions réelles | ~/Documents + ~/Téléchargements — 2 bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe entre PDF concurrents)** |
 | Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
-| OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI non encore exécuté, D-067) |
+| OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |
 | Optimisations/alertes de transparence | 5 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets, OCR (D-062 à D-065, D-067) |
 | i18n | FR + EN complets |
 | Guide utilisateur | ✅ docs/guide-utilisateur.md, captures d'écran réelles |
