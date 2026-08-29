@@ -81,6 +81,18 @@ class TestDocxExtractor:
         result = DocxExtractor.safe_extract(f, "nonexistent.docx")
         assert result.status is FileStatus.ERROR
 
+    def test_password_protected_gives_clear_error(self, tmp_path: Path) -> None:
+        """D-089 : un .docx protégé par mot de passe à l'ouverture (conteneur
+        OLE2, plus un ZIP) donnait un `PackageNotFoundError` bas niveau,
+        jamais un message disant à l'utilisateur que le fichier est protégé."""
+        f = tmp_path / "protected.docx"
+        f.write_bytes(bytes((0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1)) + b"\x00" * 500)
+
+        result = DocxExtractor.extract(f, "protected.docx")
+        assert result.status is FileStatus.ERROR
+        assert result.error_message is not None
+        assert "mot de passe" in result.error_message.lower()
+
     def test_count_media_images_empty(self, tmp_path: Path) -> None:
         from docx import Document
 

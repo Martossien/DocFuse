@@ -102,6 +102,7 @@
 
   "error.no_extractor": "No extractor for extension {ext}",
   "error.encrypted_pdf": "Password-protected PDF (encrypted)",
+  "error.encrypted_office": "File password-protected on open (encrypted)",
   "error.corrupt_file": "Corrupt file",
   "error.permission": "Permission denied",
   "error.unknown": "Unknown error",

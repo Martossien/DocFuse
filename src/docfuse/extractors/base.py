@@ -22,6 +22,31 @@ from docfuse.models.file_status import FileStatus
 logger = logging.getLogger(__name__)
 
 
+_OLE_CFBF_MAGIC = bytes((0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1))
+
+
+def is_ole_encrypted(path: Path) -> bool:
+    """Détecte un fichier Office (.docx/.pptx/.xlsx) protégé par un mot de
+    passe **à l'ouverture** (D-089).
+
+    Un .docx/.pptx/.xlsx "normal" est un ZIP (signature `PK\\x03\\x04`).
+    Quand Office chiffre le fichier avec un mot de passe d'ouverture (pas
+    juste une protection de structure/feuille), il l'enveloppe dans un
+    conteneur OLE2/CFBF (Compound File Binary Format — même format que les
+    anciens .doc/.xls, spec MS-OFFCRYPTO) contenant des flux `EncryptionInfo`
+    et `EncryptedPackage`. Ce conteneur n'est plus un ZIP valide du tout —
+    sans cette détection, python-docx/python-pptx/openpyxl échouent avec une
+    exception bas niveau (`BadZipFile: File is not a zip file`,
+    `PackageNotFoundError: Package not found at ...`) qui ne dit jamais à
+    l'utilisateur que le fichier est protégé.
+    """
+    try:
+        with path.open("rb") as f:
+            return f.read(len(_OLE_CFBF_MAGIC)) == _OLE_CFBF_MAGIC
+    except OSError:
+        return False
+
+
 def error_result(
     path: Path,
     relative_path: str,

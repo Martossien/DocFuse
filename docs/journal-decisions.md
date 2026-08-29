@@ -1399,6 +1399,56 @@ import D-081).
   `pip-licenses` restent non épinglés (n'affectent pas le pass/fail sur la
   base d'une opinion de version, contrairement à ruff/mypy/stubs).
 
+### D-089 : détection des fichiers Office protégés par mot de passe à l'ouverture
+
+**Décision** : nouveau helper `extractors/base.py::is_ole_encrypted()`,
+appelé en tout premier dans `extract()` de `xlsx.py`/`docx.py`/`pptx.py`.
+Nouvelle clé i18n `error.encrypted_office`.
+
+**Rationale** :
+- Retour utilisateur (test sur machine Windows réelle) : un `.xlsx`
+  protégé par mot de passe à l'ouverture donnait une erreur incompréhensible
+  plutôt qu'un message clair — même défaut déjà corrigé pour le PDF
+  (`error.encrypted_pdf`), jamais étendu aux formats Office.
+- Vérifié empiriquement (signature OLE2/CFBF `D0 CF 11 E0 A1 B1 1A E1`,
+  spec MS-OFFCRYPTO) : `openpyxl`/`python-docx`/`python-pptx` échouent
+  tous les trois avec une exception bas niveau différente et peu parlante
+  (`BadZipFile: File is not a zip file`, `PackageNotFoundError: Package
+  not found at ...`) — même classe de bug sur les trois formats, un seul
+  helper partagé suffit (contrairement à la détection PDF, qui utilise
+  `pypdf.PdfReader.is_encrypted`, propre au format PDF).
+- Distinction volontaire avec la protection de structure/feuille
+  (`wb.security.workbookPassword`, verrouille l'édition mais pas la
+  lecture) : seul le chiffrement complet du conteneur (mot de passe
+  obligatoire pour même ouvrir le fichier) est détecté ici — les fichiers
+  avec juste une protection de structure continuent de s'extraire
+  normalement, comme avant.
+
+### D-090 : GUI — tri des colonnes du tableau de fichiers, fenêtre élargie
+
+**Décision** : en-têtes du tableau cliquables (tri par nom/type/texte
+estimé/contexte/statut, second clic = inverse), logique de tri extraite en
+fonction pure `sort_file_pairs()` (même esprit que `resolve_tokenizer_choice`,
+testable sans ouvrir de fenêtre). Fenêtre par défaut `900x720`/`minsize
+700x600` → `1050x720`/`minsize 900x600`.
+
+**Rationale** :
+- Retour utilisateur (test sur machine Windows réelle) : impossible de
+  trier la liste de fichiers, et les boutons du bas (Générer, Rapport,
+  Annuler) débordaient de la fenêtre par défaut, obligeant à l'agrandir
+  manuellement à chaque lancement.
+- Tri par statut : sévérité (`FileStatus.severity`, 0=ready) plutôt que
+  libellé traduit affiché — regroupe "Peu de texte" avec "Images"/"Erreur"
+  dans un ordre de gravité cohérent, pas un tri alphabétique arbitraire du
+  texte français/anglais affiché.
+- Fenêtre élargie : vérifié par capture d'écran (session Linux avec
+  affichage réel disponible) que le rendu CustomTkinter local n'était PAS
+  cassé à 900x720 — le débordement observé par l'utilisateur est donc
+  probablement spécifique au rendu de police Windows (Segoe UI plus large,
+  ou mise à l'échelle DPI) et n'a pas pu être reproduit tel quel ici. La
+  marge supplémentaire est une mitigation de bon sens, pas une correction
+  vérifiée à l'identique du bug original — à confirmer par l'utilisateur.
+
 ---
 
 *Fin du journal des décisions — Session 14.*

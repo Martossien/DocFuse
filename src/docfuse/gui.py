@@ -71,8 +71,14 @@ class DocFuseGUI:
         self._dnd_enabled = _DND_AVAILABLE
 
         self.root.title(t("app.title"))
-        self.root.geometry("900x720")
-        self.root.minsize(700, 600)
+        # D-090 : à 900x720 (minsize 700x600), les boutons du bas (Générer,
+        # Rapport, Annuler) débordaient de la fenêtre sous Windows au premier
+        # lancement — rendu de police (Segoe UI) plus large que sur Linux, et
+        # `pack(side=...)` ne fait jamais passer les boutons à la ligne : un
+        # débordement horizontal les pousse simplement hors de la zone
+        # visible plutôt que de les redimensionner. Marge généreuse.
+        self.root.geometry("1050x720")
+        self.root.minsize(900, 600)
 
         self.initial_directory = initial_directory
         self.input_selection: InputSelection | None = None
@@ -223,20 +229,30 @@ class DocFuseGUI:
         self.file_tree.pack(fill="both", expand=True)
 
         # I-10: En-têtes du tableau avec colonne « Texte estimé »
+        # D-090 : en-têtes cliquables pour trier (nom de fichier n'est pas
+        # forcément l'ordre le plus utile une fois le dossier volumineux).
         header_frame = ctk.CTkFrame(self.file_tree)
         header_frame.pack(fill="x")
-        headers = [
-            t("table.file"),
-            t("table.type"),
-            t("table.text_estimated"),
-            t("table.context_margin"),
-            t("table.status"),
-            t("table.actions"),
+        headers: list[tuple[str, str | None]] = [
+            (t("table.file"), "file"),
+            (t("table.type"), "type"),
+            (t("table.text_estimated"), "text_estimated"),
+            (t("table.context_margin"), "context_margin"),
+            (t("table.status"), "status"),
+            (t("table.actions"), None),
         ]
-        for i, col in enumerate(headers):
-            ctk.CTkLabel(header_frame, text=col, font=ctk.CTkFont(size=12, weight="bold")).grid(
-                row=0, column=i, padx=8, sticky="w"
+        self._sort_column: str | None = None
+        self._sort_reverse = False
+        self._header_labels: dict[str, Any] = {}
+        for i, (col_text, sort_key) in enumerate(headers):
+            label = ctk.CTkLabel(
+                header_frame, text=col_text, font=ctk.CTkFont(size=12, weight="bold")
             )
+            label.grid(row=0, column=i, padx=8, sticky="w")
+            if sort_key is not None:
+                label.configure(cursor="hand2")
+                label.bind("<Button-1>", lambda _e, key=sort_key: self._sort_by(key))
+                self._header_labels[sort_key] = (label, col_text)
 
         self.file_rows_frame = ctk.CTkFrame(self.file_tree)
         self.file_rows_frame.pack(fill="both", expand=True)
@@ -681,6 +697,32 @@ class DocFuseGUI:
         else:
             self.progress_bar.configure(progress_color="#22c55e")  # vert
 
+    def _sort_by(self, key: str) -> None:
+        """Trie la liste des fichiers par colonne (D-090). Un second clic sur
+        la même colonne inverse l'ordre — même convention qu'un tableur."""
+        if self._sort_column == key:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = key
+            self._sort_reverse = False
+        self._update_sort_indicators()
+        self._populate_file_list()
+
+    def _update_sort_indicators(self) -> None:
+        """Affiche ▲/▼ sur la colonne triée, texte simple sur les autres."""
+        for key, (label, base_text) in self._header_labels.items():
+            if key == self._sort_column:
+                arrow = " ▼" if self._sort_reverse else " ▲"
+                label.configure(text=base_text + arrow)
+            else:
+                label.configure(text=base_text)
+
+    def _sorted_file_pairs(self) -> list[tuple[Any, Any]]:
+        """Fichiers + leur estimation, dans l'ordre d'affichage actuel."""
+        assert self.result is not None
+        pairs = list(zip(self.result.files, self.result.estimates, strict=False))
+        return sort_file_pairs(pairs, self._sort_column, self._sort_reverse)
+
     def _populate_file_list(self) -> None:
         """Remplit la liste des fichiers avec colonnes CdC §6.1."""
         import customtkinter as ctk
@@ -691,7 +733,7 @@ class DocFuseGUI:
         if not self.result:
             return
 
-        for i, f in enumerate(self.result.files):
+        for f, est in self._sorted_file_pairs():
             row = ctk.CTkFrame(self.file_rows_frame, fg_color="transparent")
             row.pack(fill="x", pady=1)
 
@@ -704,16 +746,12 @@ class DocFuseGUI:
                 row=0, column=1, padx=8, sticky="w"
             )
             # I-10: Colonne 2: Texte estimé (tokens sans marge)
-            tokens_est = 0
-            if i < len(self.result.estimates):
-                tokens_est = self.result.estimates[i].tokens_estimated
+            tokens_est = est.tokens_estimated if est is not None else 0
             ctk.CTkLabel(
                 row, text=format_number(tokens_est) if tokens_est else "—", anchor="w"
             ).grid(row=0, column=2, padx=8, sticky="w")
             # Colonne 3: Contexte +15%
-            tokens_margin = 0
-            if i < len(self.result.estimates):
-                tokens_margin = self.result.estimates[i].tokens_with_margin
+            tokens_margin = est.tokens_with_margin if est is not None else 0
             ctk.CTkLabel(
                 row, text=format_number(tokens_margin) if tokens_margin else "—", anchor="w"
             ).grid(row=0, column=3, padx=8, sticky="w")
@@ -870,6 +908,39 @@ class DocFuseGUI:
     def run(self) -> None:
         """Lance la boucle principale."""
         self.root.mainloop()
+
+
+def _sort_key_for_column(pair: tuple[Any, Any], column: str) -> Any:
+    """Valeur de tri pour une colonne du tableau de fichiers (D-090)."""
+    f, est = pair
+    if column == "file":
+        return f.relative_path.lower()
+    if column == "type":
+        return f.file_type.lower()
+    if column == "text_estimated":
+        return est.tokens_estimated if est is not None else 0
+    if column == "context_margin":
+        return est.tokens_with_margin if est is not None else 0
+    if column == "status":
+        # Sévérité (0 = ready), pas le libellé traduit : "Peu de texte"
+        # doit se regrouper avec "Images"/"Erreur", pas se ranger avec un
+        # tri alphabétique arbitraire du texte affiché.
+        return f.status.severity
+    return 0
+
+
+def sort_file_pairs(
+    pairs: list[tuple[Any, Any]], column: str | None, reverse: bool
+) -> list[tuple[Any, Any]]:
+    """Trie des paires (ExtractedFile, TokenEstimate) pour l'affichage GUI (D-090).
+
+    Fonction pure (testable sans ouvrir de fenêtre), même esprit que
+    `resolve_tokenizer_choice`. `column=None` (pas encore trié par
+    l'utilisateur) renvoie l'ordre reçu tel quel — ordre natural du dossier.
+    """
+    if column is None:
+        return pairs
+    return sorted(pairs, key=lambda pair: _sort_key_for_column(pair, column), reverse=reverse)
 
 
 def resolve_tokenizer_choice(label: str, label_to_id: dict[str, str]) -> str:

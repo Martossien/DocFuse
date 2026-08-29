@@ -1187,3 +1187,34 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   téléchargement perdu, 0 asset sur la version cassée) — même procédure
   que l'incident v0.1.3.
 
+### Retour utilisateur sur machine Windows réelle — 3 correctifs (D-089, D-090) — ✅ Corrigé
+
+- L'utilisateur a testé le build Windows de v0.1.4 sur une vraie machine.
+  Retour : erreur peu claire sur un `.xlsx` protégé par mot de passe,
+  impossible de trier la liste de fichiers, boutons du bas qui débordent
+  de la fenêtre par défaut.
+- **D-089** : même bug de message d'erreur peu clair que le PDF (déjà
+  corrigé), jamais étendu aux formats Office — étendu à `.xlsx`/`.docx`/
+  `.pptx` via un helper partagé (signature OLE2/CFBF), les trois échouaient
+  avec une exception bas niveau différente mais la même classe de cause.
+- **D-090** : tri de colonnes ajouté (en-têtes cliquables, logique extraite
+  en fonction pure testable) ; fenêtre par défaut élargie. Vérifié en
+  conditions quasi réelles : un vrai display Linux était disponible dans
+  cette session — la GUI a été lancée pour de vrai, pilotée par clics
+  `xdotool`, et le tri capturé par écran à chaque étape (ascendant,
+  descendant, par statut/sévérité) — fonctionne exactement comme prévu.
+  Le rendu à 900×720 ne montrait cependant **aucun** débordement sur ce
+  display Linux, donc l'élargissement de fenêtre est une mitigation de bon
+  sens (marge supplémentaire) plutôt qu'une reproduction confirmée du bug
+  Windows exact (probablement un rendu de police Segoe UI plus large, ou
+  une mise à l'échelle DPI) — **à confirmer par l'utilisateur**.
+- Piste signalée mais non tranchée : `.pptx` dont le contenu réel est
+  dans des images (captures d'écran, diagrammes) extraient mal (« quasiment
+  que les titres ») — confirme le besoin déjà noté (v1.1 OCR : images
+  intégrées dans `.docx`/`.pptx`). Le fichier `atelier_camelia_managers_V0.4.pptx`
+  cité en exemple par l'utilisateur a cependant été testé et s'est révélé
+  bien extrait (1 seule image dans tout le fichier, texte + notes
+  substantiels sur les 23 diapos) — pas un bon exemple reproductible du
+  problème décrit, à clarifier avec l'utilisateur (autre fichier ?
+  diapo précise ?) avant de dimensionner ce chantier.
+

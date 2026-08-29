@@ -204,15 +204,15 @@ Conventional Commits (sans scope obligatoire) :
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 51 |
-| Tests collectés depuis un clone frais | 427 |
+| Tests collectés depuis un clone frais | 433 |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
-| mypy --strict | ✅ 5 erreurs pré-existantes (même classe `bs4.NavigableString`/email `BytesParser`, aucune nouvelle catégorie) |
-| pytest | ✅ 388 passed, 39 skipped (`tests/samples_real/` absent) |
+| mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
+| pytest | ✅ 395 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 87 (D-001 à D-087) |
+| Décisions archivées | 90 (D-001 à D-090) |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
-| Test conditions réelles | ~/Documents + ~/Téléchargements — 2 bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe entre PDF concurrents)** |
+| Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie) |
 | Extracteurs | 13 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
 | OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |

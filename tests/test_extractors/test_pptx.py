@@ -51,6 +51,18 @@ class TestPptxExtractor:
         result = PptxExtractor.safe_extract(f, "nonexistent.pptx")
         assert result.status is FileStatus.ERROR
 
+    def test_password_protected_gives_clear_error(self, tmp_path: Path) -> None:
+        """D-089 : un .pptx protégé par mot de passe à l'ouverture (conteneur
+        OLE2, plus un ZIP) donnait un `PackageNotFoundError` bas niveau,
+        jamais un message disant à l'utilisateur que le fichier est protégé."""
+        f = tmp_path / "protected.pptx"
+        f.write_bytes(bytes((0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1)) + b"\x00" * 500)
+
+        result = PptxExtractor.extract(f, "protected.pptx")
+        assert result.status is FileStatus.ERROR
+        assert result.error_message is not None
+        assert "mot de passe" in result.error_message.lower()
+
     def test_fixture_file(self) -> None:
         fixture = Path(__file__).resolve().parent.parent / "fixtures" / "sample.pptx"
         if fixture.exists():

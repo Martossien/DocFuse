@@ -12,7 +12,8 @@ import zipfile
 from pathlib import Path
 
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result
+from docfuse.extractors.base import Extractor, error_result, is_ole_encrypted
+from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 
@@ -34,6 +35,21 @@ class XlsxExtractor(Extractor):
     @classmethod
     def extract(cls, path: Path, relative_path: str) -> ExtractedFile:
         try:
+            # D-089 : un .xlsx protégé par mot de passe à l'ouverture est un
+            # conteneur OLE2, plus un ZIP — sans cette détection, openpyxl
+            # échoue avec un `BadZipFile` bas niveau qui ne dit jamais à
+            # l'utilisateur que le fichier est protégé.
+            if is_ole_encrypted(path):
+                return ExtractedFile(
+                    path=path,
+                    relative_path=relative_path,
+                    extension="xlsx",
+                    file_type=cls.file_type,
+                    size_bytes=path.stat().st_size,
+                    status=FileStatus.ERROR,
+                    error_message=t("error.encrypted_office"),
+                )
+
             from openpyxl import load_workbook
 
             wb = load_workbook(str(path), read_only=True, data_only=True)

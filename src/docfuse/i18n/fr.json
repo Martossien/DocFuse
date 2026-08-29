@@ -102,6 +102,7 @@
 
   "error.no_extractor": "Aucun extracteur pour l'extension {ext}",
   "error.encrypted_pdf": "PDF protégé par mot de passe (chiffré)",
+  "error.encrypted_office": "Fichier protégé par mot de passe à l'ouverture (chiffré)",
   "error.corrupt_file": "Fichier corrompu",
   "error.permission": "Permission refusée",
   "error.unknown": "Erreur inconnue",

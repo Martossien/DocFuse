@@ -8,6 +8,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [Non publié]
+
+### Corrigé
+
+- **Fichiers Office protégés par mot de passe à l'ouverture (.xlsx/.docx/.pptx)** :
+  donnaient une erreur bas niveau incompréhensible (`BadZipFile`,
+  `PackageNotFoundError`) au lieu d'un message clair — même défaut déjà
+  corrigé pour le PDF, jamais étendu aux formats Office. Détecté via la
+  signature OLE2/CFBF du conteneur chiffré.
+
+### Ajouté
+
+- **GUI : tri des colonnes du tableau de fichiers** — en-têtes cliquables
+  (nom, type, texte estimé, contexte +15 %, statut), second clic pour
+  inverser l'ordre. Le tri par statut suit la sévérité (Prêt < Images <
+  Peu de texte < ...), pas l'ordre alphabétique du libellé affiché.
+- **GUI : fenêtre par défaut élargie** (900×720 → 1050×720, minsize
+  700×600 → 900×600) — les boutons du bas (Générer, Rapport, Annuler)
+  pouvaient déborder de la fenêtre par défaut sous Windows.
+
 ## [0.1.4] - 2026-08-29 — Beta
 
 ### Ajouté
