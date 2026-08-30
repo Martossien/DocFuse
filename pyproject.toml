@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docfuse"
-version = "0.1.6"
+version = "0.2.0"
 description = "Outil portable Windows d'assemblage de documents bureautiques vers un corpus unique (Markdown ou PDF) destiné aux LLM"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -38,8 +38,6 @@ dependencies = [
     "striprtf>=0.0.26",
     "charset-normalizer>=3.3.0",
     "reportlab>=4.0.0",
-    "customtkinter>=5.2.0",
-    "tkinterdnd2>=0.3.2",
     "tiktoken>=0.7.0",
     "pypdfium2>=4.30.0",
     "pillow>=10.0.0",
@@ -49,6 +47,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# D-103 : l'interface graphique est un extra — le cœur (CLI, bibliothèque,
+# service) s'installe sans Tk ni CustomTkinter.
+gui = [
+    "customtkinter>=5.2.0",
+    "tkinterdnd2>=0.3.2",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
@@ -68,7 +72,7 @@ Homepage = "https://github.com/docfuse/docfuse"
 where = ["src"]
 
 [tool.setuptools.package-data]
-docfuse = ["i18n/*.json", "assets/*.ttf", "assets/*.json", "assets/*.tiktoken"]
+docfuse = ["py.typed", "i18n/*.json", "assets/*.ttf", "assets/*.json", "assets/*.tiktoken"]
 
 [tool.ruff]
 target-version = "py311"
