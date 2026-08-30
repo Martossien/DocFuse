@@ -8,6 +8,9 @@ from __future__ import annotations
 import os
 import re
 
+from docfuse.branding import LEGACY_APP_NAME
+from docfuse.branding import OUTPUT_DIR_NAME as _OUTPUT_DIR_NAME
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Extensions de fichiers supportées (liste blanche)
 # CdC §7.2 (obligatoires), §7.3 (faciles), §7.4 (refusés)
@@ -158,10 +161,12 @@ IGNORE_PATTERNS: list[str] = [
     "Thumbs.db",
     "desktop.ini",
     ".DS_Store",
-    "corpus.md",  # Sortie CorpusOne pour éviter de se réingérer
+    "corpus.md",  # Sortie DocFuse pour éviter de se réingérer
     "corpus.pdf",
-    "corpusone_report.json",
-    "corpusone_report.md",
+    "corpus_[0-9][0-9][0-9].md",  # Parties d'un corpus découpé (D-101)
+    "corpus_[0-9][0-9][0-9].pdf",
+    f"{LEGACY_APP_NAME.lower()}_report.json",  # Rapports d'anciennes versions (0.1.x)
+    f"{LEGACY_APP_NAME.lower()}_report.md",
     "*_rapport.md",  # I-05: Rapports générés par DocFuse (REPORT_SUFFIX)
     "*_rapport.json",
     "*.min.js",  # D-077 : bundle tiers minifié, jamais du code source à lire
@@ -211,8 +216,12 @@ fichiers en plus du corpus/rapport."""
 # Sorties : noms partagés CLI/GUI (D-099, voir output/paths.py)
 # ──────────────────────────────────────────────────────────────────────────────
 
-OUTPUT_DIR_NAME: str = "CorpusOne_output"
-"""Dossier de sortie par défaut, créé dans la source sélectionnée (I-13)."""
+OUTPUT_DIR_NAME: str = _OUTPUT_DIR_NAME
+"""Dossier de sortie par défaut, créé dans la source sélectionnée (I-13).
+Dérivé du nom d'application (D-102, voir `branding.py`)."""
+
+DEFAULT_SPLIT_CONTEXT: bool = False
+"""Mode découpage (D-101) : désactivé par défaut, le plafond bloque (CdC §10.3)."""
 
 REPORT_SUFFIX: str = "_rapport"
 """Suffixe des rapports écrits à côté du corpus (`corpus_rapport.md/.json`).

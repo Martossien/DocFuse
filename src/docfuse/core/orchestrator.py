@@ -46,6 +46,7 @@ from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
 from docfuse.core.report import write_report_pair
 from docfuse.core.secret_scanner import scan_for_secrets
+from docfuse.core.splitter import CorpusPart
 from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.core.tokenizers.registry import resolve_engine
 from docfuse.extractors.base import file_type_for
@@ -75,6 +76,12 @@ class OrchestratorResult:
         block_reason: Raison du blocage si is_blocked.
         cancelled: True si l'analyse a été interrompue par l'utilisateur
             (D-099) — le résultat est alors vide et ne doit pas être utilisé.
+        split_context: Mode « découpage » (D-101) : le plafond ne bloque plus,
+            les fichiers sont répartis en plusieurs corpus (voir
+            `core.splitter`). `oversized_files` liste alors les fichiers qui
+            dépassent à eux seuls le plafond (isolés dans leur partie).
+        oversized_files: Fichiers dont l'estimation avec marge dépasse le
+            plafond — identique à `blocking_files` hors mode découpage.
     """
 
     def __init__(
@@ -88,6 +95,7 @@ class OrchestratorResult:
         engine: TokenizerEngine | None = None,
         *,
         cancelled: bool = False,
+        split_context: bool = False,
     ) -> None:
         self.files = files
         self.ignored = ignored
@@ -97,14 +105,22 @@ class OrchestratorResult:
         self.margin = margin
         self.engine = engine
         self.cancelled = cancelled
+        self.split_context = split_context
         self._base_statuses = [file.status for file in files]
         # D-098 : estimations déjà calculées, par moteur — un aller-retour
         # de menu (approx → Mistral → approx) ne re-tokenise plus tout.
         self._estimates_by_engine: dict[str, list[TokenEstimate]] = {self.engine_id: estimates}
         self.blocking_files: list[ExtractedFile] = []
+        self.oversized_files: list[ExtractedFile] = []
         self.is_blocked = False
         self.block_reason: str | None = None
         self.recompute_blocking(context_limit)
+
+    def extracted_indices(self) -> list[int]:
+        """Indices (dans `files`) des fichiers extraits, d'après leur statut
+        d'analyse — indépendant d'un éventuel TOO_LARGE posé par le blocage.
+        Ce sont exactement les fichiers que les writers écrivent."""
+        return [i for i, status in enumerate(self._base_statuses) if status.is_extracted()]
 
     @property
     def engine_id(self) -> str:
@@ -123,12 +139,23 @@ class OrchestratorResult:
         for file, base_status in zip(self.files, self._base_statuses, strict=True):
             file.status = base_status
 
-        # Recalculer les fichiers bloquants
-        self.blocking_files = [
+        # Recalculer les fichiers hors plafond
+        self.oversized_files = [
             f
             for f, e in zip(self.files, self.estimates, strict=True)
             if not check_limit(e.tokens_with_margin, context_limit) and f.status.is_extracted()
         ]
+        if self.split_context:
+            # D-101 : en mode découpage, rien ne bloque — un fichier hors
+            # plafond est isolé dans sa propre partie et signalé, le total
+            # est réparti sur plusieurs corpus. Les statuts restent ceux de
+            # l'analyse (jamais TOO_LARGE).
+            self.blocking_files = []
+            self.is_blocked = False
+            self.block_reason = None
+            return
+
+        self.blocking_files = list(self.oversized_files)
         for f in self.blocking_files:
             f.status = FileStatus.TOO_LARGE
 
@@ -277,6 +304,7 @@ def run_analysis(
     max_depth: int = MAX_TRAVERSAL_DEPTH,
     tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE,
     extract_embedded_images: bool = False,
+    split_context: bool = False,
 ) -> OrchestratorResult:
     """Lance l'analyse complète : inventaire → extraction → comptage.
 
@@ -295,6 +323,9 @@ def run_analysis(
         extract_embedded_images: Exporter les images intégrées (DOCX/PPTX,
             D-091) en fichiers séparés, avec un tag de position dans le
             texte. Désactivé par défaut (écrit des fichiers en plus).
+        split_context: Mode « découpage » (D-101) : ne bloque jamais, le
+            corpus est réparti en plusieurs fichiers sous le plafond (voir
+            `generate_corpus_parts` et `core.splitter`).
 
     Returns:
         OrchestratorResult avec les fichiers, estimations, statut de blocage.
@@ -344,7 +375,9 @@ def run_analysis(
 
     if total_files == 0:
         total = TokenEstimate(0, 0, 0)
-        return OrchestratorResult(files, ignored, [], total, context_limit, margin, engine)
+        return OrchestratorResult(
+            files, ignored, [], total, context_limit, margin, engine, split_context=split_context
+        )
 
     def _extract_one(idx: int, path: Path, relative_path: str) -> tuple[int, ExtractedFile]:
         # I-15: Avertissement pour fichier volumineux
@@ -409,7 +442,15 @@ def run_analysis(
         # scanner, dédupliquer et compter ce qui a été extrait avant l'arrêt.
         logger.info("Analyse annulée après %d fichier(s)", len(results_map))
         return OrchestratorResult(
-            [], ignored, [], TokenEstimate(0, 0, 0), context_limit, margin, engine, cancelled=True
+            [],
+            ignored,
+            [],
+            TokenEstimate(0, 0, 0),
+            context_limit,
+            margin,
+            engine,
+            cancelled=True,
+            split_context=split_context,
         )
 
     # Remettre dans l'ordre original (tri par inventaire)
@@ -470,6 +511,7 @@ def run_analysis(
         context_limit,
         margin,
         engine,
+        split_context=split_context,
     )
 
     logger.info(
@@ -514,31 +556,91 @@ def generate_corpus(result: OrchestratorResult, output_path: Path) -> bool:
         output_path: Chemin du fichier de sortie.
 
     Returns:
-        True si le corpus a été généré, False si bloqué.
+        True si le corpus a été généré, False si bloqué. En mode découpage
+        (`result.split_context`, D-101), délègue à `generate_corpus_parts` :
+        les fichiers `<stem>_001.<ext>`, `<stem>_002.<ext>`… sont écrits à la
+        place de `output_path` et True est renvoyé dès qu'une partie existe.
     """
+    if result.split_context:
+        return bool(generate_corpus_parts(result, output_path))
+
     if result.is_blocked:
         logger.warning("Génération bloquée : %s", result.block_reason)
         write_report_pair(result, report_base_path(output_path))
         return False
 
+    _write_corpus_file(result, output_path)
+    _write_images_and_reports(result, output_path)
+    logger.info("Corpus généré : %s", output_path)
+    return True
+
+
+def generate_corpus_parts(result: OrchestratorResult, output_path: Path) -> list[Path]:
+    """Génère le corpus en plusieurs parties sous le plafond (D-101).
+
+    Chaque partie devient `<stem>_NNN.<ext>` à côté de `output_path` (qui
+    n'est pas écrit lui-même) : `corpus.md` → `corpus_001.md`,
+    `corpus_002.md`… Les images intégrées et le rapport (unique, avec la
+    partie de chaque fichier) sont écrits à côté, sous le nom de base.
+
+    Args:
+        result: Résultat de l'analyse (`split_context` ou non : la répartition
+            se fait avec `result.context_limit`).
+        output_path: Chemin de base du corpus (`.md` ou `.pdf`).
+
+    Returns:
+        Chemins des parties écrites, dans l'ordre. Vide si aucun fichier
+        extrait (le rapport est quand même écrit).
+    """
+    from docfuse.core.splitter import split_by_budget
+
+    parts = split_by_budget(result)
+    ext = output_path.suffix.lower()
+    if ext not in (".md", ".pdf"):
+        raise ValueError(f"Format de sortie non supporté : {ext}")
+
+    written: list[Path] = []
+    for part in parts:
+        part_path = output_path.with_name(f"{output_path.stem}_{part.index:03d}{ext}")
+        _write_corpus_file(result, part_path, part=part, parts_total=len(parts))
+        written.append(part_path)
+
+    _write_images_and_reports(result, output_path, parts=parts)
+    logger.info("Corpus généré en %d partie(s) : %s", len(written), output_path.parent)
+    return written
+
+
+def _write_corpus_file(
+    result: OrchestratorResult,
+    output_path: Path,
+    *,
+    part: CorpusPart | None = None,
+    parts_total: int = 1,
+) -> None:
+    """Écrit un fichier de corpus (Markdown ou PDF) — entier ou une partie."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     ext = output_path.suffix.lower()
     if ext == ".md":
         from docfuse.output.markdown_writer import write_markdown_corpus
 
-        write_markdown_corpus(result, output_path, result.margin)
+        write_markdown_corpus(
+            result, output_path, result.margin, part=part, parts_total=parts_total
+        )
     elif ext == ".pdf":
         from docfuse.output.pdf_writer import write_pdf_corpus
 
-        write_pdf_corpus(result, output_path, result.margin)
+        write_pdf_corpus(result, output_path, result.margin, part=part, parts_total=parts_total)
     else:
         raise ValueError(f"Format de sortie non supporté : {ext}")
 
+
+def _write_images_and_reports(
+    result: OrchestratorResult, output_path: Path, *, parts: list[CorpusPart] | None = None
+) -> None:
     from docfuse.output.image_writer import write_embedded_images
 
     images_written = write_embedded_images(result.files, output_path)
     if images_written:
         logger.info("%d image(s) intégrée(s) exportée(s) à côté de %s", images_written, output_path)
 
-    write_report_pair(result, report_base_path(output_path))
-    logger.info("Corpus généré : %s", output_path)
-    return True
+    write_report_pair(result, report_base_path(output_path), parts=parts)

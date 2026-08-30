@@ -9,7 +9,7 @@ Corrections Session 3 :
 - I-10 : colonne « Texte estimé » ajoutée
 - I-11 : jauge couleur vert/orange/rouge
 - I-12 : case « Ouvrir le dossier à la fin »
-- I-13 : sortie dans CorpusOne_output/
+- I-13 : sortie dans <App>_output/ (voir branding.py)
 - I-21 : message de blocage conforme au CdC
 - M-10 : utilise config.margin au lieu de DEFAULT_MARGIN
 - M-13 : bouton « Changer »
@@ -29,6 +29,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from docfuse.branding import APP_NAME
 from docfuse.config import Config, load_config
 from docfuse.constants import (
     ALL_EXTENSIONS,
@@ -38,7 +39,12 @@ from docfuse.constants import (
     PENDING_COLOR,
     STATUS_COLORS,
 )
-from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
+from docfuse.core.orchestrator import (
+    OrchestratorResult,
+    generate_corpus,
+    generate_corpus_parts,
+    run_analysis,
+)
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.report import write_report_pair
 from docfuse.core.tokenizers.registry import list_engines
@@ -113,7 +119,7 @@ class DocFuseGUI:
         self.root = ctk.CTk(className="DocFuse")
         self._dnd_enabled = _DND_AVAILABLE and _load_tkdnd(self.root)
 
-        self.root.title(t("app.title"))
+        self.root.title(t("app.title", app=APP_NAME))
         # D-090 : à 900x720 (minsize 700x600), les boutons du bas (Générer,
         # Rapport, Annuler) débordaient de la fenêtre sous Windows au premier
         # lancement — rendu de police (Segoe UI) plus large que sur Linux, et
@@ -262,7 +268,15 @@ class DocFuseGUI:
         self.extract_images_var = ctk.BooleanVar(value=self.config.extract_embedded_images)
         ctk.CTkCheckBox(
             options_frame, text=t("gui.extract_embedded_images"), variable=self.extract_images_var
-        ).grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 10), sticky="w")
+        ).grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 5), sticky="w")
+
+        # D-101 : découpage en plusieurs corpus sous le plafond au lieu de
+        # bloquer — recalcul instantané si une analyse existe déjà.
+        self.split_context_var = ctk.BooleanVar(value=self.config.split_context)
+        self.split_context_var.trace_add("write", self._on_split_context_changed)
+        ctk.CTkCheckBox(
+            options_frame, text=t("gui.split_context"), variable=self.split_context_var
+        ).grid(row=5, column=0, columnspan=4, padx=10, pady=(0, 10), sticky="w")
 
         # Moteur de comptage : "Approximation" (défaut) ou un moteur précis
         # (ex: Mistral) si disponible dans cet environnement.
@@ -582,6 +596,7 @@ class DocFuseGUI:
         context_limit = self._get_current_limit()
         recursive = bool(self.recursive_var.get())
         extract_embedded_images = bool(self.extract_images_var.get())
+        split_context = bool(self.split_context_var.get())
         # Lu sur le thread principal : StringVar.get() n'est pas thread-safe.
         tokenizer_engine = resolve_tokenizer_choice(
             self.tokenizer_engine_var.get(), self._tokenizer_label_to_id
@@ -600,7 +615,14 @@ class DocFuseGUI:
 
         self._analysis_thread = threading.Thread(
             target=self._run_analysis_thread,
-            args=(selection, context_limit, recursive, tokenizer_engine, extract_embedded_images),
+            args=(
+                selection,
+                context_limit,
+                recursive,
+                tokenizer_engine,
+                extract_embedded_images,
+                split_context,
+            ),
             daemon=True,
         )
         self._analysis_thread.start()
@@ -614,6 +636,7 @@ class DocFuseGUI:
         recursive: bool,
         tokenizer_engine: str,
         extract_embedded_images: bool,
+        split_context: bool = False,
     ) -> None:
         """Thread d'analyse."""
         try:
@@ -627,6 +650,7 @@ class DocFuseGUI:
                 scan_config=self.config.scan,
                 tokenizer_engine=tokenizer_engine,
                 extract_embedded_images=extract_embedded_images,
+                split_context=split_context,
             )
         except Exception as exc:
             logger.exception("Échec de l'analyse")
@@ -739,6 +763,16 @@ class DocFuseGUI:
         self._limit_after_id = None
         if self.result is None:
             return
+        self.result.recompute_blocking(self._get_current_limit())
+        self._refresh_from_result()
+
+    def _on_split_context_changed(self, *_args: str) -> None:
+        """Bascule du mode découpage (D-101) : recalcul du blocage sans
+        ré-extraction, comme pour le plafond."""
+        analyzing = self._analysis_thread is not None and self._analysis_thread.is_alive()
+        if self.result is None or analyzing:
+            return
+        self.result.split_context = bool(self.split_context_var.get())
         self.result.recompute_blocking(self._get_current_limit())
         self._refresh_from_result()
 
@@ -871,7 +905,7 @@ class DocFuseGUI:
         self.summary_label.configure(text="\n".join(build_summary_lines(self.result)))
 
     def _generate(self) -> None:
-        """Génère le corpus dans CorpusOne_output/ (I-13)."""
+        """Génère le corpus dans <App>_output/ (I-13)."""
         if not self.result or self.input_selection is None:
             return
 
@@ -887,13 +921,24 @@ class DocFuseGUI:
         # dans `report_callback_exception` de Tk → stderr, inexistant dans
         # l'exe fenêtré : le clic semblait ne rien faire.
         try:
-            success = generate_corpus(self.result, output_path)
+            if self.result.split_context:
+                # D-101 : plusieurs fichiers `<stem>_NNN.<ext>`.
+                part_paths = generate_corpus_parts(self.result, output_path)
+                success = bool(part_paths)
+                generated_message = t(
+                    "gui.corpus_parts_generated",
+                    count=len(part_paths),
+                    path=str(output_path.parent),
+                )
+            else:
+                success = generate_corpus(self.result, output_path)
+                generated_message = t("gui.corpus_generated", path=str(output_path))
         except Exception as exc:
             logger.exception("Échec de la génération du corpus")
             self.summary_label.configure(text=t("gui.generation_failed_detail", error=str(exc)))
             return
         if success:
-            self.summary_label.configure(text=t("gui.corpus_generated", path=str(output_path)))
+            self.summary_label.configure(text=generated_message)
             # I-12: ouvrir le dossier à la fin si demandé
             if self.open_folder_var.get():
                 _open_folder(output_path.parent)
@@ -966,7 +1011,23 @@ def build_summary_lines(result: OrchestratorResult) -> list[str]:
     """
     lines: list[str] = []
     ready_count = result.count_base_status(FileStatus.READY)
-    if ready_count > 0 and not result.is_blocked:
+    if result.split_context:
+        # D-101 : le plafond ne bloque plus, on annonce la répartition.
+        from docfuse.core.splitter import split_by_budget
+
+        parts = split_by_budget(result)
+        if ready_count > 0:
+            lines.append(
+                t(
+                    "summary.split",
+                    count=ready_count,
+                    parts=len(parts),
+                    limit=format_number(result.context_limit),
+                )
+            )
+        if result.oversized_files:
+            lines.append(t("summary.split_oversized", count=len(result.oversized_files)))
+    elif ready_count > 0 and not result.is_blocked:
         lines.append(t("summary.ok", count=ready_count, limit=format_number(result.context_limit)))
     images_count = result.count_base_status(FileStatus.IMAGES)
     if images_count > 0:

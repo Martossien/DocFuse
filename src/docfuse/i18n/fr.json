@@ -1,5 +1,5 @@
 {
-  "app.title": "CorpusOne — Assembler des documents pour une IA",
+  "app.title": "{app} — Assembler des documents pour une IA",
 
   "gui.drop_zone": "Glissez un dossier ou des fichiers ici, ou",
   "gui.choose_folder": "Ajouter un dossier…",
@@ -81,7 +81,7 @@
   "cli.input_missing": "Aucune entrée : --input <fichier ou dossier> est obligatoire",
   "cli.output_bad_extension": "Extension de sortie non gérée : {path} (attendu .md ou .pdf, ou un dossier)",
 
-  "report.title": "Rapport DocFuse / CorpusOne",
+  "report.title": "Rapport {app}",
   "report.version": "Version",
   "report.date": "Date",
   "report.context_limit": "Plafond de contexte",
@@ -163,5 +163,20 @@
 
   "ocr.tesseract": "Tesseract",
   "ocr.applied_note": "{pages_ocr} page(s) scannée(s) reconnue(s) par OCR, {pages_mixed} page(s) mixte(s) (texte + OCR), {pages_failed} page(s) restée(s) illisible(s), sur {pages_total} page(s) ({lang})",
-  "ocr.unavailable_note": "{pages} page(s) semblent scannée(s) mais l'OCR n'est pas disponible sur cette machine (voir la variante CorpusOne-OCR, ou installez Tesseract)"
+  "ocr.unavailable_note": "{pages} page(s) semblent scannée(s) mais l'OCR n'est pas disponible sur cette machine (voir la variante {variant}, ou installez Tesseract)",
+
+  "corpus.part_label": "Partie",
+  "corpus.part_estimated": "Tokens estimés (cette partie)",
+  "corpus.part_with_margin": "Tokens avec marge (cette partie)",
+  "corpus.part_oversized": "Ce fichier dépasse à lui seul le plafond : il est isolé dans cette partie, sans coupe",
+  "report.split_context": "Découpage en parties",
+  "report.parts": "Parties du corpus",
+  "report.part_oversized": "Hors plafond (isolé)",
+  "table.part": "Partie",
+  "cli.split_context": "Découper le corpus en plusieurs fichiers sous le plafond au lieu de bloquer (jamais de coupe dans un fichier)",
+  "gui.split_context": "Découper en plusieurs corpus si le plafond est dépassé (ne bloque jamais)",
+  "gui.corpus_parts_generated": "{count} corpus généré(s) dans {path}",
+  "summary.split": "{count} fichiers prêts, répartis en {parts} corpus de {limit} tokens max (marge comprise).",
+  "summary.split_oversized": "{count} fichier(s) dépassent à eux seuls le plafond : chacun est isolé dans sa propre partie.",
+  "gui.not_installed": "L'interface graphique n'est pas installée. Installez « docfuse[gui] » ou utilisez la ligne de commande (docfuse --help)."
 }

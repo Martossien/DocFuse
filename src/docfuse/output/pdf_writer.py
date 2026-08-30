@@ -20,9 +20,12 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Flowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
+from docfuse.branding import PDF_AUTHOR
 from docfuse.constants import PDF_PAGE_HEADER_MAX_CHARS
 from docfuse.core.orchestrator import OrchestratorResult
+from docfuse.core.splitter import CorpusPart
 from docfuse.i18n import t
+from docfuse.output.markdown_writer import selected_files
 from docfuse.output.source_header import build_source_header
 
 logger = logging.getLogger(__name__)
@@ -125,13 +128,19 @@ def write_pdf_corpus(
     result: OrchestratorResult,
     output_path: Path,
     margin: float = 0.15,
+    *,
+    part: CorpusPart | None = None,
+    parts_total: int = 1,
 ) -> None:
-    """Écrit le corpus en PDF texte généré.
+    """Écrit le corpus en PDF texte généré (entier, ou une partie).
 
     Args:
         result: Résultat de l'orchestration.
         output_path: Chemin du fichier .pdf à écrire.
         margin: Marge appliquée.
+        part: Partie à écrire (D-101) — seuls ses fichiers sont inclus et le
+            titre du document porte « Partie i/N ». None = corpus entier.
+        parts_total: Nombre total de parties.
     """
     font_normal, font_bold = _register_fonts()
 
@@ -143,8 +152,12 @@ def write_pdf_corpus(
         bottomMargin=20 * mm,
         leftMargin=20 * mm,
         rightMargin=20 * mm,
-        title=t("corpus.title"),
-        author="DocFuse / CorpusOne",
+        title=(
+            t("corpus.title")
+            if part is None
+            else f"{t('corpus.title')} — {t('corpus.part_label')} {part.index}/{parts_total}"
+        ),
+        author=PDF_AUTHOR,
     )
 
     body_style = ParagraphStyle(
@@ -163,11 +176,7 @@ def write_pdf_corpus(
         textColor="#333333",
     )
 
-    included = [
-        (f, est)
-        for f, est in zip(result.files, result.estimates, strict=True)
-        if f.status.is_extracted()
-    ]
+    included = selected_files(result, part)
     story: list[object] = []
 
     for index, (f, est) in enumerate(included, 1):

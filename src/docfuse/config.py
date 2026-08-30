@@ -1,8 +1,9 @@
 """Configuration : chargement JSON à 3 niveaux.
 
 CdC §5.2 — Ordre de lecture (le premier trouvé gagne, puis fusion avec les défauts) :
-1. Fichier CorpusOne.json à côté de l'exe (priorité portable / clé USB).
-2. %APPDATA%/CorpusOne/config.json (si le dossier de l'exe n'est pas inscriptible).
+1. Fichier <App>.json à côté de l'exe (priorité portable / clé USB).
+2. %APPDATA%/<App>/config.json (si le dossier de l'exe n'est pas inscriptible).
+Les emplacements de l'ancien nom (0.1.x) sont lus en repli, jamais écrits (D-102).
 3. Valeurs par défaut compilées dans constants.py.
 
 Écriture : même endroit d'où la conf a été lue ; si lecture seule → fallback APPDATA.
@@ -18,6 +19,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from docfuse.branding import (
+    APPDATA_DIR_NAME,
+    CONFIG_FILENAME,
+    LEGACY_APPDATA_DIR_NAME,
+    LEGACY_CONFIG_FILENAME,
+)
 from docfuse.constants import (
     DEFAULT_CONTEXT_LIMIT,
     DEFAULT_EXTRACT_EMBEDDED_IMAGES,
@@ -27,6 +34,7 @@ from docfuse.constants import (
     DEFAULT_OPEN_OUTPUT_FOLDER,
     DEFAULT_RECURSIVE,
     DEFAULT_SORT,
+    DEFAULT_SPLIT_CONTEXT,
     DEFAULT_TOKENIZER_ENGINE,
     SCAN_MIN_CHARS_FILE,
     SCAN_MIN_CHARS_PER_PAGE,
@@ -66,6 +74,7 @@ class Config:
     max_depth: int = 12  # I-04: CdC §16 — profondeur max configurable, défaut 12
     tokenizer_engine: str = DEFAULT_TOKENIZER_ENGINE
     extract_embedded_images: bool = DEFAULT_EXTRACT_EMBEDDED_IMAGES
+    split_context: bool = DEFAULT_SPLIT_CONTEXT  # D-101
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -113,29 +122,32 @@ def _exe_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def _appdata_dir() -> Path:
-    """Retourne le dossier %APPDATA%/CorpusOne (ou équivalent Linux)."""
+def _appdata_base() -> Path:
+    """Racine des configs utilisateur : %APPDATA% (Windows) ou ~/.config."""
     if sys.platform == "win32":
-        base = os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
-    else:
-        base = str(Path.home() / ".config")
-    return Path(base) / "CorpusOne"
+        return Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+    return Path.home() / ".config"
+
+
+def _appdata_dir() -> Path:
+    """Retourne le dossier %APPDATA%/<App> (ou équivalent Linux)."""
+    return _appdata_base() / APPDATA_DIR_NAME
 
 
 def _config_paths() -> list[Path]:
-    """Retourne les chemins de config possibles dans l'ordre de priorité."""
-    paths: list[Path] = []
+    """Chemins de config possibles, dans l'ordre de priorité.
 
-    # 1. À côté de l'exe
+    Les emplacements du nom actuel passent avant ceux de l'ancien nom
+    (D-102) : une config au nom hérité d'une 0.1.x reste lue tant
+    qu'aucune config au nouveau nom n'existe au même niveau.
+    """
     exe_dir = _exe_dir()
-    exe_config = exe_dir / "CorpusOne.json"
-    paths.append(exe_config)
-
-    # 2. APPDATA
-    appdata_config = _appdata_dir() / "config.json"
-    paths.append(appdata_config)
-
-    return paths
+    return [
+        exe_dir / CONFIG_FILENAME,
+        exe_dir / LEGACY_CONFIG_FILENAME,
+        _appdata_dir() / "config.json",
+        _appdata_base() / LEGACY_APPDATA_DIR_NAME / "config.json",
+    ]
 
 
 def load_config(explicit_path: Path | None = None) -> Config:
@@ -234,6 +246,8 @@ def _merge_config(base: Config, data: dict[str, Any]) -> Config:
         base.extract_embedded_images = _as_bool(
             data["extract_embedded_images"], "extract_embedded_images"
         )
+    if "split_context" in data:  # D-101
+        base.split_context = _as_bool(data["split_context"], "split_context")
     if "scan" in data and isinstance(data["scan"], dict):
         scan_data: dict[str, Any] = data["scan"]
         if "min_chars_file" in scan_data:
@@ -265,7 +279,7 @@ def save_config(config: Config, explicit_path: Path | None = None) -> Path:
         target = explicit_path
     else:
         # Essayer à côté de l'exe d'abord
-        target = _exe_dir() / "CorpusOne.json"
+        target = _exe_dir() / CONFIG_FILENAME
         if not _is_writable_dir(target.parent):
             target = _appdata_dir() / "config.json"
 

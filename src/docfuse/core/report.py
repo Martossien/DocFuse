@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from docfuse import __version__
-from docfuse.constants import BYTES_PER_TOKEN, DEFAULT_TOKENIZER_ENGINE
+from docfuse.branding import APP_NAME
+from docfuse.constants import BYTES_PER_TOKEN, DEFAULT_TOKENIZER_ENGINE, REPORT_SUFFIX
 from docfuse.core.context_counter import TokenEstimate
 from docfuse.core.notes import ordered_notes
+from docfuse.core.splitter import CorpusPart, part_of_file
 from docfuse.i18n import format_number, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -26,7 +28,9 @@ if TYPE_CHECKING:
     from docfuse.core.orchestrator import OrchestratorResult
 
 
-def write_report_pair(result: OrchestratorResult, base_path: Path) -> tuple[Path, Path]:
+def write_report_pair(
+    result: OrchestratorResult, base_path: Path, *, parts: list[CorpusPart] | None = None
+) -> tuple[Path, Path]:
     """Écrit le rapport Markdown ET le rapport JSON d'un résultat d'analyse.
 
     Le Markdown va dans `base_path` avec le suffixe `.md`, le JSON avec le
@@ -35,6 +39,12 @@ def write_report_pair(result: OrchestratorResult, base_path: Path) -> tuple[Path
     moteur viennent du résultat lui-même : une seule source de vérité.
     D-099 : remplace trois copies (CLI, GUI, orchestrateur) de deux appels à
     neuf arguments chacun.
+
+    Args:
+        result: Résultat d'analyse.
+        base_path: Chemin de base (le suffixe est remplacé).
+        parts: Parties écrites en mode découpage (D-101) — le rapport liste
+            alors chaque partie et la partie de chaque fichier.
 
     Returns:
         Tuple (chemin du Markdown, chemin du JSON) écrits.
@@ -51,9 +61,22 @@ def write_report_pair(result: OrchestratorResult, base_path: Path) -> tuple[Path
         result.total.tokens_with_margin,
     )
     generate_markdown_report(
-        *common, markdown_path, estimates=result.estimates, engine_id=result.engine_id
+        *common,
+        markdown_path,
+        estimates=result.estimates,
+        engine_id=result.engine_id,
+        parts=parts,
+        split_context=result.split_context,
+        corpus_path=base_path.with_name(base_path.stem.removesuffix(REPORT_SUFFIX)),
     )
-    generate_json_report(*common, json_path, estimates=result.estimates, engine_id=result.engine_id)
+    generate_json_report(
+        *common,
+        json_path,
+        estimates=result.estimates,
+        engine_id=result.engine_id,
+        parts=parts,
+        split_context=result.split_context,
+    )
     return markdown_path, json_path
 
 
@@ -82,6 +105,8 @@ def generate_json_report(
     *,
     estimates: list[TokenEstimate] | None = None,
     engine_id: str = DEFAULT_TOKENIZER_ENGINE,
+    parts: list[CorpusPart] | None = None,
+    split_context: bool = False,
 ) -> None:
     """Génère le rapport JSON.
 
@@ -97,6 +122,9 @@ def generate_json_report(
             détailler les tokens de chaque fichier avec le moteur réellement
             utilisé. Si `None`, ce détail est omis.
         engine_id: Identifiant du moteur de comptage utilisé pour ce rapport.
+        parts: Parties du corpus en mode découpage (D-101) ; chaque fichier
+            reçoit alors sa clé `part` (None s'il n'est dans aucune partie).
+        split_context: Mode découpage actif ou non.
     """
     _check_aligned(files, estimates)
     files_data: list[dict[str, object]] = []
@@ -105,6 +133,8 @@ def generate_json_report(
         if estimates is not None:
             data["tokens_estimated"] = estimates[i].tokens_estimated
             data["tokens_with_margin"] = estimates[i].tokens_with_margin
+        if parts is not None:
+            data["part"] = part_of_file(parts, i)
         files_data.append(data)
 
     report: dict[str, object] = {
@@ -117,9 +147,21 @@ def generate_json_report(
         "total_tokens_with_margin": total_tokens_with_margin,
         "total_files": len(files),
         "total_ignored": len(ignored_files),
+        "split_context": split_context,
         "files": files_data,
         "ignored": [{"path": str(p), "reason": r} for p, r in ignored_files],
     }
+    if parts is not None:
+        report["parts"] = [
+            {
+                "index": part.index,
+                "files": [files[i].relative_path for i in part.file_indices],
+                "tokens_estimated": part.tokens_estimated,
+                "tokens_with_margin": part.tokens_with_margin,
+                "oversized": part.oversized,
+            }
+            for part in parts
+        ]
     output_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -137,6 +179,9 @@ def generate_markdown_report(
     *,
     estimates: list[TokenEstimate] | None = None,
     engine_id: str = DEFAULT_TOKENIZER_ENGINE,
+    parts: list[CorpusPart] | None = None,
+    split_context: bool = False,
+    corpus_path: Path | None = None,
 ) -> None:
     """Génère le rapport Markdown lisible.
 
@@ -152,9 +197,14 @@ def generate_markdown_report(
             fourni, le tableau par fichier utilise le moteur réellement
             utilisé au lieu de recalculer une approximation octets/4.
         engine_id: Identifiant du moteur de comptage utilisé pour ce rapport.
+        parts: Parties du corpus en mode découpage (D-101) → section
+            « Parties » avec, pour chacune, son fichier et ses totaux.
+        split_context: Mode découpage actif ou non.
+        corpus_path: Chemin de base du corpus, pour nommer les parties
+            (`<stem>_001.<ext>`) ; sans lui, seul le numéro est affiché.
     """
     lines: list[str] = []
-    lines.append(f"# {t('report.title')}")
+    lines.append(f"# {t('report.title', app=APP_NAME)}")
     lines.append("")
     lines.append(f"- **{t('report.version')}** : {__version__}")
     lines.append(f"- **{t('report.date')}** : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -167,7 +217,32 @@ def generate_markdown_report(
     )
     lines.append(f"- **{t('report.files_analyzed')}** : {len(files)}")
     lines.append(f"- **{t('report.files_ignored')}** : {len(ignored_files)}")
+    if split_context:
+        lines.append(f"- **{t('report.split_context')}** : {len(parts or [])}")
     lines.append("")
+
+    # Parties du corpus (mode découpage, D-101)
+    if parts:
+        lines.append(f"## {t('report.parts')}")
+        lines.append("")
+        lines.append(
+            f"| {t('table.part')} | {t('table.file')} | {t('corpus.files')} | "
+            f"{t('table.text_estimated')} | {t('table.context_margin')} | {t('table.status')} |"
+        )
+        lines.append("|---|---|---|---|---|---|")
+        for part in parts:
+            name = (
+                f"{corpus_path.stem}_{part.index:03d}"
+                if corpus_path is not None
+                else str(part.index)
+            )
+            status = t("report.part_oversized") if part.oversized else t("status.ready")
+            lines.append(
+                f"| {part.index} | {name} | {len(part.file_indices)} | "
+                f"{format_number(part.tokens_estimated)} | "
+                f"{format_number(part.tokens_with_margin)} | {status} |"
+            )
+        lines.append("")
 
     # Tableau des fichiers extraits
     if files:

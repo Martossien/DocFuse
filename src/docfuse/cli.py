@@ -19,9 +19,15 @@ import sys
 from pathlib import Path
 
 from docfuse import __version__
+from docfuse.branding import APP_NAME, LOG_DIR_NAME, LOG_FILENAME
 from docfuse.config import load_config
 from docfuse.constants import ALL_EXTENSIONS, CORPUS_EXTENSIONS, UNUSUAL_CONTEXT_LIMIT
-from docfuse.core.orchestrator import OrchestratorResult, generate_corpus, run_analysis
+from docfuse.core.orchestrator import (
+    OrchestratorResult,
+    generate_corpus,
+    generate_corpus_parts,
+    run_analysis,
+)
 from docfuse.core.registry import list_supported_extensions
 from docfuse.core.report import write_report_pair
 from docfuse.core.tokenizers.registry import list_engines
@@ -36,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Construit le parser argparse avec chaînes i18n."""
     parser = argparse.ArgumentParser(
         prog="docfuse",
-        description=t("app.title"),
+        description=t("app.title", app=APP_NAME),
     )
 
     parser.add_argument(
@@ -99,6 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=None,
         help=t("cli.extract_images"),
+    )
+    parser.add_argument(
+        "--split-context",
+        action="store_true",
+        default=None,
+        help=t("cli.split_context"),
     )
     parser.add_argument(
         "--include-ext",
@@ -191,9 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     import tempfile
     from logging.handlers import RotatingFileHandler
 
-    log_dir = Path(tempfile.gettempdir()) / "CorpusOne"
+    log_dir = Path(tempfile.gettempdir()) / LOG_DIR_NAME
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "corpusone.log"
+    log_file = log_dir / LOG_FILENAME
 
     handlers: list[logging.Handler] = [
         logging.StreamHandler(sys.stderr),
@@ -254,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     extract_embedded_images = (
         args.extract_images if args.extract_images is not None else config.extract_embedded_images
     )
+    # D-101 : découpage en plusieurs corpus au lieu de bloquer.
+    split_context = args.split_context if args.split_context is not None else config.split_context
 
     # M-11: Avertissement au-delà de 1 000 000 tokens (CdC §10.3)
     if context_limit > UNUSUAL_CONTEXT_LIMIT:
@@ -306,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
             print(t("cli.output_bad_extension", path=output_path), file=sys.stderr)
             return 1
     else:
-        # I-13: Sortie par défaut dans CorpusOne_output/ — même règle que la
+        # I-13: Sortie par défaut dans <App>_output/ — même règle que la
         # GUI (D-099 : un fichier seul en entrée écrivait dans le dossier
         # courant côté CLI, dans le dossier du fichier côté GUI).
         output_path = default_corpus_path(selection, output_format)
@@ -335,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         max_depth=config.max_depth,
         tokenizer_engine=tokenizer_engine,
         extract_embedded_images=extract_embedded_images,
+        split_context=split_context,
     )
 
     # Aucun fichier supporté
@@ -363,6 +378,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not result.is_blocked else 2
 
     # Génération
+    if split_context:
+        # D-101 : plusieurs fichiers `<stem>_NNN.<ext>`, jamais de code 2.
+        part_paths = generate_corpus_parts(result, output_path)
+        if args.report:
+            _write_report(result, output_path, args.report)
+        for part_path in part_paths:
+            print(t("gui.corpus_generated", path=str(part_path)))
+        print(t("gui.corpus_parts_generated", count=len(part_paths), path=str(output_path.parent)))
+        print(f"{t('counter.estimated')}: {format_number(result.total.tokens_estimated)}")
+        print(f"{t('counter.with_margin')}: {format_number(result.total.tokens_with_margin)}")
+        return 0
+
     success = generate_corpus(result, output_path)
     if not success:
         return 2
