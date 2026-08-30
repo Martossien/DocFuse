@@ -8,6 +8,67 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [0.2.0] - 2026-08-30 — Beta
+
+Version de reprise du projet Doc-IA : DocFuse devient la brique
+d'extraction côté poste d'un pipeline d'analyse documentaire par LLM, et
+gagne pour cela le découpage en plusieurs corpus. Elle abandonne aussi le
+nom de code « CorpusOne » (D-101 à D-103).
+
+### Ajouté
+
+- **Découpage par budget de tokens** (D-101) — option CLI `--split-context`,
+  clé de config `"split_context"`, case à cocher « Découper en plusieurs
+  corpus si le plafond est dépassé ». Au lieu de bloquer, DocFuse écrit
+  `corpus_001.md`, `corpus_002.md`… (ou `.pdf`), chacun sous le plafond :
+  remplissage séquentiel dans l'ordre du tri, **un fichier n'est jamais
+  coupé**, un fichier qui dépasse à lui seul le plafond est isolé dans sa
+  propre partie et signalé (préambule et rapport) — jamais abandonné en
+  silence. Le rapport liste les parties (section « Parties du corpus », clé
+  JSON `parts`) et la partie de chaque fichier (`part`). API bibliothèque :
+  `core.splitter.split_by_budget()` (module pur) et
+  `orchestrator.generate_corpus_parts()` ; `run_analysis(split_context=True)`.
+- **Nom d'application paramétrable** (D-102) — module `branding.py`, variable
+  d'environnement `DOCFUSE_APP_NAME` (défaut `DocFuse`), lue au lancement et
+  par les specs PyInstaller (`DOCFUSE_APP_NAME=MonOutil pyinstaller
+  DocFuse.spec` → `dist/MonOutil.exe`).
+- **Extra `[gui]`** (D-103) — `pip install "docfuse[gui]"` installe
+  l'interface ; le cœur (CLI, bibliothèque) n'exige plus Tk ni CustomTkinter.
+  `python -m docfuse` sans la GUI affiche un message clair.
+- `py.typed` : les annotations du paquet sont visibles par mypy chez les
+  consommateurs.
+
+### Modifié
+
+- **BREAKING (nommage)** : l'application s'appelle **DocFuse** partout —
+  exécutables `DocFuse.exe` / `DocFuse-OCR.exe`, archives
+  `DocFuse-<version>-beta-windows-x64.zip`, dossier de sortie
+  `DocFuse_output/` (au lieu de `CorpusOne_output/`), config `DocFuse.json` /
+  `%APPDATA%\DocFuse\`, journal `%TEMP%\DocFuse\docfuse.log`, specs
+  `DocFuse.spec` / `DocFuse-OCR.spec`. **Compatibilité ascendante** : une
+  config `CorpusOne.json` ou `%APPDATA%\CorpusOne\config.json` héritée
+  d'une 0.1.x est encore lue (en repli, jamais réécrite) ; les anciennes
+  sorties `corpusone_report.*` restent ignorées par l'inventaire.
+- L'inventaire ignore les parties d'un corpus découpé
+  (`corpus_NNN.md/.pdf`) pour ne jamais se réingérer.
+- Rapport Markdown : le titre porte le nom d'application.
+
+### Corrigé
+
+- README : l'exemple « Utiliser comme bibliothèque » appelait
+  `run_analysis(inputs=…)` et `generate_corpus(…, context_limit=…)`, deux
+  signatures qui n'existaient plus depuis D-099.
+- `build.sh` annonçait un chemin `--onedir` (`dist/CorpusOne/CorpusOne.exe`)
+  alors que le build est `--onefile` depuis D-054.
+
+### Technique
+
+- 555 tests réussis (21 nouveaux : découpage, parties MD/PDF, rapport,
+  branding, absence de nom en dur dans le code et les catalogues i18n),
+  39 ignorés sans `tests/samples_real/` ; ruff, `mypy --strict`, recette 7/7.
+- Aucune nouvelle dépendance. Décisions D-101 à D-103 dans
+  `docs/journal-decisions.md`.
+
 ## [0.1.6] - 2026-08-29 — Beta
 
 Version issue d'un audit complet du code (bugs, encodage, performance,
@@ -434,6 +495,7 @@ Première version publiée du projet. Scaffold complet, 13 formats supportés,
 GUI CustomTkinter, CLI argparse, i18n FR/EN, config JSON 3 niveaux,
 tests d'acceptation, build Windows initial.
 
+[0.2.0]: https://github.com/Martossien/DocFuse/releases/tag/v0.2.0
 [0.1.6]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.6
 [0.1.5]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Martossien/DocFuse/releases/tag/v0.1.4

@@ -2165,4 +2165,113 @@ pypdf : 60 pages tirées au hasard portent toutes leur en-tête `fichier
 
 ---
 
-*Fin du journal des décisions — Session 14.*
+### D-101 : découpage par budget de tokens — plusieurs corpus au lieu d'un blocage
+
+**Contexte** : reprise du projet Doc-IA (analyse RGPD/finance/sécurité/
+juridique de partages de fichiers par LLM). L'analyse du 30/08/2026
+(`~/Doc-IA/docs/ANALYSE_2026-08-30.md`) retient DocFuse comme brique
+d'extraction **sur le poste** : le texte des documents est envoyé à la LLM
+par blocs de 16–64K tokens, en JSON structuré multi-fichiers, avec
+`## SOURCE:` comme clé de corrélation. Or le CdC v1 (§10.3) **bloque** dès
+que le total dépasse le plafond, et le découpage automatique était
+explicitement hors périmètre (CdC, « hors périmètre v1 »). Un pipeline de
+milliers de fichiers ne peut pas s'arrêter sur un code 2.
+
+**Décision** : un mode « découpage » (`split_context`), **désactivé par
+défaut** (le comportement CdC reste inchangé), qui remplace le blocage par
+une répartition des fichiers extraits en parties successives sous le
+plafond :
+
+- remplissage **séquentiel** dans l'ordre du tri (first-fit) — jamais de
+  bin-packing qui réordonnerait les fichiers, l'ordre du corpus reste celui
+  de l'inventaire ;
+- **un fichier n'est jamais coupé** — la garantie « chaque `## SOURCE:` est
+  un fichier entier » est ce qui permet à la LLM de rendre un JSON par
+  fichier ;
+- un fichier qui dépasse à lui seul le plafond est **isolé dans sa propre
+  partie et signalé** (`CorpusPart.oversized`, préambule, rapport) — jamais
+  abandonné en silence (règle 12.4). Le consommateur décide (plafond plus
+  grand, retrait), DocFuse ne décide pas à sa place.
+
+Implémentation : `core/splitter.py` (module **pur**, `split_by_budget()`
+retourne des indices dans `result.files`), `OrchestratorResult.split_context`
+qui neutralise `recompute_blocking()` (statuts jamais `TOO_LARGE`,
+`oversized_files` exposé), writers MD/PDF qui acceptent une `part`
+(`selected_files()` partagé), `generate_corpus_parts()` qui écrit
+`<stem>_001.<ext>`… et un rapport unique enrichi (`parts`, `part` par
+fichier). `generate_corpus()` délègue en mode découpage pour ne pas casser
+les appelants bibliothèque. Le préambule de chaque partie porte
+« Partie i/N » et ses totaux. Le budget comparé au plafond est la **somme
+des `tokens_with_margin` par fichier** (en-tête SOURCE comprise) — plus
+conservateur que l'agrégat `approx` recalculé sur les octets, ce qui est le
+bon sens pour un budget.
+
+**Rejeté** : découper un fichier trop gros en morceaux (perd la
+correspondance fichier ↔ JSON, et un morceau sans son contexte est une
+perte de sens silencieuse) ; bin-packing optimal (réordonne, gain marginal
+sur des blocs de 16–64K).
+
+**Vérification** : `tests/test_core/test_splitter.py` (16 tests : first-fit,
+fichier hors plafond isolé, jamais de blocage, bascule du mode, fichiers non
+extraits ignorés, chaque `## SOURCE:` exactement une fois sur l'ensemble des
+parties, rapport, PDF, délégation, dossier de sortie créé). CLI réel sur
+`tests/fixtures` avec `--context 300` : 4 parties, code 0 ; sans l'option,
+blocage, code 2.
+
+---
+
+### D-102 : fin du nom de code « CorpusOne » — `branding.py` et `DOCFUSE_APP_NAME`
+
+**Contexte** : « CorpusOne » était le nom de code initial ; le projet et le
+dépôt s'appellent DocFuse, mais l'exécutable, le dossier de sortie, la
+config, le journal et les specs portaient encore l'ancien nom, écrit en dur
+à six endroits du code (`constants.py`, `config.py` ×3, `cli.py` ×2,
+`pdf_writer.py`), dans trois clés i18n, les specs, la CI et `build.sh`.
+L'utilisateur veut un nom paramétrable (distribution interne).
+
+**Décision** : un module `branding.py`, **seul** endroit qui connaît le
+nom : `APP_NAME` (défaut `DocFuse`, surcharge par la variable
+d'environnement `DOCFUSE_APP_NAME`, validée comme nom de fichier portable
+— un nom invalide retombe sur le défaut, jamais d'échec au lancement) et
+tous les dérivés (`OUTPUT_DIR_NAME`, `CONFIG_FILENAME`, `APPDATA_DIR_NAME`,
+`LOG_DIR_NAME`, `LOG_FILENAME`, `OCR_VARIANT_NAME`, `PDF_AUTHOR`). Les
+specs PyInstaller lisent la même variable pour `name=` — un seul nom pour
+l'exe, le dossier de sortie et la config. Les clés i18n concernées
+prennent un placeholder (`{app}`, `{variant}`) : le nom n'est pas du texte
+d'interface. Les specs sont renommés `DocFuse.spec` / `DocFuse-OCR.spec`.
+
+**Compatibilité ascendante** : `config._config_paths()` lit en repli
+`CorpusOne.json` et `%APPDATA%/CorpusOne/config.json` (jamais écrits) ;
+`IGNORE_PATTERNS` garde `corpusone_report.*`. Le nom hérité vit dans
+`branding.LEGACY_*` uniquement.
+
+**Garde-fou** : `tests/test_branding.py` échoue si un fichier `.py` du
+paquet (hors `branding.py`) ou un catalogue i18n contient encore
+« CorpusOne » — la dette ne peut pas revenir.
+
+**Rejeté** : garder `CorpusOne_output` par défaut « pour ne rien casser » —
+les utilisateurs 0.1.x sont peu nombreux, la 0.2.0 est marquée BREAKING
+(nommage) dans le CHANGELOG, et la lecture en repli couvre la config.
+
+---
+
+### D-103 : l'interface graphique devient un extra `[gui]`
+
+**Contexte** : pour servir de bibliothèque (analyzer Doc-IA v3, service
+d'extraction) DocFuse tirait `customtkinter` et `tkinterdnd2` — donc Tk —
+sur des machines sans écran ; et le README montrait un exemple
+« bibliothèque » faux depuis D-099.
+
+**Décision** : `customtkinter` et `tkinterdnd2` passent dans
+`[project.optional-dependencies] gui` ; `__main__` sans argument affiche un
+message i18n clair si la GUI est absente (au lieu d'un
+`ModuleNotFoundError`). CI, specs et `build.sh` installent `.[dev,gui]`.
+Ajout de `py.typed`. README corrigé et complété (découpage, branding).
+
+**Vérification** : suite complète (555 réussis), `mypy --strict`, recette
+7/7 ; l'exe Windows n'est pas buildé localement (voir « Reste à faire »
+d'AGENTS.md : vérifier `DOCFUSE_APP_NAME` au prochain build CI).
+
+---
+
+*Fin du journal des décisions — Session 15.*

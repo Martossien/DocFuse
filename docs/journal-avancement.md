@@ -1521,3 +1521,45 @@ graphiques, PDF annotations/champs de formulaire, XLSX commentaires en
   réel sur ~/Documents + ~/Téléchargements **en Markdown et en PDF** (voir
   D-100 pour les chiffres).
 
+---
+
+## Session 15 — 2026-08-30 — 0.2.0 : découpage, fin de « CorpusOne », extra gui
+
+Contexte : reprise du projet Doc-IA (voir `~/Doc-IA/docs/ANALYSE_2026-08-30.md`).
+DocFuse devient la brique d'extraction côté poste d'un pipeline LLM ; il lui
+manquait le découpage en blocs, et le nom de code traînait partout.
+
+### Découpage par budget de tokens (D-101) — ✅ Livré
+
+- `core/splitter.py` pur (`split_by_budget`, `CorpusPart`), first-fit dans
+  l'ordre du tri, jamais de coupe, fichier hors plafond isolé et signalé.
+- `OrchestratorResult.split_context` neutralise le blocage sans changer
+  l'API ; writers MD/PDF avec `part` ; `generate_corpus_parts()` écrit
+  `corpus_001…` + rapport unique (`parts`, `part` par fichier) ;
+  `generate_corpus()` délègue. CLI `--split-context`, config
+  `split_context`, case GUI avec recalcul instantané, résumé adapté.
+- 16 tests ; CLI réel : 4 parties / code 0 vs blocage / code 2.
+
+### Nom d'application paramétrable (D-102) — ✅ Livré
+
+- `branding.py` + `DOCFUSE_APP_NAME` ; specs renommés `DocFuse.spec` /
+  `DocFuse-OCR.spec` et `name=` lu de l'environnement ; CI, `build.sh`
+  (messages `--onedir` périmés corrigés), `.gitignore`, i18n avec
+  placeholders, config en repli sur l'ancien nom. Test « plus aucun
+  CorpusOne dans le code ni les catalogues ».
+
+### Extra `[gui]`, `py.typed`, README (D-103) — ✅ Livré
+
+- `pip install "docfuse[gui]"` ; message clair sans GUI ; exemple
+  bibliothèque du README corrigé (`input_path=`, `generate_corpus(result,
+  path)`, `set_language`) et documentation du découpage.
+
+### Qualité
+
+- 555 réussis / 39 ignorés (593 collectés), ruff + format, `mypy --strict`
+  (0 erreur, `ftfy`/`office_oxide`/`oxmsg` réinstallés dans le venv de dev),
+  recette 7/7. Version 0.2.0, CHANGELOG, `docs/releases/v0.2.0.md`, AGENTS.md.
+- Non fait : build Windows (pas de machine ici) — `DOCFUSE_APP_NAME` dans les
+  specs à vérifier au prochain job CI ; pas de tag/release (à la demande de
+  l'utilisateur, publication sur confirmation seulement).
+
