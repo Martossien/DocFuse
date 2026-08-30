@@ -1,6 +1,7 @@
 # Contributing to DocFuse
 
-Merci de votre intérêt pour DocFuse / CorpusOne. Toute contribution est la bienvenue :
+Merci de votre intérêt pour DocFuse (anciennement CorpusOne). Toute contribution
+est la bienvenue :
 corrections de bugs, nouvelles fonctionnalités, nouveaux extracteurs de formats,
 traductions, documentation, rapports de bugs, revues de PRs.
 
@@ -27,8 +28,10 @@ python -m venv .venv
 source .venv/bin/activate          # Linux / macOS
 # .venv\Scripts\activate           # Windows PowerShell
 
-# Installation en mode éditable avec les dépendances de dev
-pip install -e ".[dev]"
+# Installation en mode éditable avec les dépendances de dev + l'interface
+# graphique (extra `gui` : customtkinter + tkinterdnd2). Sans `gui`, seuls
+# la CLI et la bibliothèque sont installées.
+pip install -e ".[dev,gui]"
 
 # Vérifier que tout fonctionne
 pytest tests/ -v

@@ -8,7 +8,8 @@ réseau, n'enregistre rien dans `%APPDATA%` sans consentement, n'écrit rien dan
 
 Les fichiers manipulés restent sur le disque de l'utilisateur ; aucun service
 cloud n'est contacté. Les sorties (corpus Markdown/PDF, rapports MD/JSON) sont
-écrites dans un sous-dossier `CorpusOne_output/` du dossier d'entrée.
+écrites dans un sous-dossier `DocFuse_output/` du dossier d'entrée (le nom
+dérive du nom d'application, personnalisable par `DOCFUSE_APP_NAME`).
 
 Cela dit, DocFuse lit et parse des fichiers dans des formats variés (PDF,
 DOCX, PPTX, XLSX, RTF, HTML, ODF, EML, MHTML…). Comme tout parser, les
@@ -19,10 +20,11 @@ extracteurs peuvent être exposés à des fichiers **malformés** voire
 
 | Version | Supportée        |
 |---------|------------------|
-| 0.1.x   | ✅ Oui           |
+| 0.2.x   | ✅ Oui           |
+| 0.1.x   | ❌ Non           |
 | < 0.1   | ❌ Non           |
 
-Seule la dernière série (0.1.x) reçoit des correctifs. Le projet est en
+Seule la dernière série (0.2.x) reçoit des correctifs. Le projet est en
 préversion alpha (3 - Alpha selon le classifier PyPI) : l'API peut encore
 évoluer, ne l'utilisez pas en production sans audit.
 

@@ -1,4 +1,4 @@
-# AGENTS.md — DocFuse / CorpusOne
+# AGENTS.md — DocFuse
 
 > Guide de reprise pour tout agent (humain ou IA) qui travaille sur ce projet.
 > Ce fichier est mis à jour à chaque session. **Le lire en premier.**
@@ -7,7 +7,7 @@
 
 ## 1. Le projet en une phrase
 
-**DocFuse** (nom de code **CorpusOne**) est un outil Windows portable, hors-ligne, sans droits admin, qui prend un ou plusieurs dossiers ou fichiers hétérogènes (PDF, DOCX, PPTX, XLSX, RTF, HTML, TXT, etc.), en extrait le texte, et produit un corpus unique (Markdown ou PDF) destiné à nourrir un LLM — avec un compteur de contexte générique par fichier et total, et un contrôle de plafond.
+**DocFuse** (anciennement **CorpusOne**, nom de code abandonné en 0.2.0 — D-102) est un outil Windows portable, hors-ligne, sans droits admin, qui prend un ou plusieurs dossiers ou fichiers hétérogènes (PDF, DOCX, PPTX, XLSX, RTF, HTML, TXT, etc.), en extrait le texte, et produit un corpus unique — ou plusieurs corpus sous le plafond en mode découpage (D-101) — en Markdown ou PDF, destiné à nourrir un LLM, avec un compteur de contexte générique par fichier et total, et un contrôle de plafond.
 
 ## 2. Cahier des charges
 
@@ -22,6 +22,7 @@ Points non négociables (résumé) :
 - UI en français par défaut + infrastructure i18n.
 - Compteur générique : octets_UTF8 / 4, marge +15 %, plafond 128 000 (variable).
 - Blocage si un fichier OU le total dépasse le plafond. Images = warning (ne bloque pas).
+  Exception explicite : le mode découpage (`--split-context`, D-101) remplace ce blocage par plusieurs corpus sous le plafond, sans jamais couper un fichier.
 
 ## 3. Stack technique
 
@@ -52,11 +53,13 @@ src/docfuse/
 ├── cli.py                  # CLI argparse + i18n + codes retour 0-4
 ├── gui.py                  # GUI CustomTkinter (sélection multiple, retrait, jauge dynamique)
 ├── config.py               # config JSON (3 niveaux) + validate() min/max
+├── branding.py             # APP_NAME (DOCFUSE_APP_NAME) → sortie, config, log, exe (D-102)
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
 ├── assets/                 # DejaVuSans.ttf/-Bold (police PDF), tekken_240911.json (vocab Mistral), o200k_base.tiktoken (vocab OpenAI)
 ├── core/
 │   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
+│   ├── splitter.py         # split_by_budget() → CorpusPart, jamais de coupe (D-101)
 │   ├── registry.py         # @register + dispatch par extension
 │   ├── context_counter.py  # compteur tokens (octets/4 par défaut, ou moteur precis)
 │   ├── tokenizers/         # registre de moteurs : approx (défaut), mistral, openai
@@ -106,7 +109,8 @@ Entrée : dossier(s) et/ou fichier(s) explicites
   → compteur par fichier (octets/4 par défaut ou moteur précis, +15%, en-têtes SOURCE comprises)
   → agrégation + compteur total
   → décision: bloquer / autoriser (fichier OU total > plafond)
-  → écriture MD ou PDF + rapport MD/JSON
+     ou, en mode découpage, répartition en parties sous le plafond (core/splitter.py)
+  → écriture MD ou PDF (une ou plusieurs parties) + rapport MD/JSON unique
 ```
 
 ### Principes de conception
@@ -140,7 +144,7 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 |---|---|---|
 | Code haute qualité | `ruff check` + `ruff format --check` | ✅ |
 | Typage strict | `mypy --strict` sur 44 fichiers | ✅ |
-| Tests versionnés | 295 collectés : 256 réussis, 39 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
+| Tests versionnés | 593 collectés : 555 réussis, 39 ignorés sans `tests/samples_real/` | ⚠️ jeu réel non versionné |
 | Maintenabilité | Un extracteur = un fichier, registry auto, docstrings | ✅ |
 | User-friendly | GUI CustomTkinter, jauge couleur, recalcul sans ré-extraction | ✅ |
 | Configurable | JSON 3 niveaux + validate() + scan_config + sort + max_depth | ✅ |
@@ -152,7 +156,9 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 
 ```bash
 # Installation (mode dev, hors-ligne possible après premier pip install)
-pip install -e ".[dev]"
+# La GUI est un extra (D-103) : sans `gui`, seuls la CLI et la bibliothèque
+# sont installées. `pip install -e ".[dev]"` suffit pour tout sauf gui.py.
+pip install -e ".[dev,gui]"
 
 # Lint
 ruff check src/ tests/
@@ -171,7 +177,10 @@ pytest tests/test_acceptance.py -v
 pip-licenses --from=classifier --allow-only="MIT;BSD;Apache Software License;ISC License;Mozilla Public License 2.0;Python Software Foundation License"
 
 # Build Windows portable (sur machine Windows)
-pyinstaller --noconfirm CorpusOne.spec
+pyinstaller --noconfirm DocFuse.spec
+
+# Build sous un autre nom (D-102) : la spec lit DOCFUSE_APP_NAME
+DOCFUSE_APP_NAME=MonOutil pyinstaller --noconfirm DocFuse.spec  # → dist/MonOutil.exe
 ```
 
 ## 8. CI GitHub Actions
@@ -194,30 +203,30 @@ Conventional Commits (sans scope obligatoire) :
 
 ## 10. Journaux
 
-- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-055).
+- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-103).
 - `docs/journal-avancement.md` — suivi de l'implémentation, session par session, avec statut.
 - `docs/cahier-des-charges-docfuse.md` — cahier des charges contractuel (lecture seule).
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 14 — 0.1.5 beta)
+## 11. État actuel (Session 15 — 0.2.0 beta)
 
 | Métrique | Valeur |
 |---|---|
 | Fichiers source Python | 57 |
-| Tests collectés depuis un clone frais | 572 |
+| Tests collectés depuis un clone frais | 593 (572 + 21 nouveaux : splitter, branding) |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 534 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 555 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 100 (D-001 à D-100) |
+| Décisions archivées | 103 (D-001 à D-103) |
 | Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lot 2 livré (D-097 : ftfy restreint à la corruption d'encodage, chemin rapide ASCII, presque-UTF-8, HTML sans charset) ; lot 3 livré (D-098 : OCR des images intégrées parallélisé dans le fichier, sémaphore Tesseract global, XLSX/DOCX/PDF sans re-lecture — 28,4 s → 10,6 s sur ~/Documents, corpus identique byte à byte) ; lot 4 livré (D-099 : gardes/notes/rapports/chemins factorisés, politique `file_type` unique, helpers GUI purs — trois bugs révélés par la factorisation dont un `.md` encapsulé contre le CdC). Audit clos. |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
 | Extracteurs | 16 formats + fichiers de développement (`CODE_EXTENSIONS`, ~60 extensions, via `TextExtractor`) — +EPUB (D-093), +DOC/XLS/PPT/MSG (D-094) |
 | Moteurs de comptage | 3 : approx (défaut, octets/4), mistral (Tekken), openai (o200k_base) — registre extensible `core/tokenizers/` |
-| OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `CorpusOne.exe` sans OCR bundlé, `CorpusOne-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |
+| OCR PDF scannés | Optionnel (Tesseract), registre `core/ocr/` — `DocFuse.exe` sans OCR bundlé, `DocFuse-OCR.exe` avec (build CI vérifié avec succès sur la Release v0.1.4, ~127 Mo zippé, D-067) |
 | OCR images intégrées DOCX/PPTX/XLSX/ODT/ODP | Optionnel (même moteur `core/ocr/`), automatique sans réglage (D-091, étendu D-093). Export image + tag `[[IMAGE: ...]]` en option désactivée par défaut (CLI `--extract-images`, GUI, config JSON) — écrit `<sortie>_images/`. `.ods`/EML/MHTML hors périmètre. |
 | Robustesse fichiers | Garde-fou "bombe zip" (D-093, tous formats ZIP), réparation mojibake automatique (`ftfy`, D-093), validation de plausibilité cp1252 (D-093) |
 | Optimisations/alertes de transparence | 5 : dédup en-têtes/pieds PDF, retrait base64 Markdown, doublons de contenu, alerte secrets, OCR (D-062 à D-065, D-067) |
@@ -227,8 +236,11 @@ Conventional Commits (sans scope obligatoire) :
 | Sélection GUI | ✅ dossier(s), fichiers exacts, glisser-déposer, retrait instantané, changement de moteur instantané |
 | Police PDF Unicode | ✅ DejaVu Sans (SIL/OFL) |
 | Build Windows | ✅ PyInstaller **`--onefile`** (un seul .exe autoportant, GUI + CLI) |
-| Publication Windows | ✅ automatique sur les Releases GitHub (`.zip` + `.sha256` × 2 : `CorpusOne` et `CorpusOne-OCR`) à chaque Release publiée — voir §13 |
+| Publication Windows | ✅ automatique sur les Releases GitHub (`.zip` + `.sha256` × 2 : `DocFuse` et `DocFuse-OCR`) à chaque Release publiée — voir §13 |
 | Testé sur documents réels | ✅ 65 fichiers synthétiques + 14 documents utilisateur variés, 0 erreur |
+| Découpage par budget | ✅ `--split-context` / case GUI / `"split_context": true` → `corpus_001.md`, `corpus_002.md`… chacun sous le plafond, remplissage séquentiel dans l'ordre du tri, **jamais de coupe dans un fichier**. Un fichier hors plafond est isolé dans sa propre partie et signalé (préambule + rapport), jamais abandonné. Rapport unique : section « Parties du corpus », clé JSON `parts` + `part` par fichier. Le code retour 2 n'existe plus dans ce mode (D-101, `core/splitter.py` + `orchestrator.generate_corpus_parts`) |
+| Nom d'application | ✅ `branding.py` est le seul endroit qui connaît le nom : `DocFuse` par défaut, surchargeable par `DOCFUSE_APP_NAME` (runtime **et** specs PyInstaller). En dérivent `DocFuse_output/`, `DocFuse.json`, `%APPDATA%\DocFuse\config.json`, `%TEMP%\DocFuse\docfuse.log`, l'auteur PDF, le titre de fenêtre, `DocFuse-OCR`. Configs héritées d'une 0.1.x (ancien nom de code) encore **lues** en repli, jamais écrites ; anciennes sorties `*_report.*` toujours ignorées par l'inventaire (D-102) |
+| Extras `gui` | ✅ `customtkinter`/`tkinterdnd2` sortis des dépendances obligatoires : `pip install docfuse` = cœur (CLI + bibliothèque), `pip install "docfuse[gui]"` = + interface. `python -m docfuse` sans la GUI affiche un message clair (`gui.not_installed`), pas de trace. `py.typed` publié : annotations visibles par mypy chez les consommateurs (D-103) |
 | Régressions connues sur la suite versionnée | 0 |
 | Working tree | clean |
 
@@ -251,6 +263,7 @@ C:\Windows\Temp\Python313\python.exe
 - ⬜ GUI : mise à jour en place des lignes de la table (aujourd'hui reconstruite à chaque recalcul — 7 widgets par fichier, lent au-delà de quelques centaines de fichiers) et génération du corpus dans un thread worker (le clic « Générer » gèle la fenêtre sur un gros corpus PDF). Reportés de l'audit D-096..D-099 : intrusifs, hors « sans dégradation »
 - ⬜ Scanner de secrets : faux positifs possibles sur des identifiants de code (`api_key = settings.API_KEY`) — signalé par lecture lors de l'audit, non reproduit sur du code réel ; à confirmer avant de toucher aux regex
 - ⬜ Sniff d'un `.doc` qui est en réalité du RTF ou du HTML (générateurs qui mentent sur l'extension) — signalé par lecture, non reproduit
+- ⬜ Vérifier au prochain build Windows que `DOCFUSE_APP_NAME` est bien pris en compte par PyInstaller (specs renommés `DocFuse.spec` / `DocFuse-OCR.spec`, jamais buildés localement)
 
 ## 12. Règles critiques
 
@@ -282,10 +295,10 @@ sur `main`, en local (pas de branche de release séparée à ce stade).
    bas de fichier.
 4. **`docs/releases/vX.Y.Z.md`** : nouvelles notes de version (voir les
    fichiers précédents pour le gabarit). Le nom de zip attendu est
-   `CorpusOne-X.Y.Z-beta-windows-x64.zip` (déterminé par le tag Git, voir
+   `DocFuse-X.Y.Z-beta-windows-x64.zip` (déterminé par le tag Git, voir
    étape 6 — ne pas inventer un autre nom).
 5. **README.md** (sections FR **et** EN) : badge de version, tableau de
-   téléchargement (lien vers `vX.Y.Z`, nom de fichier `CorpusOne-X.Y.Z-beta-windows-x64.zip`),
+   téléchargement (lien vers `vX.Y.Z`, nom de fichier `DocFuse-X.Y.Z-beta-windows-x64.zip`),
    lien vers les notes de version, badge de tests si le nombre a changé.
 6. **AGENTS.md** : section « État actuel », `docs/journal-avancement.md` :
    nouvelle entrée de session, `docs/journal-decisions.md` : ADR des
@@ -296,18 +309,20 @@ sur `main`, en local (pas de branche de release séparée à ce stade).
    ```bash
    git tag vX.Y.Z
    git push origin vX.Y.Z
-   gh release create vX.Y.Z --title "CorpusOne X.Y.Z beta" \
+   gh release create vX.Y.Z --title "DocFuse X.Y.Z beta" \
      --notes-file docs/releases/vX.Y.Z.md
    ```
    Publier la Release déclenche automatiquement deux jobs indépendants de
    `.github/workflows/ci.yml` (`github.event_name == 'release'`) :
-   `build-windows` (zippe `dist/CorpusOne.exe`) et `build-windows-ocr`
-   (zippe `dist/CorpusOne-OCR.exe`, Tesseract embarqué — D-067/D-078).
+   `build-windows` (zippe `dist/DocFuse.exe` en
+   `DocFuse-X.Y.Z-beta-windows-x64.zip`) et `build-windows-ocr` (zippe
+   `dist/DocFuse-OCR.exe` en `DocFuse-OCR-X.Y.Z-beta-windows-x64.zip`,
+   Tesseract embarqué — D-067/D-078).
    Chacun calcule son SHA-256 et attache ses deux fichiers à la Release
    (`gh release upload ... --clobber`) — voir D-061 dans
    `docs/journal-decisions.md`. Aucune étape manuelle d'upload. Les deux
    jobs sont indépendants : un échec de `build-windows-ocr` n'empêche pas
-   `CorpusOne.exe` d'être publié normalement.
+   `DocFuse.exe` d'être publié normalement.
 9. **Vérifier** : `gh run list --branch main --limit 1` jusqu'à
    `completed`/`success`, puis `gh release view vX.Y.Z --json assets` pour
    confirmer que le `.zip` et le `.sha256` sont bien attachés.
