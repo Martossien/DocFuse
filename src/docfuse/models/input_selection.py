@@ -74,7 +74,7 @@ class InputSelection:
 
     @property
     def output_directory(self) -> Path:
-        """Dossier source dans lequel créer ``CorpusOne_output``."""
+        """Dossier source dans lequel créer le dossier de sortie (``<App>_output``)."""
 
         primary = self.primary_path
         return primary if primary.is_dir() else primary.parent

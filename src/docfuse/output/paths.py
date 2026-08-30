@@ -1,7 +1,7 @@
 """Chemins de sortie partagés par la CLI et la GUI (D-099).
 
 Avant : la CLI écrivait `corpus.md` dans le dossier courant pour un fichier
-unique en entrée, la GUI dans `<dossier du fichier>/CorpusOne_output/` ; le
+unique en entrée, la GUI dans `<dossier du fichier>/<App>_output/` ; le
 suffixe `_rapport` et le nom du dossier de sortie étaient des littéraux
 répétés dans trois modules. Un seul endroit à maintenir.
 """
@@ -29,7 +29,7 @@ def corpus_extension(output_format: str) -> str:
 
 
 def default_corpus_path(selection: InputSelection, output_format: str) -> Path:
-    """Chemin par défaut du corpus : `<source>/CorpusOne_output/corpus.<ext>`.
+    """Chemin par défaut du corpus : `<source>/<App>_output/corpus.<ext>`.
 
     `<source>` est le dossier sélectionné, ou le dossier du premier fichier
     pour une sélection de fichiers (I-13) — même règle CLI et GUI.

@@ -1,27 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Spec file PyInstaller pour DocFuse / CorpusOne.
+"""Spec file PyInstaller pour DocFuse (anciennement CorpusOne).
 
 CdC §5.1 — Build Windows portable mono-exécutable (--onefile).
     Le runtime Python (python313.dll, VCRUNTIME140, etc.) et toutes les
     dépendances sont embarqués dans le .exe pour qu'un simple déplacement
-    du fichier CorpusOne.exe suffise à le lancer, sans DLL externe.
+    du fichier DocFuse.exe suffise à le lancer, sans DLL externe.
 CdC §13.2 — Empaquetage Python : PyInstaller onefile préféré pour la
     portabilité. Le démarrage (extraction du bundle dans %TEMP%) reste
     acceptable pour un outil de génération de corpus.
 
 Usage sur Windows:
-    pyinstaller --noconfirm CorpusOne.spec
+    pyinstaller --noconfirm DocFuse.spec
 
 Usage sous Linux avec Wine:
     # 1. Installer Wine
     # 2. Installer Python pour Windows dans Wine
     # 3. Installer les dépendances dans Wine
     # 4. Lancer PyInstaller via Wine
-    wine python pyinstaller --noconfirm CorpusOne.spec
+    wine python pyinstaller --noconfirm DocFuse.spec
 """
 
 import os
 import sys
+
+# D-102 : le nom de l'exécutable suit la variable d'environnement lue par
+# `docfuse.branding` (défaut DocFuse) — un seul nom pour l'exe, le dossier de
+# sortie et la config.
+_APP_NAME = (os.environ.get("DOCFUSE_APP_NAME") or "DocFuse").strip() or "DocFuse"
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -93,7 +98,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="CorpusOne",
+    name=_APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

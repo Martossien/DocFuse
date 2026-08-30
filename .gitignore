@@ -25,6 +25,9 @@ env/
 _internal/
 CorpusOne/
 CorpusOne.exe
+DocFuse/
+DocFuse.exe
+DocFuse-OCR.exe
 
 # Tests
 .pytest_cache/

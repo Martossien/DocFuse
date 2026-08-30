@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from docfuse import i18n
+from docfuse.branding import OUTPUT_DIR_NAME
 from docfuse.cli import main
 from docfuse.core.embedded_images import dedupe_image_filenames
 from docfuse.core.orchestrator import generate_corpus, run_analysis
@@ -114,11 +115,9 @@ class TestSharedHelpers:
         doc.write_text("x", "utf-8")
 
         selection = InputSelection.from_paths([doc])
-        assert (
-            default_corpus_path(selection, "pdf") == doc.parent / "CorpusOne_output" / "corpus.pdf"
-        )
+        assert default_corpus_path(selection, "pdf") == doc.parent / OUTPUT_DIR_NAME / "corpus.pdf"
         assert default_corpus_path(InputSelection.from_paths([tmp_path]), "md") == (
-            tmp_path / "CorpusOne_output" / "corpus.md"
+            tmp_path / OUTPUT_DIR_NAME / "corpus.md"
         )
         assert report_base_path(Path("/x/corpus.pdf")) == Path("/x/corpus_rapport.md")
         assert corpus_extension("md") == ".md"
@@ -236,7 +235,7 @@ class TestCli:
         doc = tmp_path / "seul.txt"
         doc.write_text("Un document seul, texte assez long pour compter." * 3, "utf-8")
         assert main(["--input", str(doc)]) == 0
-        assert (tmp_path / "CorpusOne_output" / "corpus.md").exists()
+        assert (tmp_path / OUTPUT_DIR_NAME / "corpus.md").exists()
 
 
 class TestI18n:

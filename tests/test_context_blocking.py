@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from docfuse.branding import APP_NAME, OUTPUT_DIR_NAME
 from docfuse.core.orchestrator import generate_corpus, run_analysis
 
 
@@ -400,7 +401,7 @@ class TestWindowsBehavior:
 
     def test_pyinstaller_spec_windowed(self) -> None:
         """Le spec PyInstaller utilise --windowed (console=False)."""
-        spec = Path(__file__).resolve().parent.parent / "CorpusOne.spec"
+        spec = Path(__file__).resolve().parent.parent / "DocFuse.spec"
         if spec.exists():
             content = spec.read_text("utf-8")
             assert "console=False" in content
@@ -408,12 +409,12 @@ class TestWindowsBehavior:
             assert "fr.json" in content
 
     def test_log_rotation_windows(self) -> None:
-        """Le log utilise RotatingFileHandler vers %TEMP%/CorpusOne/."""
+        """Le log utilise RotatingFileHandler vers %TEMP%/<App>/ (D-102)."""
         cli = (Path(__file__).resolve().parent.parent / "src" / "docfuse" / "cli.py").read_text(
             "utf-8"
         )
         assert "RotatingFileHandler" in cli
-        assert "CorpusOne" in cli
+        assert "LOG_DIR_NAME" in cli
         assert "tempfile" in cli
 
     def test_main_dispatches_gui_no_args(self) -> None:
@@ -436,18 +437,20 @@ class TestWindowsBehavior:
         assert cn_pos > 0
         assert cp1252_pos < cn_pos, "cp1252 doit être avant charset-normalizer"
 
-    def test_output_in_corpusone_output(self) -> None:
-        """La sortie par défaut va dans CorpusOne_output/ (CdC §5.3)."""
+    def test_output_in_app_output_dir(self) -> None:
+        """La sortie par défaut va dans <App>_output/ (CdC §5.3, D-102) — CLI et
+        GUI passent par `default_corpus_path`, qui dérive du nom d'application."""
         cli = (Path(__file__).resolve().parent.parent / "src" / "docfuse" / "cli.py").read_text(
             "utf-8"
         )
         gui = (Path(__file__).resolve().parent.parent / "src" / "docfuse" / "gui.py").read_text(
             "utf-8"
         )
-        assert "CorpusOne_output" in cli
-        assert "CorpusOne_output" in gui
+        assert "default_corpus_path" in cli
+        assert "default_corpus_path" in gui
+        assert f"{APP_NAME}_output" == OUTPUT_DIR_NAME
 
     def test_pyinstaller_collects_dynamic_extractors(self) -> None:
         """Le build embarque les extracteurs chargés via import_module()."""
-        spec = (Path(__file__).resolve().parent.parent / "CorpusOne.spec").read_text("utf-8")
+        spec = (Path(__file__).resolve().parent.parent / "DocFuse.spec").read_text("utf-8")
         assert 'collect_submodules("docfuse.extractors")' in spec

@@ -8,8 +8,8 @@ thread-safe). `tesseract stdin stdout` lit l'image sur l'entrée standard et
 créer ni à nettoyer.
 
 Résolution du binaire, dans l'ordre :
-1. Bundlé à côté de l'exécutable figé (`CorpusOne-OCR.exe`, voir
-   `CorpusOne-OCR.spec`) — détecté via `sys._MEIPASS`.
+1. Bundlé à côté de l'exécutable figé (variante `<App>-OCR.exe`, voir
+   `DocFuse-OCR.spec`) — détecté via `sys._MEIPASS`.
 2. Une installation Tesseract déjà présente sur la machine (PATH), ex.
    l'installeur Windows officiel (UB-Mannheim). Aucun réseau dans les deux cas.
 
@@ -65,11 +65,11 @@ class TesseractEngine(OcrEngine):
 
 
 def _bundled_binary_path() -> Path | None:
-    """Chemin du binaire Tesseract embarqué dans un exécutable figé (CorpusOne-OCR).
+    """Chemin du binaire Tesseract embarqué dans un exécutable figé (variante OCR).
 
     `sys._MEIPASS` n'existe que dans un exécutable PyInstaller onefile en
     cours d'exécution (extraction temporaire du bundle). L'arborescence
-    attendue (voir `CorpusOne-OCR.spec`) : `tesseract/tesseract.exe` +
+    attendue (voir `DocFuse-OCR.spec`) : `tesseract/tesseract.exe` +
     `tesseract/tessdata/*.traineddata` juste à côté.
     """
     meipass = getattr(sys, "_MEIPASS", None)
@@ -95,7 +95,7 @@ def _resolve_binary() -> str | None:
 def _subprocess_env(binary: str) -> dict[str, str] | None:
     """Environnement à passer au process `tesseract`.
 
-    Pour le binaire bundlé (`CorpusOne-OCR.exe`), `TESSDATA_PREFIX` est fixé
+    Pour le binaire bundlé (variante OCR), `TESSDATA_PREFIX` est fixé
     explicitement vers le `tessdata/` embarqué à côté — on ne compte pas sur
     la détection relative par défaut de Tesseract, qui dépend du répertoire
     de travail du process appelant, imprévisible depuis un onefile

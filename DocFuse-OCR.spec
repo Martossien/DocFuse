@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Spec file PyInstaller pour la variante CorpusOne-OCR (avec Tesseract bundlé).
+"""Spec file PyInstaller pour la variante DocFuse-OCR (avec Tesseract bundlé).
 
-Décision produit (2026-08-29, voir docs/journal-decisions.md) : `CorpusOne.exe`
+Décision produit (2026-08-29, voir docs/journal-decisions.md) : `DocFuse.exe`
 reste identique en taille — Tesseract (binaire + tessdata, ~40-80 Mo) n'y est
-PAS embarqué. Cette variante distincte, `CorpusOne-OCR.exe`, l'embarque pour
+PAS embarqué. Cette variante distincte, `DocFuse-OCR.exe`, l'embarque pour
 un usage "zéro installation" de l'OCR des PDF scannés (core/ocr/). Le code
 d'exécution est strictement identique entre les deux exe — seul cet
 empaquetage diffère (voir `core/ocr/tesseract.py::_bundled_binary_path`, qui
@@ -11,22 +11,25 @@ attend le binaire sous `tesseract/tesseract.exe` et les modèles de langue
 sous `tesseract/tessdata/*.traineddata`, exactement l'arborescence produite
 ici).
 
-Ce fichier duplique volontairement la majeure partie de `CorpusOne.spec`
+Ce fichier duplique volontairement la majeure partie de `DocFuse.spec`
 plutôt que de factoriser un module commun : les deux fichiers ne sont
 buildés que sur un runner Windows (jamais testés localement dans cet
 environnement de développement Linux) — minimiser les changements sur
-`CorpusOne.spec`, déjà vérifié en production, réduit le risque plutôt que
+`DocFuse.spec`, déjà vérifié en production, réduit le risque plutôt que
 d'introduire une dépendance partagée non testée entre les deux builds.
 
 Usage sur Windows (CI, voir .github/workflows/ci.yml::build-windows-ocr) :
     # 1. choco install tesseract -y  (fournit tesseract.exe + DLL + eng.traineddata)
     # 2. Télécharger fra.traineddata (tessdata_fast) dans le même tessdata/
     # 3. set TESSERACT_HOME=C:\\Program Files\\Tesseract-OCR  (optionnel, valeur par défaut)
-    # 4. pyinstaller --noconfirm CorpusOne-OCR.spec
+    # 4. pyinstaller --noconfirm DocFuse-OCR.spec
 """
 
 import os
 import sys
+
+# D-102 : même variable d'environnement que DocFuse.spec / docfuse.branding.
+_APP_NAME = (os.environ.get("DOCFUSE_APP_NAME") or "DocFuse").strip() or "DocFuse"
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -38,7 +41,7 @@ assets_dir = Path(SPECPATH) / "src" / "docfuse" / "assets"
 i18n_dir = Path(SPECPATH) / "src" / "docfuse" / "i18n"
 
 # D-054 / D-055 : DLL runtime non couvertes par l'analyse statique (voir
-# CorpusOne.spec — même raison, même solution).
+# DocFuse.spec — même raison, même solution).
 _python_dlls_dir = Path(getattr(sys, "base_prefix", sys.prefix)) / "DLLs"
 _extra_binaries: list[tuple[str, str]] = []
 if _python_dlls_dir.is_dir():
@@ -69,7 +72,7 @@ else:
 if not _tesseract_datas:
     raise FileNotFoundError(
         f"Aucun *.traineddata trouvé sous {_tesseract_home / 'tessdata'} — "
-        "le build CorpusOne-OCR sans modèle de langue n'aurait aucun intérêt."
+        "le build DocFuse-OCR sans modèle de langue n'aurait aucun intérêt."
     )
 
 a = Analysis(
@@ -85,7 +88,7 @@ a = Analysis(
         (str(i18n_dir / "en.json"), "docfuse/i18n"),
     ]
     + _tesseract_datas
-    # D-096 : bibliothèque Tcl `tkdnd` (voir CorpusOne.spec).
+    # D-096 : bibliothèque Tcl `tkdnd` (voir DocFuse.spec).
     + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("docfuse.extractors")
     + collect_submodules("tiktoken_ext")
@@ -114,7 +117,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="CorpusOne-OCR",
+    name=f"{_APP_NAME}-OCR",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

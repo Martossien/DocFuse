@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from docfuse.branding import OUTPUT_DIR_NAME
+
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
@@ -206,7 +208,7 @@ def run_cli(args: list[str]) -> tuple[int, str, str]:
 def test_dossier_mixte_md() -> Result:
     """S19.2 -- Dossier mixte -> un MD unique, chaque source identifiable."""
     r = Result("Dossier mixte -> Markdown")
-    output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus.md"
+    output = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus.md"
     if output.exists():
         output.unlink()
     code, out, err = run_cli(
@@ -235,7 +237,7 @@ def test_dossier_mixte_md() -> Result:
 def test_dossier_mixte_pdf() -> Result:
     """S19.2 -- Meme dossier -> un PDF unique, texte selectionnable."""
     r = Result("Dossier mixte -> PDF")
-    output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus.pdf"
+    output = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus.pdf"
     if output.exists():
         output.unlink()
     code, out, err = run_cli(
@@ -292,7 +294,7 @@ def test_blocage_context() -> Result:
 def test_fichier_exe_ignore() -> Result:
     """S19.2 -- Fichier .exe dans le dossier -> ignore, present au rapport."""
     r = Result("Fichier .exe ignore")
-    output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_test.md"
+    output = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_test.md"
     code, out, err = run_cli(
         [
             "-i",
@@ -303,7 +305,7 @@ def test_fichier_exe_ignore() -> Result:
             "--yes",
         ]
     )
-    report = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_test_rapport.json"
+    report = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_test_rapport.json"
     if not report.exists():
         r.fail("Rapport non genere")
         return r
@@ -321,7 +323,7 @@ def test_fichier_exe_ignore() -> Result:
 def test_lock_file_ignore() -> Result:
     """S19.2 -- ~$w.docx -> ignore."""
     r = Result("Fichier verrou ~$ ignore")
-    output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_lock.md"
+    output = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_lock.md"
     code, out, err = run_cli(
         [
             "-i",
@@ -332,7 +334,7 @@ def test_lock_file_ignore() -> Result:
             "--yes",
         ]
     )
-    report = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_lock_rapport.json"
+    report = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_lock_rapport.json"
     if not report.exists():
         r.fail("Rapport non genere")
         return r
@@ -350,7 +352,7 @@ def test_lock_file_ignore() -> Result:
 def test_dry_run() -> Result:
     """S19.2 -- CLI --dry-run -> pas de corpus, rapport stats."""
     r = Result("Dry-run avec rapport")
-    output = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_dry.md"
+    output = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_dry.md"
     code, out, err = run_cli(
         [
             "-i",
@@ -363,7 +365,7 @@ def test_dry_run() -> Result:
     if output.exists():
         r.fail("Corpus ne devrait pas exister en dry-run")
         return r
-    report_md = DOSSIER_MIXTE / "CorpusOne_output" / "corpus_dry_rapport.md"
+    report_md = DOSSIER_MIXTE / OUTPUT_DIR_NAME / "corpus_dry_rapport.md"
     if not report_md.exists():
         r.fail("Rapport MD non genere en dry-run")
         return r
@@ -393,7 +395,7 @@ def test_list_formats() -> Result:
 def main() -> int:
     _generate_test_files()
     print("=" * 60)
-    print("Script de recette DocFuse / CorpusOne (CdC S21.4)")
+    print("Script de recette DocFuse (CdC S21.4)")
     print("=" * 60)
     print()
 

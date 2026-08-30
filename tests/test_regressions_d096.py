@@ -446,7 +446,7 @@ class TestGuiDragAndDrop:
 
     def test_specs_bundle_tkdnd_tcl_library(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        for spec in ("CorpusOne.spec", "CorpusOne-OCR.spec"):
+        for spec in ("DocFuse.spec", "DocFuse-OCR.spec"):
             assert 'collect_data_files("tkinterdnd2")' in (root / spec).read_text(encoding="utf-8")
 
 

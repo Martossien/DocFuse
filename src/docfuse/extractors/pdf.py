@@ -28,6 +28,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from docfuse.branding import OCR_VARIANT_NAME
 from docfuse.constants import (
     OCR_DPI,
     OCR_LANG,
@@ -426,7 +427,9 @@ def _apply_ocr(
             _blank_if_garbage(kinds[i], page) if i in ocr_indices else page
             for i, page in enumerate(pages_text)
         ]
-        return cleaned_pages, t("ocr.unavailable_note", pages=len(ocr_indices))
+        return cleaned_pages, t(
+            "ocr.unavailable_note", pages=len(ocr_indices), variant=OCR_VARIANT_NAME
+        )
 
     ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine)
 
