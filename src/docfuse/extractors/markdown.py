@@ -9,9 +9,9 @@ import re
 from pathlib import Path
 
 from docfuse.constants import MARKDOWN_BASE64_MIN_LEN
+from docfuse.core.encoding import decode_text_with_note
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, file_type_for
-from docfuse.extractors.text import decode_text_with_note
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus

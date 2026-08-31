@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import StrEnum
@@ -35,6 +36,7 @@ from docfuse.constants import (
     OCR_MAX_CONCURRENCY,
     OCR_MAX_PAGES_PER_FILE,
     OCR_MAX_PIXELS_PER_PAGE,
+    OCR_MIN_DPI,
     PDF_BOILERPLATE_MAX_LINE_LEN,
     PDF_BOILERPLATE_MIN_OCCURRENCES,
     PDF_BOILERPLATE_MIN_PAGES,
@@ -464,6 +466,73 @@ def _apply_ocr(
     return new_pages, note
 
 
+def _ocr_render_scale(width_pt: float, height_pt: float) -> float | None:
+    """Facteur d'échelle de rastérisation d'une page, ou `None` si elle doit
+    être ignorée (D-105).
+
+    Fonction pure, testable sans moteur OCR ni PDF : c'est elle qui remplace
+    l'ancien `continue` qui perdait purement et simplement toute page dont la
+    surface dépassait `OCR_MAX_PIXELS_PER_PAGE` à `OCR_DPI` — souvent
+    justement les documents qui comptent (plan A0, scan haute résolution,
+    facture numérisée à 600 dpi).
+
+    Portée réelle du sauvetage (D-106 — la docstring précédente et celle de
+    `constants.OCR_MIN_DPI` étaient inexactes). Avec `OCR_DPI = 200` et
+    `OCR_MIN_DPI = 100`, la réduction autorisée est d'un facteur 2 en
+    résolution, donc **4 en surface** : une page est rendue tant que son aire
+    ne dépasse pas `OCR_MAX_PIXELS_PER_PAGE / (OCR_MIN_DPI/72)²`, soit
+    8 294 400 pt². Chiffres mesurés (voir
+    `tests/test_extractors/test_pdf.py::TestOcrRenderScaleBounds`) :
+
+    * A4 (595 × 842 pt) → 200 dpi, plein tarif ;
+    * ARCH E1 (2160 × 3024 pt) → 112,7 dpi ;
+    * ANSI E (2448 × 3168 pt) → 103,4 dpi ;
+    * **A0 (2384 × 3370 pt) → 101,6 dpi** — et non « 120 dpi » comme
+      l'affirmait `constants.py` ;
+    * ARCH E (2592 × 3456 pt) → 96,2 dpi, **sous le plancher : ignorée** ;
+    * B0 (2835 × 4008 pt) → ignorée.
+
+    Les très grands formats restent donc hors de portée. Le découpage de la
+    page en bandes (`crop=` de `pypdfium2`) permettrait de garder 200 dpi,
+    mais **n'a pas été retenu** (D-106) : une bande horizontale coupe les
+    lignes de texte en deux, et Tesseract rend alors du bruit des deux côtés
+    de la coupure — une corruption silencieuse du contenu, strictement pire
+    que la résolution réduite déjà en place. Le rattraper demanderait un
+    recouvrement entre bandes puis une déduplication heuristique des lignes,
+    qui perd ou duplique du texte selon le réglage. Le sauvetage reste donc
+    une réduction d'échelle honnête, et la page hors de portée est
+    journalisée puis traitée par la règle D-086 (`_blank_if_garbage`), jamais
+    silencieusement remplie de texte poubelle.
+
+    Args:
+        width_pt: Largeur de la page en points PDF (1/72 pouce).
+        height_pt: Hauteur de la page en points PDF.
+
+    Returns:
+        L'échelle à passer à `page.render(scale=...)` : `OCR_DPI / 72` si la
+        page tient déjà sous le plafond, sinon l'échelle réduite qui l'y fait
+        tenir exactement. `None` si cette échelle réduite tombe sous
+        `OCR_MIN_DPI` (page inexploitable même OCRisée) ou si les dimensions
+        sont dégénérées.
+    """
+    # D-106 : garde explicite sur chaque dimension, et non sur leur produit.
+    # `(-595, -842)` donnait une aire **positive** et passait à l'échelle
+    # nominale (PDFium recevant des dimensions négatives), et `NaN` traversait
+    # toutes les comparaisons (`NaN <= 0` est faux, `NaN < x` aussi) pour
+    # ressortir en `NaN` vers `page.render(scale=NaN)`. `not (x > 0)` rejette
+    # à la fois zéro, le négatif et `NaN`.
+    if not (width_pt > 0 and height_pt > 0):
+        return None
+    base_scale = OCR_DPI / 72
+    area_pt = width_pt * height_pt
+    if area_pt * base_scale * base_scale <= OCR_MAX_PIXELS_PER_PAGE:
+        return base_scale
+    reduced = math.sqrt(OCR_MAX_PIXELS_PER_PAGE / area_pt)
+    if reduced < OCR_MIN_DPI / 72:
+        return None
+    return reduced
+
+
 def _ocr_pages(
     path: Path,
     page_indices: list[int],
@@ -508,19 +577,32 @@ def _ocr_pages(
                 for idx in capped:
                     try:
                         page = pdf[idx]
-                        # D-096 : le plafond de pixels était vérifié APRÈS le
-                        # rendu — la bitmap complète était déjà allouée (une
-                        # page A0 à 200 dpi ≈ 250 Mo RGBA, une page hostile
-                        # plusieurs Go) : un OOM est un SIGKILL, pas une
-                        # exception rattrapable, et tue tout le processus
-                        # (même classe que D-078). Rejet avant allocation.
+                        # D-096 : le plafond de pixels est vérifié AVANT le
+                        # rendu — sinon la bitmap complète est déjà allouée
+                        # (une page A0 à 200 dpi ≈ 250 Mo RGBA, une page
+                        # hostile plusieurs Go) : un OOM est un SIGKILL, pas
+                        # une exception rattrapable, et tue tout le processus
+                        # (même classe que D-078).
+                        # D-105 : le calcul se fait toujours avant allocation,
+                        # mais une page hors plafond n'est plus perdue — elle
+                        # est rendue à l'échelle réduite qui la fait tenir.
                         width, height = page.get_size()
-                        if (width * scale) * (height * scale) > OCR_MAX_PIXELS_PER_PAGE:
+                        page_scale = _ocr_render_scale(width, height)
+                        if page_scale is None:
                             logger.warning(
                                 "Page %d de %s trop grande pour l'OCR, ignorée", idx + 1, path
                             )
                             continue
-                        bitmap = page.render(scale=scale)
+                        if page_scale < scale:
+                            logger.info(
+                                "Page %d de %s rendue en résolution réduite (%d dpi au lieu de %d)"
+                                " pour tenir sous le plafond mémoire OCR",
+                                idx + 1,
+                                path,
+                                round(page_scale * 72),
+                                OCR_DPI,
+                            )
+                        bitmap = page.render(scale=page_scale)
                         pil_image = bitmap.to_pil()
                         buf = io.BytesIO()
                         pil_image.save(buf, format="PNG")

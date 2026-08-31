@@ -2274,4 +2274,224 @@ d'AGENTS.md : vérifier `DOCFUSE_APP_NAME` au prochain build CI).
 
 ---
 
-*Fin du journal des décisions — Session 15.*
+### D-104 : `.msg` Outlook — aucune propriété lue sans garde
+
+**Contexte** : bug de production sur le serveur Windows de l'utilisateur.
+Des dossiers entiers de mails Outlook sortaient en `ERREUR`, deux causes
+distinctes, toutes deux systématiques :
+
+* `_attachment_name()` lisait `Attachment.long_filename` — attribut qui
+  **n'existe dans aucune version de `python-oxmsg`** (l'API réelle est
+  `file_name`, `PidTagAttachLongFilename`). Tout mail portant une pièce
+  jointe levait `AttributeError` ;
+* `Message.body` lève `UnicodeDecodeError` quand le corps est un
+  `PtypString8` dont la code page annoncée (souvent 65001/UTF-8) ne
+  correspond pas aux octets stockés — cas systématique des mails français
+  écrits en cp1252 (é, è, à, €). Ce n'est pas une exception au chargement :
+  les propriétés d'oxmsg sont paresseuses, le mail s'ouvre puis casse à la
+  lecture du champ.
+
+**Décision** : « aucun `.msg` ne doit faire échouer l'extraction ». Chaque
+propriété est lue défensivement (`_safe()`), et une propriété texte qui lève
+déclenche une **relecture du flux brut** dans le conteneur OLE2
+(`Message._storage.property_stream_bytes(pid, ptyp)`), court-circuitant le
+décodage d'oxmsg et sa code page mensongère. Au pire un champ manque, jamais
+le fichier entier.
+
+**Rejeté** : patcher `python-oxmsg` (dépendance tierce, mise à jour
+impossible côté client) ; déclarer ces mails en erreur (règle 12.4 — jamais
+de perte silencieuse, mais surtout ici : le contenu est parfaitement
+récupérable).
+
+**Vérification** : `tests/test_extractors/test_msg.py::TestMsgRobustness` —
+pièce jointe via l'API réelle, pièce jointe sans nom, nom qui lève, corps
+cp1252 relu du flux brut, HTML binaire relu, corps définitivement illisible
+(le mail reste `READY`), destinataire illisible, pièces jointes annoncées
+mais illisibles.
+
+**Suite** : la relecture critique de ce correctif a trouvé qu'il laissait
+passer exactement la classe de défaut qu'il visait — voir D-106.
+
+---
+
+### D-105 : OCR — échecs diagnosticables, pages géantes lues, console silencieuse
+
+**Contexte** : trois défauts remontés par le même audit en conditions
+réelles (serveur Windows), tous invisibles depuis le poste de développement.
+
+**Décision** :
+
+1. **Langue** — `OCR_LANG = "fra+eng"` fait sortir Tesseract en **code 1
+   pour chaque page** si une seule des deux langues manque du `tessdata` :
+   des centaines de PDF scannés sortaient vides, sans message exploitable.
+   La demande est réduite aux langues réellement installées
+   (`--list-langs` → `available_languages()` → `effective_lang()`), et le
+   `stderr` de Tesseract (jusqu'ici jeté) est journalisé — **une fois par
+   message distinct**, compteur de module sous verrou (l'OCR tourne dans un
+   `ThreadPoolExecutor`), rappel toutes les 50 occurrences. Ajout de
+   `self_test()`, retour sérialisable JSON, destiné à un `docia doctor`.
+2. **Pages géantes** — une page hors `OCR_MAX_PIXELS_PER_PAGE` était
+   purement abandonnée (`continue`), c'est-à-dire du contenu perdu en
+   silence sur exactement les documents qui comptent (plan A0, scan 600
+   dpi). Elle est désormais rendue à l'échelle réduite qui la fait tenir
+   (`_ocr_render_scale()`, fonction pure), avec un plancher de lisibilité
+   `OCR_MIN_DPI`. Le garde-fou mémoire D-096 est intact : le calcul reste
+   **avant** `page.render`, jamais de bitmap allouée puis jetée.
+3. **Bruit console** — les `UserWarning` d'openpyxl (« … extension is not
+   supported and will be removed ») inondaient la console de l'exécutable
+   sans aucune conséquence sur le texte extrait. Filtre ciblé sur le module
+   émetteur et cette seule catégorie ; **pas** de `catch_warnings()` par
+   appel, qui mute l'état global de `warnings` et n'est pas thread-safe.
+
+**Vérification** : `tests/test_core/test_ocr/test_tesseract.py` (langue
+réduite, OCR désactivé sans langue, `stderr` journalisé une fois, tronqué,
+`self_test()` sérialisable) et `tests/test_extractors/test_pdf.py`
+(`TestOcrRenderScale`, plus un bout en bout sous `skipif` Tesseract).
+
+**Suite** : la portée réelle du sauvetage (2) et l'emplacement du filtre (3)
+ont été corrigés par D-106.
+
+---
+
+### D-106 : relecture critique de D-104/D-105 — la perte silencieuse qu'ils laissaient passer
+
+**Contexte** : relecture critique du commit `c7e2b3b` (D-104 + D-105).
+Constat central : **le correctif laissait passer exactement la classe de
+défaut qu'il visait**, la perte silencieuse de données. Neuf défauts
+confirmés, tous reproduits avant correction.
+
+**Décisions**
+
+*MSG (`extractors/msg.py`)*
+
+1. **Sujet et expéditeur disparaissaient en silence (bloquant)**.
+   `subject` et `sender` étaient lus par `_safe()`, qui avale l'exception et
+   rend `""` **sans jamais tenter la relecture brute**. Or `Message.subject`
+   passe par le même `String8Property` avec la même code page mensongère que
+   `Message.body` : sur les mails visés par D-104, le corps était récupéré et
+   le mail sortait en `READY` **amputé de son sujet et de son expéditeur** —
+   là où, avant D-104, il rendait au moins une erreur visible et
+   comptabilisée. Les deux passent désormais par `_property_text()` avec leur
+   PID (`PidTagSubject` 0x0037 ; expéditeur : `PidTagSenderEmailAddress`
+   0x0C1F, puis `PidTagSenderSmtpAddress` 0x5D01, puis `PidTagSenderName`
+   0x0C1A). Les doubles de test exposaient `subject` comme une **chaîne
+   littérale**, jamais une propriété qui lève : ils ne pouvaient pas voir le
+   défaut, ils ont été corrigés pour reproduire la réalité.
+2. **`_decode_8bit` réintroduisait la régression corrigée par D-097**.
+   La cascade `cp1252 → latin-1 → utf-8/replace` n'essaie **jamais** l'UTF-8 :
+   cp1252 ne lève que sur 5 octets indéfinis, donc il « réussit » sur presque
+   tout et rend du mojibake (`RÃ©union budgÃ©taire Ã\xa0 14h â€” cafÃ©…`
+   pour un corps UTF-8 valide). C'est textuellement le scénario déjà résolu
+   dans ce dépôt par `detect_encoding()` (BOM → UTF-8 strict → presque-UTF-8
+   D-097 → cp1252 avec contrôle de plausibilité D-093 → charset-normalizer →
+   latin-1) et `repair_mojibake()`. `msg.py` réutilise l'existant.
+3. **`attachment_count` corrompu → explosion mémoire**. Il sort d'un
+   `struct.unpack("<8x4I", …)` : entier **non signé 32 bits**, sans borne
+   haute. `["?"] * 4294967295` = 34 Go de pointeurs puis un `", ".join` de
+   8 Go — un `MemoryError` est un SIGKILL, pas une exception rattrapable
+   (classe D-078/D-096). Plafonné par `MSG_MAX_ATTACHMENT_PLACEHOLDERS`
+   (50) ; au-delà, `[pièces jointes : N annoncées, illisibles]`.
+4. **Ordre des flux inversé**. `PtypString` (0x001F) est **toujours**
+   utf-16-le, sans ambiguïté, et Outlook écrit fréquemment les deux
+   variantes du même champ : commencer par `PtypString8` rendait
+   `CoÃ»t 12â‚¬` alors que le flux Unicode voisin donnait `Coût 12€`.
+   L'ordre devient `(STRING, STRING8, BINARY)`.
+5. **Pièces jointes et destinataires**. `_attachment_name()` ne faisait
+   qu'une cascade d'attributs : `Attachment.file_name` traverse le même
+   décodage que `subject`, donc lève sur les mêmes mails, et on retombait sur
+   `"?"` alors que le nom est lisible dans `PidTagAttachLongFilename`
+   (0x3707) / `PidTagAttachFilename` (0x3704) — relecture brute ajoutée en
+   dernier recours. `_ATTACHMENT_NAME_ATTRS` est réduit de 8 à 2 noms : six
+   n'existent dans aucune version publiée d'oxmsg et `"name"` est assez
+   générique pour capter un attribut sans rapport. Enfin
+   `_safe(lambda: list(msg.recipients), [])` était tout-ou-rien : un seul
+   destinataire dont la construction lève faisait perdre **tous** les
+   destinataires — l'itérateur est consommé avec un `try` par élément.
+6. **Bruit console**. Le repli de décodage était journalisé en WARNING par
+   propriété et par fichier, sans compteur ni nom de fichier, et le libellé
+   disait « Corps » alors que la fonction sert aussi `html_body`, le sujet et
+   les pièces jointes : sur un dossier de centaines de mails, exactement le
+   bruit que D-105 venait de supprimer côté openpyxl. Passé en DEBUG — le
+   repli n'est pas une anomalie pour l'utilisateur, le texte est récupéré.
+
+*Politique d'avertissements (`extractors/xlsx.py`, `cli.py`, `gui.py`)*
+
+7. **Effet de bord global du filtre**. `warnings.filterwarnings(...)` était
+   posé **à l'import du module**, donc sur le processus hôte : le filtre
+   s'ajoute en tête de `warnings.filters`, une application qui avait choisi
+   `-W error::UserWarning` le perdait **en silence, sans opt-out**, du seul
+   fait d'importer DocFuse ; il disparaissait si l'hôte appelait
+   `warnings.resetwarnings()` ; et la regex n'était pas ancrée
+   (`openpyxl_autre.chose` était couvert). Le raisonnement anti-
+   `catch_warnings()` de D-105 (non thread-safe) reste juste, mais la place
+   d'une politique d'avertissements est le **point d'entrée applicatif** :
+   `silence_openpyxl_warnings()` devient une API publique documentée,
+   appelée par `cli.main()` et `gui.launch()`, et par personne d'autre. Une
+   bibliothèque appelante décide elle-même (côté docia : à ajouter à son
+   propre point d'entrée).
+
+*OCR (`extractors/pdf.py`, `constants.py`, `core/ocr/tesseract.py`)*
+
+8. **`_ocr_render_scale` : docstring inexacte et bornes dégénérées**. La
+   formule et le garde-fou D-096 sont corrects, mais la portée annoncée était
+   fausse : avec `OCR_DPI = 200` et `OCR_MIN_DPI = 100`, le sauvetage est
+   borné à un facteur 2 en résolution, **4 en surface** — une page A0 sort à
+   **101,6 dpi** (et non « 120 dpi » comme l'affirmait `constants.py`), un
+   ANSI E à 103,4 dpi, tandis qu'un ARCH E (96,2 dpi) et un B0 restent
+   ignorés. Les docstrings disent maintenant les chiffres mesurés.
+   Le **découpage en bandes** (`crop=` de `pypdfium2`), qui permettrait de
+   garder 200 dpi, a été **examiné puis écarté** : une bande horizontale
+   coupe les lignes de texte en deux et Tesseract rend du bruit des deux
+   côtés de la coupure — une corruption silencieuse du contenu, strictement
+   pire que la résolution réduite ; le rattraper demanderait un recouvrement
+   entre bandes puis une déduplication heuristique qui perd ou duplique du
+   texte selon le réglage. Bornes dégénérées corrigées : `(-595, -842)`
+   donnait une surface **positive** et passait à l'échelle nominale, et `NaN`
+   traversait toutes les comparaisons pour ressortir en `NaN` vers
+   `page.render` — la garde devient `if not (width_pt > 0 and height_pt > 0)`.
+9. **Caches OCR**. `_FAILURE_COUNTS` n'était borné par rien et sa clé
+   contenait le `stderr` complet : une valeur variable (« Estimating
+   resolution as 633 ») créait une clé neuve par page — dictionnaire qui
+   croît sans fin **et** dédoublonnage inopérant, donc le bruit revient. La
+   clé est normalisée (chiffres neutralisés) et le nombre de causes
+   distinctes plafonné (200 + un seau de débordement). `_list_langs` est un
+   `lru_cache(maxsize=1)` sans purge : un échec transitoire (timeout) était
+   mémorisé pour toute la vie du process — dans une session longue (fenêtre
+   docia), installer un `.traineddata` ne débloquait rien avant redémarrage ;
+   `reset_language_cache()` est ajouté à côté de `reset_failure_counts()`.
+   Enfin `_failure_message(binary, "--list-langs", result)` passait une
+   **option** dans le paramètre `lang` et le journal affichait « langue :
+   --list-langs » : le paramètre devient `context`, explicite.
+
+*Emplacement de la détection d'encodage*
+
+10. `detect_encoding()` / `repair_mojibake()` sont remontés de
+    `extractors/text.py` vers **`core/encoding.py`** : cinq extracteurs en
+    dépendaient déjà et `msg.py` devait s'en servir à son tour — importer
+    `extractors.text` depuis un autre extracteur y déclenche
+    l'enregistrement d'un extracteur (`@register`) comme effet de bord d'un
+    besoin de décodage. Le décodage est un service du cœur.
+    `extractors/text.py` réexporte les mêmes noms (adresse historique de
+    cette API, aucun appelant cassé), la définition n'existe qu'une fois.
+
+**Rejeté** : découper les pages géantes en bandes (voir 8) ; garder le
+filtre d'avertissements à l'import « parce que l'exécutable en a besoin »
+(l'exécutable passe par `cli.main()`/`gui.launch()`, qui le posent) ;
+remplacer `_safe()` partout par `_property_text()` (une propriété absente
+vaut légitimement `None` — la relecture brute n'a de sens que pour les
+champs texte qui *lèvent*).
+
+**Vérification** : chaque défaut a un test qui **échoue avant** et **passe
+après** — 25 tests ajoutés (`TestMsgSilentLossD106`,
+`TestOxmsgContract`, `TestOpenpyxlWarningsAreNotAGlobalSideEffect`,
+`TestOcrRenderScaleBounds`, `TestFailureCacheBounds`). Les doubles de test
+MSG reproduisent la réalité : propriétés qui **lèvent**, flux `PtypString`
+**et** `PtypString8` présents simultanément, octets UTF-8 valides et
+tronqués. Un **test de contrat oxmsg** échoue explicitement si
+`Message._storage` / `Storage.property_stream_bytes` /
+`Attachment._storage` disparaît, plutôt que de laisser tous les replis
+rendre `""` en silence. Suite complète : 606 réussis, 39 ignorés.
+
+---
+
+*Fin du journal des décisions — Session 16.*

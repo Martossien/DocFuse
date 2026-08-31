@@ -20,9 +20,9 @@ from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 
+from docfuse.core.encoding import decode_text
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, file_type_for
-from docfuse.extractors.text import decode_text
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 

@@ -329,6 +329,22 @@ MARKDOWN_BASE64_MIN_LEN: int = 100
 intégrée à retirer (évite de matcher de courtes chaînes accidentelles)."""
 
 # ──────────────────────────────────────────────────────────────────────────────
+# MSG (email Outlook) — garde-fou mémoire sur le nombre de pièces jointes
+# ──────────────────────────────────────────────────────────────────────────────
+
+MSG_MAX_ATTACHMENT_PLACEHOLDERS: int = 50
+"""Nombre maximal de marqueurs « ? » matérialisés quand les pièces jointes
+sont annoncées mais illisibles (D-106).
+
+`Message.attachment_count` sort d'un `struct.unpack("<8x4I", …)` : un entier
+**non signé 32 bits** lu dans le fichier, sans borne haute. Un `.msg`
+corrompu ou hostile annonçant 4 294 967 295 pièces jointes faisait allouer
+34 Go de pointeurs puis joindre 8 Go de chaînes — un `MemoryError` est un
+SIGKILL du processus entier, pas une exception rattrapable (même classe que
+D-078 et D-096). Au-delà de ce plafond, le nombre annoncé est écrit tel quel
+plutôt que matérialisé : l'information est conservée, la mémoire aussi."""
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Détection de doublons de contenu entre fichiers (v0.1.3)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -376,6 +392,22 @@ OCR_MAX_PAGES_PER_FILE: int = 200
 
 OCR_MAX_PIXELS_PER_PAGE: int = 4000 * 4000
 """Plafond largeur×hauteur d'une page rastérisée — protection mémoire."""
+
+OCR_MIN_DPI: int = 100
+"""Résolution plancher de rastérisation avant OCR (D-105). Une page trop
+grande pour tenir sous `OCR_MAX_PIXELS_PER_PAGE` à `OCR_DPI` n'est plus
+abandonnée : elle est rendue à l'échelle réduite qui l'y fait tenir. En
+dessous de cette résolution, le taux d'erreur caractère rend le résultat
+inexploitable — la page est alors seulement ignorée.
+
+D-106 : chiffres exacts (l'ancienne rédaction annonçait « 120 dpi » pour un
+A0, ce qui est faux). Le rapport `OCR_DPI / OCR_MIN_DPI` = 2 borne la
+réduction à un facteur **4 en surface** : sont rendues les pages dont l'aire
+ne dépasse pas `OCR_MAX_PIXELS_PER_PAGE / (OCR_MIN_DPI/72)²` = 8 294 400 pt².
+Un A0 (2384 × 3370 pt) sort donc à **101,6 dpi**, un ANSI E à 103,4 dpi ; un
+ARCH E (2592 × 3456 pt, 96,2 dpi) et un B0 restent ignorés. Voir
+`extractors/pdf.py::_ocr_render_scale` pour la justification du refus de
+découper la page en bandes."""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Détection d'encodage : plausibilité du décodage cp1252 (D-093)

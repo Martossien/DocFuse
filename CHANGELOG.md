@@ -8,6 +8,104 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 > Pour les notes de version détaillées (visibles sur la page GitHub Releases),
 > voir le dossier [`docs/releases/`](./docs/releases/).
 
+## [Unreleased]
+
+### Corrigé
+
+- **Extraction MSG robuste** (D-104) — deux plantages en masse sur des
+  `.msg` Outlook réels (serveur Windows de production) :
+  - le nom des pièces jointes était lu via `Attachment.long_filename`,
+    attribut inexistant dans `python-oxmsg` (l'API réelle est `file_name`) —
+    `AttributeError` sur tout mail avec pièce jointe. La lecture passe
+    désormais par une cascade de noms d'attribut tolérante aux versions ;
+  - `Message.body` lève `UnicodeDecodeError` quand le corps est un
+    `PtypString8` dont la code page déclarée (souvent 65001/UTF-8) ne
+    correspond pas aux octets stockés — cas systématique des mails français
+    en cp1252 (é, è, à, €). Le flux brut est relu dans le conteneur OLE2
+    (décodage confié à `core/encoding.py` depuis D-106).
+
+  Plus généralement, aucune propriété MSG n'est désormais lue sans garde :
+  un mail dont un champ est illisible reste extrait au mieux au lieu de
+  basculer le fichier entier en ERREUR.
+
+- **OCR : échecs diagnosticables, pages géantes lues, console silencieuse**
+  (D-105) — trois défauts remontés par un audit réel sur serveur Windows :
+  - Tesseract échouait en code 1 sur *chaque* page (des centaines de PDF
+    scannés sortis vides et mal classés) et son `stderr` était jeté : le
+    journal ne disait que « tesseract a renvoyé le code 1 ». Le `stderr`
+    (tronqué à 500 caractères), le binaire et la langue sont désormais
+    journalisés, **une seule fois par message distinct** (compteur de module
+    protégé par un verrou, l'OCR tournant dans un pool de threads), avec un
+    rappel toutes les 50 occurrences. Cause première corrigée :
+    `OCR_LANG = "fra+eng"` fait échouer Tesseract si une seule des deux
+    langues manque du `tessdata` — la langue demandée est maintenant réduite
+    aux langues réellement installées (`available_languages()` via
+    `tesseract --list-langs`, mis en cache), avec un avertissement explicite
+    (« langue eng absente du tessdata, OCR en fra seul »), et l'OCR est
+    proprement désactivé si aucune langue n'est disponible. Nouvelle
+    fonction publique `core.ocr.tesseract.self_test()` (retour JSON) :
+    binaire, version, `TESSDATA_PREFIX`, langues installées, langue
+    effective et OCR réel sur une image générée en mémoire.
+  - Une page dépassant `OCR_MAX_PIXELS_PER_PAGE` était purement abandonnée
+    (« trop grande pour l'OCR, ignorée ») — un plan A0 ou un scan haute
+    résolution n'était jamais lu. Elle est désormais rastérisée à l'échelle
+    réduite qui la fait tenir sous le plafond (garde-fou mémoire D-096
+    inchangé : le calcul reste **avant** `page.render`), jusqu'à un plancher
+    de lisibilité `OCR_MIN_DPI` (100 dpi) sous lequel elle est seulement
+    ignorée. Journal INFO à chaque page rendue en résolution réduite.
+  - Les `UserWarning` d'openpyxl (« Data Validation extension is not
+    supported and will be removed », « Unknown extension », « Conditional
+    Formatting extension ») inondaient la console de l'exécutable sans aucune
+    conséquence sur le texte extrait : filtre posé une fois à l'import de
+    `extractors/xlsx.py`, ciblé sur le module émetteur et cette seule
+    catégorie (pas de `catch_warnings()` par appel, qui n'est pas
+    thread-safe). Depuis D-106, le filtre est posé par le **point d'entrée
+    applicatif** (`cli.main()` / `gui.launch()`) et non à l'import.
+
+- **Relecture critique de D-104/D-105 : la perte silencieuse qu'ils
+  laissaient passer** (D-106) — neuf défauts confirmés et reproduits :
+  - **MSG, sujet et expéditeur perdus en silence** : `subject` et `sender`
+    étaient lus par une garde qui rend `""` sans jamais tenter la relecture
+    brute, alors qu'ils traversent le même décodage que le corps. Les mails
+    visés par D-104 sortaient donc en `READY` **amputés de leurs deux
+    en-têtes principaux** — pire qu'avant D-104, où l'erreur était au moins
+    visible et comptabilisée. Ils passent par les PID `PidTagSubject`,
+    `PidTagSenderEmailAddress`/`SmtpAddress`/`SenderName`.
+  - **MSG, mojibake** : la cascade de repli `cp1252 → latin-1` n'essayait
+    jamais l'UTF-8 (cp1252 ne lève que sur 5 octets indéfinis) et rendait
+    `RÃ©union budgÃ©taire` sur un corps UTF-8 parfaitement valide — la
+    régression même que D-097 avait corrigée ailleurs. Le décodage réutilise
+    `detect_encoding()` / `repair_mojibake()`, remontés dans
+    `core/encoding.py`.
+  - **MSG, explosion mémoire** : `attachment_count` est un entier non signé
+    32 bits lu dans le fichier ; un `.msg` corrompu annonçant 4 294 967 295
+    pièces jointes faisait allouer 34 Go (un `MemoryError` est un SIGKILL,
+    pas une exception rattrapable). Plafonné à 50 marqueurs, au-delà
+    `[pièces jointes : N annoncées, illisibles]`.
+  - **MSG, flux Unicode ignoré** : Outlook écrit souvent les deux variantes
+    d'un champ ; le flux 8 bits était essayé en premier (`CoÃ»t 12â‚¬`) alors
+    que le `PtypString` voisin est toujours de l'utf-16-le (`Coût 12€`).
+  - **MSG, divers** : nom de pièce jointe avec repli brut
+    (`PidTagAttachLongFilename`/`AttachFilename`), destinataires lus un par
+    un (un seul illisible faisait perdre toute la liste), repli de décodage
+    journalisé en DEBUG et non plus en WARNING par propriété et par fichier.
+  - **Avertissements openpyxl** : le filtre était posé à l'import du module,
+    donc sur le processus hôte — une application avec `-W error::UserWarning`
+    perdait son choix en silence, sans opt-out. `silence_openpyxl_warnings()`
+    devient une API publique appelée par les points d'entrée, et sa regex est
+    ancrée.
+  - **OCR, bornes dégénérées** : `_ocr_render_scale(-595, -842)` donnait une
+    surface positive et passait à l'échelle nominale ; un `NaN` traversait
+    toutes les comparaisons jusqu'à `page.render`. Docstrings corrigées : une
+    page A0 sort à **101,6 dpi** et non « 120 dpi ».
+  - **OCR, caches** : le compteur d'échecs n'était borné par rien et sa clé
+    contenait le `stderr` complet (« Estimating resolution as 633 » créait
+    une clé par page — dédoublonnage inopérant, bruit de retour) ; clé
+    normalisée et nombre de causes plafonné. Ajout de
+    `reset_language_cache()` : un échec transitoire du listage des langues
+    était mémorisé pour toute la vie du process. Le message d'échec ne dit
+    plus « langue : --list-langs ».
+
 ## [0.2.0] - 2026-08-30 — Beta
 
 Version de reprise du projet Doc-IA : DocFuse devient la brique

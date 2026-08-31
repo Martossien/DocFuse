@@ -13,9 +13,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from docfuse.core.encoding import detect_encoding, mojibake_metadata, repair_mojibake
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, file_type_for
-from docfuse.extractors.text import detect_encoding, mojibake_metadata, repair_mojibake
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 

@@ -10,9 +10,9 @@ import io
 from pathlib import Path
 
 from docfuse.constants import CSV_FIELD_SIZE_LIMIT
+from docfuse.core.encoding import decode_text_with_note
 from docfuse.core.registry import register
 from docfuse.extractors.base import Extractor, error_result, file_type_for
-from docfuse.extractors.text import decode_text_with_note
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 

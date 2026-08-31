@@ -248,3 +248,150 @@ class TestXlsxExtractor:
         result = XlsxExtractor.extract(f, "with_text_image.xlsx")
         assert "onjour" in result.text or "Excel" in result.text
         assert result.embedded_images == []
+
+
+def _xlsx_with_unsupported_extension(tmp_path: Path) -> Path:
+    """Classeur portant une extension OOXML qu'openpyxl ne sait pas modéliser.
+
+    C'est le cas réel du serveur de production : openpyxl émet alors
+    « Data Validation extension is not supported and will be removed » à
+    chaque lecture de feuille. La validation de données x14 ne s'écrit pas
+    avec openpyxl — le bloc `<extLst>` est injecté directement dans le XML de
+    la feuille, comme le fait Excel.
+    """
+    import zipfile
+
+    import openpyxl
+
+    plain = tmp_path / "_plain.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "Client"
+    ws["B1"] = "Montant"
+    ws["A2"] = "ACME"
+    ws["B2"] = 42
+    wb.save(str(plain))
+
+    ext_block = (
+        b'<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" '
+        b'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+        b'<x14:dataValidations count="0"/></ext></extLst>'
+    )
+    f = tmp_path / "validation.xlsx"
+    with zipfile.ZipFile(plain) as zin, zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                data = data.replace(b"</worksheet>", ext_block + b"</worksheet>")
+            zout.writestr(item, data)
+    return f
+
+
+class TestOpenpyxlWarnings:
+    """D-105 : le bruit openpyxl (« … extension is not supported and will be
+    removed ») remontait dans la console de l'exécutable et inquiétait
+    l'utilisateur, alors qu'il est sans effet sur le texte extrait."""
+
+    def test_fixture_really_triggers_the_warning(self, tmp_path: Path) -> None:
+        """Garde-fou du test suivant : sans le filtre, openpyxl avertit bien."""
+        import warnings
+
+        import openpyxl
+
+        f = _xlsx_with_unsupported_extension(tmp_path)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            openpyxl.load_workbook(str(f))
+        assert any("extension is not supported" in str(w.message) for w in caught)
+
+    def test_extraction_emits_no_openpyxl_warning(self, tmp_path: Path) -> None:
+        import warnings
+
+        from docfuse.extractors.xlsx import silence_openpyxl_warnings
+
+        f = _xlsx_with_unsupported_extension(tmp_path)
+        with warnings.catch_warnings(record=True) as caught:
+            # Le filtre est posé par le point d'entrée applicatif
+            # (`cli.main` / `gui.launch`, D-106) : on reproduit ici cet état.
+            silence_openpyxl_warnings()
+            result = XlsxExtractor.extract(f, "validation.xlsx")
+
+        assert result.status == FileStatus.READY
+        assert "ACME" in result.text
+        assert [str(w.message) for w in caught if w.category is UserWarning] == []
+
+
+class TestOpenpyxlWarningsAreNotAGlobalSideEffect:
+    """D-106 : le filtre était posé **à l'import du module**, donc sur le
+    processus hôte, sans opt-out. Une application qui avait choisi
+    `-W error::UserWarning` le perdait en silence du seul fait d'importer
+    DocFuse ; la place d'une politique d'avertissements est le point d'entrée
+    applicatif."""
+
+    def test_importing_the_module_installs_no_filter(self) -> None:
+        import subprocess
+        import sys
+
+        # Processus neuf : `warnings.filters` intact au moment de l'import.
+        code = (
+            "import warnings, sys;"
+            "before = list(warnings.filters);"
+            "import docfuse.extractors.xlsx;"
+            "print(warnings.filters == before)"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        )
+        assert proc.stdout.strip() == "True", (
+            "importer docfuse.extractors.xlsx modifie warnings.filters du "
+            f"processus hôte : {proc.stdout!r}"
+        )
+
+    def test_host_policy_w_error_survives_the_import(self) -> None:
+        """La preuve côté utilisateur : une application hôte qui a posé
+        `-W error::UserWarning` doit garder son choix après un simple `import
+        docfuse`. Avant D-106, le filtre posé à l'import passait devant (il est
+        inséré **en tête** de `warnings.filters`) et l'avertissement openpyxl
+        était avalé, sans opt-out."""
+        import subprocess
+        import sys
+
+        # `warn_explicit(..., module=...)` reproduit un avertissement émis
+        # depuis openpyxl sans avoir à ouvrir un vrai classeur.
+        code = (
+            "import docfuse.extractors.xlsx, warnings;"
+            "warnings.warn_explicit("
+            "'Unknown extension is not supported and will be removed',"
+            " UserWarning, 'openpyxl/reader/excel.py', 1, module='openpyxl.reader.excel');"
+            "print('AVALE')"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-W", "error::UserWarning", "-c", code],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0, f"le -W error de l'hôte a été neutralisé : {proc.stdout!r}"
+        assert "UserWarning" in proc.stderr
+
+    def test_entry_points_install_the_filter(self) -> None:
+        """`cli.main` et `gui.launch` appellent bien la fonction publique."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent.parent / "src" / "docfuse"
+        for name in ("cli.py", "gui.py"):
+            source = (root / name).read_text("utf-8")
+            assert "silence_openpyxl_warnings()" in source, (
+                f"{name} ne pose plus la politique d'avertissements openpyxl"
+            )
+
+    def test_filter_regex_is_anchored_on_openpyxl(self) -> None:
+        """La regex `module=` est compilée puis `.match()`ée : non ancrée,
+        elle couvrait aussi `openpyxl_autre.chose`."""
+        import re
+
+        from docfuse.extractors.xlsx import _OPENPYXL_MODULE_RE
+
+        pattern = re.compile(_OPENPYXL_MODULE_RE)
+        assert pattern.match("openpyxl")
+        assert pattern.match("openpyxl.worksheet._reader")
+        assert not pattern.match("openpyxl_autre.chose")

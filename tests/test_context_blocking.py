@@ -427,9 +427,12 @@ class TestWindowsBehavior:
         assert "cli" in main.lower()
 
     def test_cp1252_before_charset_normalizer(self) -> None:
-        """cp1252 est essayé avant charset-normalizer (priorité Windows)."""
+        """cp1252 est essayé avant charset-normalizer (priorité Windows).
+
+        D-106 : la détection d'encodage a été remontée dans `core/encoding.py`
+        (elle sert six modules, dont `extractors/msg.py`)."""
         text = (
-            Path(__file__).resolve().parent.parent / "src" / "docfuse" / "extractors" / "text.py"
+            Path(__file__).resolve().parent.parent / "src" / "docfuse" / "core" / "encoding.py"
         ).read_text("utf-8")
         cp1252_pos = text.find("cp1252")
         cn_pos = text.find("charset_normalizer")

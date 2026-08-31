@@ -7,6 +7,7 @@ CdC §9.4 — Détection images via LTImage/LTFigure.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -324,3 +325,123 @@ class TestPdfOcr:
         result = PdfExtractor.extract(f, "native.pdf")
         assert "ocr" not in result.extra_metadata
         assert "texte OCR" not in result.text
+
+
+class TestOcrRenderScale:
+    """D-105 : une page hors plafond mémoire n'est plus abandonnée
+    (« trop grande pour l'OCR, ignorée ») mais rendue à l'échelle réduite."""
+
+    def test_normal_page_keeps_nominal_dpi(self) -> None:
+        from docfuse.constants import OCR_DPI
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(595, 842) == pytest.approx(OCR_DPI / 72)  # A4
+
+    def test_oversized_page_is_scaled_down_not_dropped(self) -> None:
+        from docfuse.constants import OCR_MAX_PIXELS_PER_PAGE, OCR_MIN_DPI
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        width, height = 3370.0, 2384.0  # A0 paysage, ~62 Mpx à 200 dpi
+        scale = _ocr_render_scale(width, height)
+        assert scale is not None
+        assert (width * scale) * (height * scale) <= OCR_MAX_PIXELS_PER_PAGE
+        assert scale * 72 >= OCR_MIN_DPI
+
+    def test_scaled_page_uses_the_whole_budget(self) -> None:
+        """L'échelle réduite est la plus grande qui tienne — pas de perte de
+        lisibilité gratuite."""
+        from docfuse.constants import OCR_MAX_PIXELS_PER_PAGE
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        scale = _ocr_render_scale(2000.0, 2000.0)
+        assert scale is not None
+        assert (2000.0 * scale) ** 2 == pytest.approx(OCR_MAX_PIXELS_PER_PAGE)
+
+    def test_page_below_readability_floor_is_still_skipped(self) -> None:
+        """Le garde-fou mémoire (D-096) reste : sous ~100 dpi le résultat
+        serait illisible, la page est ignorée comme avant."""
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(20000.0, 20000.0) is None
+
+    def test_degenerate_size_is_skipped(self) -> None:
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(0.0, 800.0) is None
+
+
+class TestOcrRenderScaleBounds:
+    """D-106 : bornes dégénérées et portée réelle du sauvetage D-105."""
+
+    def test_negative_dimensions_are_rejected(self) -> None:
+        """`(-595, -842)` donne une aire **positive** : la garde `area <= 0`
+        laissait passer la page à l'échelle nominale, dimensions négatives
+        transmises telles quelles à `page.render()`."""
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(-595.0, -842.0) is None
+        assert _ocr_render_scale(-595.0, 842.0) is None
+        assert _ocr_render_scale(595.0, -842.0) is None
+
+    def test_nan_dimensions_are_rejected(self) -> None:
+        """`NaN` est faux dans toutes les comparaisons : il traversait la
+        fonction entière et ressortait en `NaN` vers `page.render(scale=NaN)`."""
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(math.nan, 842.0) is None
+        assert _ocr_render_scale(595.0, math.nan) is None
+        assert _ocr_render_scale(math.nan, math.nan) is None
+
+    def test_infinite_dimensions_are_rejected(self) -> None:
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        assert _ocr_render_scale(math.inf, 842.0) is None
+
+    def test_documented_formats_match_the_docstring(self) -> None:
+        """Les chiffres annoncés par la docstring (et par `OCR_MIN_DPI`) sont
+        ceux que la fonction produit réellement — un A0 sort à 101,6 dpi, pas
+        à « 120 dpi »."""
+        from docfuse.extractors.pdf import _ocr_render_scale
+
+        a0 = _ocr_render_scale(2384.0, 3370.0)
+        assert a0 is not None
+        assert a0 * 72 == pytest.approx(101.6, abs=0.1)
+
+        ansi_e = _ocr_render_scale(34 * 72, 44 * 72)
+        assert ansi_e is not None
+        assert ansi_e * 72 == pytest.approx(103.4, abs=0.1)
+
+        # ARCH E (96,2 dpi) et B0 tombent sous le plancher : ignorés.
+        assert _ocr_render_scale(36 * 72, 48 * 72) is None
+        assert _ocr_render_scale(2835.0, 4008.0) is None
+
+    @pytest.mark.skipif(not _OCR_AVAILABLE, reason="Tesseract non installé")
+    def test_giant_scanned_page_is_ocred_not_ignored(self, tmp_path: Path) -> None:
+        """Bout en bout : une page géante (hors plafond à 200 dpi) doit sortir
+        du texte, là où l'ancien `continue` la perdait entièrement."""
+        from PIL import Image, ImageDraw
+        from reportlab.pdfgen import canvas
+
+        from docfuse.constants import OCR_DPI, OCR_MAX_PIXELS_PER_PAGE
+        from docfuse.extractors.pdf import _ocr_pages
+
+        width = height = 2000.0  # ~31 Mpx à 200 dpi, au-dessus du plafond
+        assert (width * OCR_DPI / 72) * (height * OCR_DPI / 72) > OCR_MAX_PIXELS_PER_PAGE
+
+        img = Image.new("RGB", (2000, 2000), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((100, 900), "FACTURE 4711", fill="black")
+        big = img.resize((4000, 4000), Image.LANCZOS)
+        png_path = tmp_path / "_giant.png"
+        big.save(png_path)
+
+        pdf_path = tmp_path / "giant.pdf"
+        c = canvas.Canvas(str(pdf_path), pagesize=(width, height))
+        c.drawImage(str(png_path), 0, 0, width=width, height=height)
+        c.showPage()
+        c.save()
+
+        results = _ocr_pages(pdf_path, [0], "fra+eng", TesseractEngine())
+        text, ok = results[0]
+        assert ok is True, f"page géante toujours ignorée : {results}"
+        assert "4711" in text

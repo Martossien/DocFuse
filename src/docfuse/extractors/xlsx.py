@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import posixpath
 import re
+import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import closing
@@ -24,6 +25,46 @@ from docfuse.models.file_status import FileStatus
 logger = logging.getLogger(__name__)
 
 _MERGE_CELL_REF_RE = re.compile(r'<mergeCell ref="([^"]+)"')
+
+
+# Le filtre vise le module émetteur — `openpyxl` lui-même ou un sous-module.
+# D-106 : la regex était `"openpyxl"`, non ancrée : `warnings` la compile puis
+# appelle `.match()`, donc `openpyxl_autre.chose` était couvert aussi.
+_OPENPYXL_MODULE_RE = r"openpyxl(\.|$)"
+
+
+def silence_openpyxl_warnings() -> None:
+    """Neutralise les `UserWarning` d'openpyxl (D-105) — **API publique**.
+
+    openpyxl avertit sur chaque fonctionnalité de classeur qu'il ne sait pas
+    représenter en mémoire (« Data Validation extension is not supported and
+    will be removed », « Conditional Formatting extension… », « Unknown
+    extension… », en-têtes non conformes…). DocFuse ne réécrit **jamais** un
+    classeur : il n'en lit que le texte, donc ces avertissements n'ont
+    aucune conséquence sur la sortie — mais ils remontaient en masse dans la
+    console de l'exécutable et inquiétaient l'utilisateur.
+
+    Volontairement **pas** un `warnings.catch_warnings()` autour de chaque
+    appel : ce dernier mute l'état global de `warnings` et n'est pas
+    thread-safe — il fuirait entre les fichiers traités en parallèle par le
+    `ThreadPoolExecutor` de l'orchestrateur (masquant des avertissements
+    d'autres extracteurs, ou laissant passer ceux-ci selon l'entrelacement).
+
+    D-106 : ce filtre n'est **plus posé à l'import du module**. Poser un
+    filtre global depuis l'import d'une bibliothèque est un effet de bord sur
+    le processus hôte, sans opt-out : il s'ajoute en tête de
+    `warnings.filters` et une application qui avait choisi
+    `-W error::UserWarning` perdait ce choix en silence, du seul fait
+    d'importer DocFuse. La place d'une politique d'avertissements est le
+    **point d'entrée applicatif** : `cli.main()` et `gui.launch()` l'appellent
+    (voir aussi la note d'intégration côté docia). Une bibliothèque appelante
+    décide elle-même, ou ne l'appelle pas.
+
+    Le filtre vise le module émetteur (`openpyxl` et ses sous-modules) et la
+    seule catégorie `UserWarning` : rien d'autre n'est masqué. Idempotent —
+    `warnings.filterwarnings` dédoublonne les entrées identiques.
+    """
+    warnings.filterwarnings("ignore", category=UserWarning, module=_OPENPYXL_MODULE_RE)
 
 
 @register(".xlsx")

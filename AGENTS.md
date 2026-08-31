@@ -203,24 +203,24 @@ Conventional Commits (sans scope obligatoire) :
 
 ## 10. Journaux
 
-- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-103).
+- `docs/journal-decisions.md` — historique des décisions d'architecture (D-001 à D-106).
 - `docs/journal-avancement.md` — suivi de l'implémentation, session par session, avec statut.
 - `docs/cahier-des-charges-docfuse.md` — cahier des charges contractuel (lecture seule).
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 15 — 0.2.0 beta)
+## 11. État actuel (Session 16 — 0.2.0 beta + correctifs D-104..D-106)
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers source Python | 57 |
-| Tests collectés depuis un clone frais | 593 (572 + 21 nouveaux : splitter, branding) |
+| Fichiers source Python | 60 (+`core/encoding.py`, D-106) |
+| Tests collectés depuis un clone frais | 644 (593 + 26 : D-104/D-105 ; + 25 : D-106) |
 | ruff | ✅ épinglé `==0.16.5` (D-079), plus de dérive local/CI possible |
 | mypy --strict | ✅ 0 erreur (D-088 : `mypy`/`types-beautifulsoup4` épinglés, le "baseline" de 5 erreurs pré-existantes tout au long de la session était en réalité un artefact de dérive locale) |
-| pytest | ✅ 555 passed, 39 skipped (`tests/samples_real/` absent) |
+| pytest | ✅ 606 passed, 39 skipped (`tests/samples_real/` absent) |
 | Script de recette | ✅ 7/7 PASS |
 | Fichiers de test réels | ⚠️ non présents dans le clone Git (voir « Reste à faire ») |
-| Décisions archivées | 103 (D-001 à D-103) |
+| Décisions archivées | 106 (D-001 à D-106) |
 | Audit qualité (session 14) | 4 auditeurs parallèles + reproduction de chaque finding ; lot 1 livré (D-096 : 23 correctifs contenu perdu/plantage, dont glisser-déposer GUI jamais fonctionnel, HTML `<div>` aplati, doublon retiré = contenu perdu) ; lot 2 livré (D-097 : ftfy restreint à la corruption d'encodage, chemin rapide ASCII, presque-UTF-8, HTML sans charset) ; lot 3 livré (D-098 : OCR des images intégrées parallélisé dans le fichier, sémaphore Tesseract global, XLSX/DOCX/PDF sans re-lecture — 28,4 s → 10,6 s sur ~/Documents, corpus identique byte à byte) ; lot 4 livré (D-099 : gardes/notes/rapports/chemins factorisés, politique `file_type` unique, helpers GUI purs — trois bugs révélés par la factorisation dont un `.md` encapsulé contre le CdC). Audit clos. |
 | Audit extracteurs | 17 bugs de perte silencieuse/qualité corrigés (D-069 à D-076 forte gravité, D-080 à D-087 gravité moyenne) — DOCX, EML, PDF, ODF, HTML, PPTX, RTF, XLSX, MHTML |
 | Test conditions réelles | ~/Documents + ~/Téléchargements + machine Windows réelle — bugs trouvés et corrigés : D-077 (bruit JS/CSS minifié), **D-078 (crash SIGSEGV, PDFium non thread-safe)**, D-088 (dérive mypy/CI), D-089 (fichiers Office protégés par mot de passe), D-090 (tri GUI + fenêtre élargie), D-091 (OCR images intégrées DOCX/PPTX + export pour description LLM), D-092 (erreurs JSON/XML clarifiées, `__MACOSX/` ignoré), D-093 (mojibake, garde-fou zip, plausibilité d'encodage, EPUB, images XLSX/ODF), D-094 (support .doc/.xls/.ppt/.msg) |
@@ -241,6 +241,9 @@ Conventional Commits (sans scope obligatoire) :
 | Découpage par budget | ✅ `--split-context` / case GUI / `"split_context": true` → `corpus_001.md`, `corpus_002.md`… chacun sous le plafond, remplissage séquentiel dans l'ordre du tri, **jamais de coupe dans un fichier**. Un fichier hors plafond est isolé dans sa propre partie et signalé (préambule + rapport), jamais abandonné. Rapport unique : section « Parties du corpus », clé JSON `parts` + `part` par fichier. Le code retour 2 n'existe plus dans ce mode (D-101, `core/splitter.py` + `orchestrator.generate_corpus_parts`) |
 | Nom d'application | ✅ `branding.py` est le seul endroit qui connaît le nom : `DocFuse` par défaut, surchargeable par `DOCFUSE_APP_NAME` (runtime **et** specs PyInstaller). En dérivent `DocFuse_output/`, `DocFuse.json`, `%APPDATA%\DocFuse\config.json`, `%TEMP%\DocFuse\docfuse.log`, l'auteur PDF, le titre de fenêtre, `DocFuse-OCR`. Configs héritées d'une 0.1.x (ancien nom de code) encore **lues** en repli, jamais écrites ; anciennes sorties `*_report.*` toujours ignorées par l'inventaire (D-102) |
 | Extras `gui` | ✅ `customtkinter`/`tkinterdnd2` sortis des dépendances obligatoires : `pip install docfuse` = cœur (CLI + bibliothèque), `pip install "docfuse[gui]"` = + interface. `python -m docfuse` sans la GUI affiche un message clair (`gui.not_installed`), pas de trace. `py.typed` publié : annotations visibles par mypy chez les consommateurs (D-103) |
+| Robustesse `.msg` Outlook | ✅ D-104 (pièces jointes, corps `PtypString8` à code page mensongère) puis **D-106** : sujet/expéditeur relus du flux brut (ils disparaissaient en silence), décodage délégué à `core/encoding.py`, `attachment_count` plafonné (uint32 → `MemoryError`/SIGKILL), flux Unicode essayé en premier, nom de pièce jointe et destinataires sans perte tout-ou-rien. Test de contrat oxmsg (`_storage`, `property_stream_bytes`) |
+| Politique d'avertissements | ✅ D-106 : `silence_openpyxl_warnings()` est une API publique appelée par `cli.main()`/`gui.launch()` — **plus jamais à l'import** (un hôte avec `-W error::UserWarning` perdait son choix en silence). **À appeler aussi depuis le point d'entrée de docia** |
+| Détection d'encodage | ✅ `core/encoding.py` (D-106) — remontée de `extractors/text.py`, qui réexporte ; six modules consommateurs, plus de couplage à l'enregistrement d'un extracteur |
 | Régressions connues sur la suite versionnée | 0 |
 | Working tree | clean |
 
@@ -263,6 +266,8 @@ C:\Windows\Temp\Python313\python.exe
 - ⬜ GUI : mise à jour en place des lignes de la table (aujourd'hui reconstruite à chaque recalcul — 7 widgets par fichier, lent au-delà de quelques centaines de fichiers) et génération du corpus dans un thread worker (le clic « Générer » gèle la fenêtre sur un gros corpus PDF). Reportés de l'audit D-096..D-099 : intrusifs, hors « sans dégradation »
 - ⬜ Scanner de secrets : faux positifs possibles sur des identifiants de code (`api_key = settings.API_KEY`) — signalé par lecture lors de l'audit, non reproduit sur du code réel ; à confirmer avant de toucher aux regex
 - ⬜ Sniff d'un `.doc` qui est en réalité du RTF ou du HTML (générateurs qui mentent sur l'extension) — signalé par lecture, non reproduit
+- ⬜ **docia** : appeler `docfuse.extractors.xlsx.silence_openpyxl_warnings()` depuis son propre point d'entrée — DocFuse ne pose plus ce filtre à l'import (D-106), l'application appelante doit le faire si elle veut la console silencieuse
+- ⬜ OCR de très grands formats (ARCH E, B0…) : toujours ignorés au-dessus de 8 294 400 pt². Le découpage en bandes (`crop=` de `pypdfium2`) a été examiné et écarté en D-106 (coupe les lignes de texte → bruit OCR des deux côtés). Une piste sûre serait un découpage **par blocs de texte détectés** plutôt que par bandes géométriques — non chiffré
 - ⬜ Vérifier au prochain build Windows que `DOCFUSE_APP_NAME` est bien pris en compte par PyInstaller (specs renommés `DocFuse.spec` / `DocFuse-OCR.spec`, jamais buildés localement)
 
 ## 12. Règles critiques

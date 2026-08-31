@@ -1124,6 +1124,13 @@ def _open_folder(path: Path) -> None:
 
 
 def launch() -> None:
-    """Lance la GUI."""
+    """Lance la GUI.
+
+    D-105/D-106 : c'est ici — point d'entrée applicatif — qu'est posée la
+    politique d'avertissements, et non à l'import d'`extractors/xlsx.py`
+    (effet de bord sur le processus hôte, sans opt-out possible)."""
+    from docfuse.extractors.xlsx import silence_openpyxl_warnings
+
+    silence_openpyxl_warnings()
     gui = DocFuseGUI()
     gui.run()

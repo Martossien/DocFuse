@@ -1563,3 +1563,61 @@ manquait le découpage en blocs, et le nom de code traînait partout.
   specs à vérifier au prochain job CI ; pas de tag/release (à la demande de
   l'utilisateur, publication sur confirmation seulement).
 
+
+---
+
+## Session 16 — 2026-08-31 — Robustesse `.msg`/OCR : le correctif corrigé
+
+Contexte : le commit `c7e2b3b` (D-104 `.msg`, D-105 OCR) a été relu de
+manière critique. Verdict : **il laissait passer exactement la classe de
+défaut qu'il visait**, la perte silencieuse de données. Neuf défauts
+confirmés, tous reproduits avant correction (voir D-106).
+
+### MSG — sujet, expéditeur, encodage, mémoire (D-106) — ✅ Livré
+
+- `subject`/`sender` passent par `_property_text()` + relecture brute
+  (0x0037 ; 0x0C1F → 0x5D01 → 0x0C1A). Avant : `_safe()` rendait `""` et le
+  mail sortait `READY` amputé de ses deux en-têtes principaux.
+- `_decode_8bit()` délègue à `core/encoding.detect_encoding()` +
+  `repair_mojibake()` : la cascade maison `cp1252 → latin-1` n'essayait
+  jamais l'UTF-8 et rendait `RÃ©union budgÃ©taire` sur un corps UTF-8 valide.
+- `attachment_count` (uint32 non borné) plafonné par
+  `MSG_MAX_ATTACHMENT_PLACEHOLDERS` — `["?"] * 4294967295` = 34 Go, donc un
+  SIGKILL, vérifié sous `RLIMIT_AS`.
+- Ordre des flux `(STRING, STRING8, BINARY)` : `Coût 12€` au lieu de
+  `CoÃ»t 12â‚¬` quand Outlook écrit les deux variantes.
+- Nom de pièce jointe : repli brut 0x3707/0x3704 ; `_ATTACHMENT_NAME_ATTRS`
+  réduit de 8 à 2 noms. Destinataires : un `try` par élément (avant :
+  tout-ou-rien). Repli de décodage journalisé en DEBUG, plus en WARNING.
+- Doubles de test corrigés pour reproduire la réalité (propriétés qui
+  **lèvent**), + test de contrat oxmsg (`_storage`,
+  `property_stream_bytes`, PID conformes à `oxmsg.domain.constants`).
+
+### Politique d'avertissements (D-106) — ✅ Livré
+
+- `silence_openpyxl_warnings()` devient une API publique, **plus appelée à
+  l'import** : posée par `cli.main()` et `gui.launch()`. Regex ancrée.
+  À ajouter côté docia dans son propre point d'entrée.
+
+### OCR : bornes, docstrings, caches (D-106) — ✅ Livré
+
+- `_ocr_render_scale()` : `if not (width_pt > 0 and height_pt > 0)` rejette
+  le négatif (surface positive !) et les `NaN`/`inf`. Docstrings exactes :
+  A0 → **101,6 dpi** (et non « 120 dpi »), ANSI E → 103,4 dpi, ARCH E et B0
+  ignorés. Découpage en bandes examiné puis **écarté** (coupe les lignes de
+  texte : corruption silencieuse, pire que la résolution réduite).
+- `_FAILURE_COUNTS` : clé normalisée (chiffres neutralisés) et plafonnée
+  (200 + seau de débordement). `reset_language_cache()` ajouté.
+  `_failure_message(..., context=)` — plus de « langue : --list-langs ».
+
+### Emplacement de la détection d'encodage (D-106) — ✅ Livré
+
+- `detect_encoding`/`repair_mojibake`/`decode_text*` remontés dans
+  `core/encoding.py` ; `extractors/text.py` réexporte. Six modules
+  consommateurs, plus aucun couplage à l'enregistrement d'un extracteur.
+
+### Qualité
+
+- 606 réussis / 39 ignorés (25 tests ajoutés, 0 régression sur les 581).
+  `ruff check`, `ruff format --check`, `mypy --strict` : verts.
+- Pas de commit ni de push (consigne explicite de l'utilisateur).

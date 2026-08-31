@@ -189,6 +189,14 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Code retour (0=OK, 1=erreur, 2=blocage, 3=aucun fichier, 4=non inscriptible).
     """
+    # D-105/D-106 : politique d'avertissements posée au point d'entrée
+    # applicatif, jamais à l'import d'un module de la bibliothèque — un
+    # consommateur de `docfuse` garde ainsi le contrôle de ses propres
+    # `warnings.filters` (voir `extractors/xlsx.silence_openpyxl_warnings`).
+    from docfuse.extractors.xlsx import silence_openpyxl_warnings
+
+    silence_openpyxl_warnings()
+
     # Pré-charger la config pour la langue avant de construire le parser
     pre_config = load_config(None)
     set_language(pre_config.lang)
