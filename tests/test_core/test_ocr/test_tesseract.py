@@ -348,6 +348,57 @@ def test_une_image_vide_naccuse_pas_tesseract(
     assert "tesseract n'est pas en cause" in caplog.text
 
 
+def test_un_format_que_leptonica_ne_lit_pas_est_nomme(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """La vraie cause des 200 échecs constatés en production : des métafichiers.
+
+    Un graphique Excel, un dessin Word ou un schéma collé sont stockés en **EMF/WMF**,
+    pas en PNG. Leptonica ne sait pas les décoder et recopie alors les premiers octets
+    du *contenu* là où on attend un nom de fichier — vide pour un EMF, mojibake pour
+    un WMF. C'est ce qui a fait prendre l'échec pour un défaut de `stdin` : le repli
+    par fichier temporaire échouait exactement pareil, la cause étant le format.
+
+    Reproduit à l'identique en local :
+
+        $ tesseract faux.emf stdout -l fra+eng
+        Error in fopenReadStream: failed to open locally with tail  for filename
+        Image file  cannot be read!
+    """
+    monkeypatch.setattr(tess, "_resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(tess, "effective_lang", lambda _lang: "fra")
+    appels: list[object] = []
+    monkeypatch.setattr(tess, "_run_tesseract", lambda *args, **_kw: appels.append(args))
+
+    with caplog.at_level(logging.WARNING):
+        assert tess.TesseractEngine().ocr_image(b"\x01\x00\x00\x00" + b"\x00" * 300, "fra") == ""
+
+    assert appels == [], "aucun processus ne doit être lancé sur un format illisible"
+    assert "EMF" in caplog.text
+    assert "pas une panne de tesseract" in caplog.text
+
+
+def test_un_echec_de_format_ne_penalise_pas_toute_la_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Régression de D-107 : une image illisible faisait basculer `stdin` à tort.
+
+    Le signe retenu (`fopenReadStream`, `pixRead`…) ne distingue pas « flux illisible »
+    de « format inconnu ». Une seule image refusée condamnait donc `stdin` pour toute
+    la session, et faisait payer un fichier temporaire par page pour rien. On ne
+    bascule plus que si le repli **réussit** là où `stdin` a échoué.
+    """
+    monkeypatch.setattr(tess, "_resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(tess, "effective_lang", lambda _lang: "fra")
+    monkeypatch.setattr(
+        tess, "_run_tesseract", lambda *_a, **_k: _resultat(1, erreur=_STDERR_WINDOWS)
+    )
+
+    assert tess.TesseractEngine().ocr_image(b"\x89PNG-faux", "fra") == ""
+
+    assert tess._STDIN_UNUSABLE is False, "le repli a échoué aussi : stdin n'est pas en cause"
+
+
 def test_stdin_illisible_bascule_sur_un_fichier_temporaire(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

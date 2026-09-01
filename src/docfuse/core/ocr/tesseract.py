@@ -164,31 +164,70 @@ Le repli par fichier temporaire fonctionne partout. On ne le paie qu'une fois : 
 premier échec de ce type, tout le reste de la session passe directement par le fichier.
 """
 
-_STDIN_FAILURE_SIGNS = ("fopenReadStream", "pixRead", "cannot be read")
-"""Signes, dans stderr, d'une image que Leptonica n'a pas su lire depuis `stdin`."""
+_LECTURE_IMPOSSIBLE = ("fopenReadStream", "pixRead", "cannot be read")
+"""Signes, dans stderr, que Leptonica n'a pas su décoder l'image qu'on lui a donnée.
+
+**Ce message ne dit pas d'où vient l'image.** Il sort aussi bien pour un flux
+`stdin` illisible que pour un format qu'il ne connaît pas — et dans ce second cas,
+il recopie les premiers octets du *contenu* là où on attend un nom de fichier :
+vide pour un EMF, mojibake pour un WMF, « II* » pour un TIFF. C'est ce qui l'a fait
+prendre à tort pour un défaut de `stdin` (D-107) : le repli par fichier temporaire
+échouait exactement pareil, puisque la cause était le format."""
+
+_FORMATS_ILLISIBLES: tuple[tuple[bytes, str], ...] = (
+    (b"\x01\x00\x00\x00", "métafichier Windows EMF"),
+    (b"\xd7\xcd\xc6\x9a", "métafichier Windows WMF (en-tête plaçable)"),
+    (b"\x01\x00\x09\x00", "métafichier Windows WMF"),
+    (b"<?xml", "image vectorielle SVG"),
+    (b"<svg", "image vectorielle SVG"),
+    (b"%PDF", "document PDF"),
+)
+"""Formats qu'aucun moteur OCR matriciel ne sait décoder, reconnus à leur en-tête.
+
+Les documents bureautiques en sont pleins : un graphique Excel, un dessin Word ou
+un schéma collé depuis un autre logiciel sont stockés en **EMF/WMF**, pas en PNG.
+Les envoyer à tesseract produisait un échec par image — 200 sur une seule campagne
+en production — avec un message qui accusait le moteur au lieu de nommer le format.
+Ils sont petits (3 à 20 Ko), ce qui les distingue nettement des pages de PDF."""
 
 
-def _looks_like_stdin_failure(stderr: bytes) -> bool:
-    """Cet échec vient-il de la lecture sur `stdin` plutôt que du contenu de l'image ?"""
+def _format_illisible(data: bytes) -> str | None:
+    """Nom du format si Leptonica ne saura pas le lire, `None` sinon."""
+    for entete, nom in _FORMATS_ILLISIBLES:
+        if data.startswith(entete):
+            return nom
+    return None
+
+
+def _lecture_impossible(stderr: bytes) -> bool:
+    """Leptonica a-t-il refusé de décoder l'image ?"""
     texte = stderr.decode("utf-8", errors="replace")
-    return any(signe in texte for signe in _STDIN_FAILURE_SIGNS)
+    return any(signe in texte for signe in _LECTURE_IMPOSSIBLE)
 
 
-def _bascule_sur_fichier_temporaire(
+def _confirme_stdin_inutilisable(
     binary: str, result: subprocess.CompletedProcess[bytes], lang: str
 ) -> None:
-    """Note une fois pour toutes que `stdin` est inutilisable sur ce poste."""
+    """Le repli a réussi là où `stdin` a échoué : la cause est bien `stdin`."""
     global _STDIN_UNUSABLE  # noqa: PLW0603 - état du poste, constaté une seule fois
     _STDIN_UNUSABLE = True
     _log_failure_once(
         "OCR : ce tesseract ne sait pas lire une image sur son entrée standard "
-        f"(langue : {lang}) — bascule sur un fichier temporaire pour toute la session. "
-        f"Message d'origine : {_failure_message(binary, result, context=f'langue : {lang}')}"
+        f"(langue : {lang}) — le repli par fichier temporaire, lui, a réussi, donc "
+        "toute la session l'emprunte désormais. Message d'origine : "
+        f"{_failure_message(binary, result, context=f'langue : {lang}')}"
     )
 
 
-def _ocr_via_temp_file(binary: str, image_bytes: bytes, lang: str) -> str:
-    """OCR en écrivant l'image dans un fichier temporaire — repli universel."""
+def _ocr_via_temp_file(
+    binary: str, image_bytes: bytes, lang: str, *, silencieux: bool = False
+) -> str:
+    """OCR en écrivant l'image dans un fichier temporaire — repli universel.
+
+    `silencieux` sert au **test** de l'hypothèse `stdin` : un échec y est attendu si
+    la vraie cause est le format de l'image, et l'appelant se charge alors de
+    rapporter l'échec d'origine plutôt que celui du repli.
+    """
     with tempfile.TemporaryDirectory(prefix="docfuse_ocr_") as dossier:
         image = Path(dossier) / "page.png"
         image.write_bytes(image_bytes)
@@ -196,11 +235,14 @@ def _ocr_via_temp_file(binary: str, image_bytes: bytes, lang: str) -> str:
     if result is None:
         return ""
     if result.returncode != 0:
-        _log_failure_once(
-            _failure_message(
-                binary, result, context=f"langue : {lang}, fichier temporaire, {len(image_bytes)} o"
+        if not silencieux:
+            _log_failure_once(
+                _failure_message(
+                    binary,
+                    result,
+                    context=f"langue : {lang}, fichier temporaire, {len(image_bytes)} o",
+                )
             )
-        )
         return ""
     return result.stdout.decode("utf-8", errors="replace")
 
@@ -232,21 +274,44 @@ class TesseractEngine(OcrEngine):
             )
             return ""
 
+        illisible = _format_illisible(image_bytes)
+        if illisible is not None:
+            # Nommer le format vaut mieux que 200 échecs qui accusent tesseract.
+            _log_failure_once(
+                f"OCR ignoré : {illisible} — aucun moteur OCR matriciel ne sait le "
+                f"décoder ({len(image_bytes)} octets). Les documents bureautiques en "
+                "sont pleins (graphiques, dessins, schémas collés) ; ce n'est pas une "
+                "panne de tesseract."
+            )
+            return ""
+
         if not _STDIN_UNUSABLE:
             result = _run_tesseract(binary, ["stdin", "stdout", "-l", lang], image_bytes)
             if result is not None and result.returncode == 0:
                 return result.stdout.decode("utf-8", errors="replace")
-            if result is not None and _looks_like_stdin_failure(result.stderr):
-                _bascule_sur_fichier_temporaire(binary, result, lang)
-            elif result is not None:
+            if result is None:
+                return ""
+            if not _lecture_impossible(result.stderr):
                 _log_failure_once(
                     _failure_message(
                         binary, result, context=f"langue : {lang}, {len(image_bytes)} octets"
                     )
                 )
                 return ""
-            else:
-                return ""
+            # Leptonica a refusé l'image. Deux causes possibles, et une seule façon
+            # honnête de trancher : réessayer par fichier. Si ça marche, `stdin` était
+            # bien en cause ; si ça échoue pareil, c'est l'image, et on ne pénalise pas
+            # le reste de la session avec un repli inutile.
+            texte = _ocr_via_temp_file(binary, image_bytes, lang, silencieux=True)
+            if texte:
+                _confirme_stdin_inutilisable(binary, result, lang)
+                return texte
+            _log_failure_once(
+                _failure_message(
+                    binary, result, context=f"langue : {lang}, {len(image_bytes)} octets"
+                )
+            )
+            return ""
 
         return _ocr_via_temp_file(binary, image_bytes, lang)
 
