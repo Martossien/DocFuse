@@ -156,15 +156,25 @@ class TestImageMessage:
     """I-22: Images pures — message spécifique."""
 
     def test_image_file_ignored_with_specific_message(self, tmp_path: Path) -> None:
+        """D-109 : une image **matricielle** n'est plus ignorée, elle est océrisée.
+
+        Ce test exigeait l'inverse — c'était le comportement d'avant, et l'angle
+        mort qu'il verrouillait : un courrier scanné en `.jpg` ou `.tif`, sortie
+        par défaut d'un copieur, était absent de l'audit. Le message spécifique
+        reste dû aux formats qu'aucun moteur OCR ne lit : `.svg` (vectoriel) et
+        `.ico` (icône).
+        """
         (tmp_path / "doc.txt").write_text(
             "Texte avec assez de caracteres pour eviter alerte.", encoding="utf-8"
         )
         (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+        (tmp_path / "icone.ico").write_bytes(b"\x00\x00\x01\x00")
 
         ignored = list_ignored(tmp_path)
         messages = {p.name: r for p, r in ignored}
-        assert "photo.jpg" in messages
-        assert "OCR" in messages["photo.jpg"] or "image" in messages["photo.jpg"].lower()
+        assert "photo.jpg" not in messages, "une image matricielle est désormais lue"
+        assert "icone.ico" in messages
+        assert "OCR" in messages["icone.ico"] or "image" in messages["icone.ico"].lower()
 
 
 class TestCRLF:

@@ -131,7 +131,11 @@ class TestSingleWalk:
     def test_walk_source_matches_public_functions(self, tmp_path: Path) -> None:
         (tmp_path / "b.txt").write_text("b", encoding="utf-8")
         (tmp_path / "a.txt").write_text("a", encoding="utf-8")
-        (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8")
+        # D-109 : `.jpg` est désormais océrisé, donc trouvé et non ignoré ; le
+        # cas « ignoré pour son extension » est tenu par `.ico`, qu'aucun moteur
+        # OCR ne sait lire. Ce test porte sur l'unicité du parcours, pas sur la
+        # liste des formats — il fallait juste un fichier qui reste écarté.
+        (tmp_path / "icone.ico").write_bytes(b"\x00\x00\x01\x00")
         (tmp_path / "node_modules").mkdir()
         (tmp_path / "node_modules" / "x.js").write_text("x", encoding="utf-8")
         (tmp_path / "sub").mkdir()
@@ -141,4 +145,4 @@ class TestSingleWalk:
 
         assert sorted(found) == sorted(scan_directory(tmp_path))
         assert sorted(ignored) == sorted(list_ignored(tmp_path))
-        assert {p.name for p, _ in ignored} == {"photo.jpg", "node_modules"}
+        assert {p.name for p, _ in ignored} == {"icone.ico", "node_modules"}

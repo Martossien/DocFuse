@@ -84,6 +84,7 @@ def _ensure_loaded() -> None:
         "docfuse.extractors.epub",
         "docfuse.extractors.msg",
         "docfuse.extractors.legacy_office",
+        "docfuse.extractors.image",
     ]
 
     for mod_name in extractor_modules:

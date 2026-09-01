@@ -133,6 +133,14 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
 )
 SUPPORTED_EXTENSIONS.update(dict.fromkeys(CODE_EXTENSIONS, "code"))
 
+# D-109 : les images matricielles deviennent lisibles — un courrier scanné sort en
+# .tif ou .jpg du copieur, pas en PDF, et ces fichiers étaient purement absents de
+# l'audit. `.svg` (vectoriel) et `.ico` (icône) restent hors périmètre.
+OCR_READABLE_IMAGES: frozenset[str] = frozenset(
+    {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+)
+SUPPORTED_EXTENSIONS.update(dict.fromkeys(OCR_READABLE_IMAGES, "image"))
+
 # I-22: Extensions d'images pures (CdC §7.4 — ignorées avec message spécifique)
 IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {
