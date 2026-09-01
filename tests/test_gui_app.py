@@ -52,7 +52,7 @@ class _Widget:
             self.parent.children.remove(self)
 
     def __getattr__(self, name: str) -> Any:
-        return lambda *a, **k: None
+        return lambda *_a, **_k: None
 
 
 class _Root(_Widget):
