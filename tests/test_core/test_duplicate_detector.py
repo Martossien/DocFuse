@@ -71,3 +71,89 @@ class TestDetectDuplicates:
 
         assert b.extra_metadata["duplicate_of"] == "a.txt"
         assert c.extra_metadata["duplicate_of"] == "a.txt"
+
+
+class TestMarqueursNeFondentPasUneIdentite:
+    """D-107 — un texte fait uniquement de marqueurs d'absence de contenu ne
+    dit rien du document : il ne peut pas fonder une identité.
+
+    Constaté en production (déploiement à 36 échecs Tesseract) : trois PDF
+    scannés de deux pages, sans OCR, produisent le même texte de
+    72 caractères et se retrouvaient déclarés « contenu identique » — un
+    dossier médical et une facture portant `doublon_de: contrat de
+    travail` sur un rapport qui sert à décider de suppressions de fichiers.
+    """
+
+    PAGES_VIDES = "[[PAGE 1: aucun texte extractible]]\n\n[[PAGE 2: aucun texte extractible]]"
+
+    def test_pdf_scannes_sans_ocr_ne_sont_pas_des_doublons(self) -> None:
+        # Le texte dépasse bien DUPLICATE_MIN_CHARS : c'est ce qui rendait
+        # la faute atteignable.
+        assert len(self.PAGES_VIDES) > 50
+
+        contrat = _file("contrat_travail_DUPONT.pdf", self.PAGES_VIDES, FileStatus.LOW_TEXT)
+        medical = _file("dossier_medical_MARTIN.pdf", self.PAGES_VIDES, FileStatus.LOW_TEXT)
+        facture = _file("facture_fournisseur_2019.pdf", self.PAGES_VIDES, FileStatus.LOW_TEXT)
+
+        detect_duplicates([contrat, medical, facture])
+
+        for fichier in (contrat, medical, facture):
+            # Ni présenté comme un doublon…
+            assert "duplicate_of" not in fichier.extra_metadata
+            # …ni amputé de son texte : le fichier reste entier dans le corpus.
+            assert fichier.text == self.PAGES_VIDES
+
+    def test_diapos_vides_avec_echafaudage_pptx_non_plus(self) -> None:
+        """L'échafaudage `## Diapo N` + `---` fait franchir le seuil à un
+        PPTX entièrement scanné dès quelques diapos."""
+        texte = "\n\n---\n\n".join(
+            f"## Diapo {i}\n\n[[DIAPO {i}: aucun texte extractible]]" for i in range(1, 5)
+        )
+        assert len(texte) > 50
+
+        a = _file("budget_2024.pptx", texte, FileStatus.LOW_TEXT)
+        b = _file("plan_social_RH.pptx", texte, FileStatus.LOW_TEXT)
+
+        detect_duplicates([a, b])
+
+        assert "duplicate_of" not in b.extra_metadata
+        assert b.text == texte
+
+    def test_libelle_de_marqueur_different_reste_ecarte(self) -> None:
+        """Le critère porte sur les délimiteurs `[[...]]`, pas sur le
+        libellé français : reformuler un marqueur ne rouvre pas la faille."""
+        texte = "[[PAGE 1 : rien à extraire]]\n\n[[PAGE 2 : rien à extraire]]\n\n[[PAGE 3 : x]]"
+        assert len(texte) > 50
+
+        a = _file("a.pdf", texte, FileStatus.LOW_TEXT)
+        b = _file("b.pdf", texte, FileStatus.LOW_TEXT)
+
+        detect_duplicates([a, b])
+
+        assert "duplicate_of" not in b.extra_metadata
+
+    def test_ocr_reussi_reste_dedoublonne(self) -> None:
+        """Contre-épreuve : le texte reconnu par OCR suit son marqueur et
+        compte comme du contenu — deux scans réellement identiques dont
+        l'OCR a réussi restent détectés."""
+        texte = (
+            "[[PAGE 1 — texte OCR (tesseract, fra)]]\n"
+            "Contrat de travail a duree indeterminee entre la societe et le salarie."
+        )
+        a = _file("dossier1/contrat.pdf", texte, FileStatus.READY)
+        b = _file("dossier2/contrat.pdf", texte, FileStatus.READY)
+
+        detect_duplicates([a, b])
+
+        assert b.extra_metadata["duplicate_of"] == "dossier1/contrat.pdf"
+
+    def test_vrai_titre_markdown_reste_du_contenu(self) -> None:
+        """Seuls les titres purement numérotés (`## Diapo 1`) sont de
+        l'échafaudage ; un vrai titre de document porte des mots."""
+        texte = "# Rapport annuel de la direction financiere\n## Synthese des resultats 2024"
+        a = _file("a.md", texte)
+        b = _file("b.md", texte)
+
+        detect_duplicates([a, b])
+
+        assert b.extra_metadata["duplicate_of"] == "a.md"

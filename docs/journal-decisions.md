@@ -2494,4 +2494,124 @@ rendre `""` en silence. Suite complète : 606 réussis, 39 ignorés.
 
 ---
 
-*Fin du journal des décisions — Session 16.*
+### D-107 : chasse aux fautes à contexte neuf — ce que le corpus affirmait à tort
+
+**Contexte** : DocFuse n'avait jamais été audité par un regard extérieur, contrairement
+à l'outil d'audit qui la consomme. Un chasseur de fautes à contexte neuf a fabriqué ses
+propres entrées (dont un écrivain OLE2 minimal pour produire de **vrais** `.msg` — aucun
+test du dépôt ne le faisait) et a rendu **3 critiques et 12 graves**. Les cinq corrigées
+ici partagent une famille : le corpus livré à la LLM ne se contentait pas d'omettre, il
+**affirmait** — une identité, une absence de contenu, un encodage, un numéro de page.
+
+Rappel de l'enjeu : les rapports produits en aval décident de **suppressions de fichiers**.
+
+**1. Trois documents différents déclarés « contenu identique »** (`core/duplicate_detector.py`)
+
+Sans OCR — variante `DocFuse.exe` standard, ou les 36 échecs Tesseract du déploiement en
+cours — deux PDF scannés de même pagination produisent exactement le même texte :
+`[[PAGE 1: aucun texte extractible]]…`, 72 caractères, au-dessus de `DUPLICATE_MIN_CHARS`.
+Un contrat de travail, une facture et un dossier médical sortaient avec
+`doublon_de: contrat_travail_DUPONT.pdf`, et `_promote_duplicate_of` propageait l'identité.
+
+Le seuil porte désormais sur le **contenu propre**, l'échafaudage retiré : marqueurs
+reconnus **par leurs délimiteurs `[[…]]`**, pas par leur libellé — choix validé en vol,
+la reformulation des marqueurs PPTX (point 3) n'a rien rouvert. Le hachage reste sur le
+texte complet : le contenu significatif ne décide que de l'éligibilité. Le fichier écarté
+garde son texte et ne reçoit aucun `duplicate_of`. Coût : 0,015 ms par fichier.
+
+**2. Les accents d'un gros fichier perdus en silence** (`core/encoding.py`)
+
+`ENCODING_MAX_UTF8_REPLACEMENT_RATIO` appliquait un **ratio** là où D-097 décrivait « une
+seule séquence tronquée en fin de fichier » : 0,1 % de 3 M caractères = ~2 950 octets
+invalides tolérés. Un export ERP français majoritairement ASCII était déclaré UTF-8 puis
+décodé `errors="replace"` — et le corpus annonçait `encodage: utf-8`, ce qui était faux.
+
+    ascii~   1000 accents=  5 -> cp1252  U+FFFD=   0
+    ascii~  10000 accents=  5 -> utf-8   U+FFFD=   6
+    ascii~3000000 accents=1050 -> utf-8  U+FFFD=1050
+
+Remplacé par un décodeur incrémental (`final=False`) : le budget toléré ne dépend plus de
+la taille, il est borné à une séquence UTF-8 incomplète. La constante est supprimée. Un
+reliquat de remplacement se voit maintenant dans `encoding_replacements` (`core/notes.py`),
+pas seulement au journal. Le cas légitime de D-097 est préservé.
+
+**3. PPTX : graphiques, SmartArt et masques perdus, avec un marqueur qui mentait**
+(`extractors/pptx.py`)
+
+Un `graphicFrame` n'a ni `has_text_frame` ni `has_table` : le corpus émettait
+`[[DIAPO N: aucun texte extractible]]`, une **affirmation fausse** qui oriente l'auditeur
+vers « diapo image, rien à lire ». Perdus : titres/séries/catégories de graphique,
+`ppt/diagrams/data*.xml` (un organigramme SmartArt est du nominatif pur), et le bandeau de
+classification du masque — posé là précisément pour valoir partout.
+
+Récupérés par lecture du XML des parties. Le gabarit sort **une seule fois**, en tête, dans
+`## Gabarit` : le recopier sur chaque diapo gonflerait le corpus proportionnellement au
+nombre de diapos pour une information qui ne varie pas. Trois marqueurs remplacent l'ancien,
+et aucun n'affirme quoi que ce soit sur le contenu — seulement sur ce qui a été inspecté.
+Arbitrage mesuré : signaler les images non OCRisées sur *toute* diapo coûtait **+8 % de
+corpus** sur 9 présentations réelles ; elles ne sont donc nommées que si la diapo n'a
+produit aucun texte, cas où l'ancien marqueur mentait.
+
+**4. DOCX : en-têtes, pieds de page, commentaires** (`extractors/docx.py`)
+
+`header.paragraphs` de python-docx ne rend que les `w:p` enfants directs : **aucun tableau
+d'en-tête ou de pied de page n'était extrait**. Or le papier à en-tête est presque toujours
+un tableau, et les gabarits RH y mettent la mention de diffusion, le responsable de
+traitement et la durée de conservation — exactement les champs que la LLM doit produire, et
+les seuls perdus. Le corps étant long, aucun `LOW_TEXT` ne se déclenchait : le document
+sortait « rapport annuel banal, aucune donnée personnelle ».
+
+`_iter_body_parts` est appliquée à la racine `w:hdr`/`w:ftr`. Aussi : les commentaires Word
+(`word/comments.xml`, jamais lus — lieu privilégié des appréciations sur les personnes,
+art. 9 RGPD ; attention, le premier commentaire réel porte `w:id="0"`, que le filtre des
+notes écarte) et les lignes de tableau enveloppées dans un `w:sdt` (le contrôle « section
+répétitive », donc les formulaires à lignes ajoutables : la LLM voyait un formulaire vierge).
+
+**5. PDF : le texte OCR d'une page collé sur une autre** (`extractors/pdf.py`)
+
+Les indices de page viennent de **pdfminer**, le rendu OCR de **PDFium**, et rien ne
+comparait les deux. pdfminer déduplique son parcours de `/Kids` ; un objet page référencé
+deux fois — cas d'un PDF fusionné — décale tout ce qui suit. Le genre étant `OCR`, le texte
+natif réel est **écrasé**, pas concaténé :
+
+    pdfminer  : 3 pages   pypdfium2 : 4 pages
+    page 3 du corpus -> texte de la page 1 ; « salaires nominatifs » absent du corpus
+
+Choix : **refuser** plutôt qu'aligner (`PdfPageCountMismatchError`), avec deux gardes —
+structurelle (pypdf) et au point de croisement (PDFium avant tout `pdf[idx]`). Aligner
+aurait imposé de recopier la boucle interne de pdfminer et de parier sur la concordance des
+numéros d'objets, sans couvrir les autres causes de désaccord — le refus aurait donc été
+nécessaire de toute façon. Coût assumé, écrit dans la docstring : le fichier quitte le
+corpus et apparaît en `ERROR` avec les deux comptes, donc à examiner à la main.
+
+**D-108, dans la foulée** : `_PDFIUM_LOCK` était détenu pendant l'encodage PNG, qui n'a
+aucun besoin de PDFium — 99 % du temps sous verrou, débit plafonné à ~1,2 page/s quel que
+soit le nombre de cœurs. Et tous les PNG rendus étaient conservés jusqu'à la fin de l'OCR,
+malgré une docstring affirmant « jamais tout le PDF en mémoire à la fois ». Verrou pris par
+page, encodage hors verrou, soumission au fil de l'eau bornée par un sémaphore. Le document
+est **rouvert par page** plutôt que maintenu ouvert entre deux prises : garder un
+`PdfDocument` vivant pendant qu'un autre thread charge le sien est exactement ce que D-078
+décrit comme corrupteur.
+
+| 200 pages A4 / 200 dpi | avant | après |
+|---|---|---|
+| pic RSS | 2 023 Mo | **96 Mo** |
+| verrou détenu | 95,7 s (99 %) | **21,0 s (21 %)** |
+| 4 fichiers en parallèle, Tesseract réel | 55,9 s / 1 411 Mo | **48,1 s / 627 Mo** |
+
+**Vérification** : `ruff`, `ruff format`, `mypy --strict` (60 fichiers) propres ;
+**650 réussis, 39 ignorés** (606 avant), sur pypdf 6.16.1 **et** 6.16.2 — les deux versions
+traitent différemment l'arbre de pages dupliqué, ce qui a fait tomber un test de prémisse
+avant d'être pris en compte.
+
+**Ce qui reste ouvert**, et qui est un arbitrage, pas un oubli : un `w:sdt` de niveau
+**cellule** fait toujours disparaître la cellule ; le corriger imposerait de sortir du
+chemin `row.cells` de python-docx pour les lignes ordinaires, donc de reprendre à notre
+charge la résolution des fusions (`gridSpan`, `vMerge`). Également : le classeur incorporé
+d'un graphique PPTX (`ppt/embeddings/*.xlsx`) n'est ni lu ni signalé, et les notes de perte
+d'encodage ne remontent pas encore pour `.html`, `.eml`, `.msg`, qui appellent
+`detect_encoding()` sans passer par `decode_text_with_note()`.
+
+---
+
+*Fin du journal des décisions — Session 17.*

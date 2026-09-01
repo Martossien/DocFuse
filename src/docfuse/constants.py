@@ -422,10 +422,14 @@ ENCODING_PLAUSIBILITY_SAMPLE_CHARS: int = 100_000
 """Nombre de caractères analysés pour le test de plausibilité — coût borné
 même sur un gros fichier."""
 
-ENCODING_MAX_UTF8_REPLACEMENT_RATIO: float = 0.001
-"""D-097 : un fichier dont le décodage UTF-8 tolérant ne produit pas plus
-de cette proportion de U+FFFD (0,1 %) est considéré UTF-8 (séquence
-tronquée en fin de fichier, octet égaré) plutôt que basculé en cp1252."""
+# D-107 : `ENCODING_MAX_UTF8_REPLACEMENT_RATIO` (0,001) est supprimée. Ce
+# ratio faisait croître le budget d'octets illisibles avec la taille du
+# fichier — 0,1 % de 3 Mo = ~3 000 octets — alors que D-097 le justifiait
+# par « une seule séquence multi-octets tronquée ». Un export cp1252 de
+# 3 Mo à 1 050 accents était déclaré UTF-8 et perdait tous ses accents en
+# silence. Le critère n'est plus quantitatif : `_is_utf8_truncated_at_end`
+# n'accepte qu'une séquence incomplète en toute fin de flux, donc au plus
+# 3 octets, indépendamment de la taille. Plus rien à régler ici.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Garde-fou "bombe zip" pour les formats conteneurs ZIP (D-093)

@@ -62,6 +62,88 @@ def _inject_textbox(docx_path: Path, part_name: str, before_closing_tag: str, te
             zout.writestr(item, contents[item.filename])
 
 
+def _rewrite_zip(docx_path: Path, remplacements: dict[str, bytes]) -> None:
+    """Réécrit un .docx en remplaçant/ajoutant les entrées données."""
+    import zipfile
+
+    with zipfile.ZipFile(str(docx_path)) as zin:
+        items = zin.infolist()
+        contents = {item.filename: zin.read(item.filename) for item in items}
+    noms = [item.filename for item in items]
+    contents.update(remplacements)
+    for nom in remplacements:
+        if nom not in noms:
+            noms.append(nom)
+    with zipfile.ZipFile(str(docx_path), "w", zipfile.ZIP_DEFLATED) as zout:
+        for nom in noms:
+            zout.writestr(nom, contents[nom])
+
+
+def _inject_part(
+    docx_path: Path, part_name: str, xml: str, content_type: str, reltype: str
+) -> None:
+    """Ajoute une partie XML au paquet (entrée ZIP + override de type de
+    contenu + relation depuis `document.xml`) — python-docx ne charge que les
+    parties atteignables par une relation, et n'a d'API ni pour les notes de
+    bas de page ni pour les notes de fin."""
+    import zipfile
+
+    with zipfile.ZipFile(str(docx_path)) as zf:
+        types = zf.read("[Content_Types].xml").decode("utf-8")
+        rels = zf.read("word/_rels/document.xml.rels").decode("utf-8")
+
+    types = types.replace(
+        "</Types>",
+        f'<Override PartName="/{part_name}" ContentType="{content_type}"/></Types>',
+    )
+    rid = "rIdInjecte1"
+    rels = rels.replace(
+        "</Relationships>",
+        f'<Relationship Id="{rid}" Type="{reltype}" '
+        f'Target="{part_name.split("/")[-1]}"/></Relationships>',
+    )
+    _rewrite_zip(
+        docx_path,
+        {
+            part_name: xml.encode("utf-8"),
+            "[Content_Types].xml": types.encode("utf-8"),
+            "word/_rels/document.xml.rels": rels.encode("utf-8"),
+        },
+    )
+
+
+_W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+_OOXML_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_OOXML_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+
+
+def _inject_sdt_rows(docx_path: Path, avant_marqueur: str, lignes: list[tuple[str, str]]) -> None:
+    """Insère des `w:tr` enveloppés dans un `w:sdt` (`CT_SdtContentRow`, le
+    contrôle « section répétitive » de Word) juste avant la ligne contenant
+    `avant_marqueur` — python-docx ne sait pas produire cet encodage."""
+    import zipfile
+
+    with zipfile.ZipFile(str(docx_path)) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+
+    bloc = ""
+    for i, (gauche, droite) in enumerate(lignes):
+        cellules = "".join(
+            f'<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/></w:tcPr>'
+            f"<w:p><w:r><w:t>{texte}</w:t></w:r></w:p></w:tc>"
+            for texte in (gauche, droite)
+        )
+        bloc += (
+            f'<w:sdt><w:sdtPr><w:id w:val="{100 + i}"/></w:sdtPr>'
+            f"<w:sdtContent><w:tr>{cellules}</w:tr></w:sdtContent></w:sdt>"
+        )
+
+    debut_tr = xml.rindex("<w:tr", 0, xml.rindex(avant_marqueur))
+    _rewrite_zip(
+        docx_path, {"word/document.xml": (xml[:debut_tr] + bloc + xml[debut_tr:]).encode("utf-8")}
+    )
+
+
 class TestDocxExtractor:
     def test_extract_basic_text(self, tmp_path: Path) -> None:
         from docx import Document
@@ -241,6 +323,237 @@ class TestDocxExtractor:
         assert result.status is FileStatus.READY
         assert "TEXTE_CELLULE_EXTERNE" in result.text
         assert "TEXTE_TABLEAU_IMBRIQUE" in result.text
+
+    def test_table_in_header_is_extracted(self, tmp_path: Path) -> None:
+        """D-107 : `_Header.paragraphs` ne rend que les `w:p` enfants directs
+        du `w:hdr` — un tableau en en-tête (le papier à en-tête d'entreprise
+        est presque toujours un tableau : logo | raison sociale | mention de
+        diffusion) était perdu en entier. Le tableau doit sortir, préfixé
+        `[en-tête]` comme les paragraphes, et une seule fois."""
+        from docx import Document
+        from docx.shared import Inches
+
+        f = tmp_path / "header_table.docx"
+        doc = Document()
+        doc.add_paragraph("Corps banal sans donnee personnelle. " * 10)
+        header = doc.sections[0].header
+        header.is_linked_to_previous = False
+        header.paragraphs[0].text = "PARA_EN_TETE"
+        table = header.add_table(rows=1, cols=2, width=Inches(6))
+        table.cell(0, 0).text = "Societe Exemple SA"
+        table.cell(0, 1).text = "CONFIDENTIEL - DIFFUSION RESTREINTE"
+        doc.save(str(f))
+
+        result = DocxExtractor.extract(f, "header_table.docx")
+        assert result.status is FileStatus.READY
+        assert "[en-tête] Societe Exemple SA | CONFIDENTIEL - DIFFUSION RESTREINTE" in result.text
+        assert result.text.count("CONFIDENTIEL - DIFFUSION RESTREINTE") == 1
+        assert "[en-tête] PARA_EN_TETE" in result.text
+
+    def test_empty_header_layout_row_adds_no_noise(self, tmp_path: Path) -> None:
+        """D-107 : un en-tête est souvent bâti sur un tableau de mise en page
+        aux cellules vides. Émettre le tableau ne doit pas produire des
+        lignes `[en-tête]  | ` là où l'ancien code (paragraphes seuls)
+        n'émettait rien."""
+        from docx import Document
+        from docx.shared import Inches
+
+        f = tmp_path / "header_layout.docx"
+        doc = Document()
+        doc.add_paragraph("Corps banal sans donnee personnelle. " * 10)
+        header = doc.sections[0].header
+        header.is_linked_to_previous = False
+        header.paragraphs[0].text = "Societe Exemple SA"
+        table = header.add_table(rows=2, cols=2, width=Inches(6))
+        table.cell(0, 0).text = "Logo"
+        doc.save(str(f))
+
+        text = DocxExtractor.extract(f, "header_layout.docx").text
+        assert "[en-tête] Logo | " in text
+        assert "[en-tête]  | " not in text
+
+    def test_table_in_footer_is_extracted(self, tmp_path: Path) -> None:
+        """D-107 : même faute côté pied de page — les gabarits RH y mettent
+        la référence de traitement, le responsable et la durée de
+        conservation, exactement les champs dont dépend une décision de
+        suppression."""
+        from docx import Document
+        from docx.shared import Inches
+
+        f = tmp_path / "footer_table.docx"
+        doc = Document()
+        doc.add_paragraph("Corps banal sans donnee personnelle. " * 10)
+        footer = doc.sections[0].footer
+        footer.is_linked_to_previous = False
+        table = footer.add_table(rows=2, cols=2, width=Inches(6))
+        table.cell(0, 0).text = "Reference de traitement"
+        table.cell(0, 1).text = "RH-2024-017"
+        table.cell(1, 0).text = "Duree de conservation : 5 ans apres depart"
+        table.cell(1, 1).text = "Responsable de traitement : DRH"
+        doc.save(str(f))
+
+        result = DocxExtractor.extract(f, "footer_table.docx")
+        assert result.status is FileStatus.READY
+        assert "[pied de page] Reference de traitement | RH-2024-017" in result.text
+        assert (
+            "[pied de page] Duree de conservation : 5 ans apres depart | "
+            "Responsable de traitement : DRH" in result.text
+        )
+
+    def test_comment_is_extracted(self, tmp_path: Path) -> None:
+        """D-107 : `/word/comments.xml` n'était jamais lu, alors que `odf.py`
+        récupère bien les `office:annotation`. Les commentaires sont le lieu
+        privilégié des appréciations sur les personnes (RGPD art. 9)."""
+        from docx import Document
+
+        f = tmp_path / "comment.docx"
+        doc = Document()
+        para = doc.add_paragraph("Entretien annuel, appreciation globale satisfaisante. " * 5)
+        doc.add_comment(
+            para.runs[0],
+            text="COMMENTAIRE_Mme_Dupont_arret_pour_depression_dossier_MDPH",
+            author="RRH Martin",
+            initials="RM",
+        )
+        doc.save(str(f))
+
+        result = DocxExtractor.extract(f, "comment.docx")
+        assert result.status is FileStatus.READY
+        assert "[commentaires]" in result.text
+        assert (
+            "RRH Martin : COMMENTAIRE_Mme_Dupont_arret_pour_depression_dossier_MDPH" in result.text
+        )
+
+    def test_comment_with_id_zero_is_not_skipped(self, tmp_path: Path) -> None:
+        """D-107 : `_extract_notes` ignore les `w:id` -1 et 0 (blocs
+        séparateurs des notes). `comments.xml` n'a pas de tels blocs et
+        numérote le premier commentaire réel `w:id="0"` — réutiliser le
+        filtre des notes aurait perdu le premier commentaire de tout
+        document."""
+        from docx import Document
+
+        f = tmp_path / "comment_id0.docx"
+        doc = Document()
+        para = doc.add_paragraph("Texte suffisamment long pour ne pas declencher LOW_TEXT. " * 5)
+        doc.add_comment(para.runs[0], text="PREMIER_COMMENTAIRE_ID_ZERO", author="A")
+        doc.save(str(f))
+
+        import zipfile
+
+        with zipfile.ZipFile(str(f)) as zf:
+            assert 'w:id="0"' in zf.read("word/comments.xml").decode("utf-8")
+
+        assert "PREMIER_COMMENTAIRE_ID_ZERO" in DocxExtractor.extract(f, "comment_id0.docx").text
+
+    def test_sdt_wrapped_table_rows_are_extracted(self, tmp_path: Path) -> None:
+        """D-107 : `Table.rows` ne rend que les `w:tr` enfants directs du
+        `w:tbl`. Une ligne enveloppée dans un `w:sdt` (`CT_SdtContentRow`,
+        l'encodage du contrôle « section répétitive » — le mécanisme même
+        des formulaires à lignes ajoutables) disparaissait : la LLM ne
+        voyait qu'un formulaire vierge (en-tête + total). LibreOffice
+        restitue bien ces lignes."""
+        from docx import Document
+
+        f = tmp_path / "sdt_rows.docx"
+        doc = Document()
+        doc.add_paragraph("Formulaire de recensement du personnel. " * 10)
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "ENTETE_COL1"
+        table.cell(0, 1).text = "ENTETE_COL2"
+        table.cell(1, 0).text = "DERNIERE_LIGNE"
+        table.cell(1, 1).text = "FIN"
+        doc.save(str(f))
+
+        _inject_sdt_rows(
+            f,
+            "DERNIERE_LIGNE",
+            [
+                ("LIGNE_SDT_Dupont_Jean", "LIGNE_SDT_NIR_1800175116600"),
+                ("LIGNE_SDT_Martin_Sophie", "LIGNE_SDT_NIR_2790675116601"),
+            ],
+        )
+
+        result = DocxExtractor.extract(f, "sdt_rows.docx")
+        assert result.status is FileStatus.READY
+        assert "LIGNE_SDT_Dupont_Jean | LIGNE_SDT_NIR_1800175116600" in result.text
+        assert "LIGNE_SDT_Martin_Sophie | LIGNE_SDT_NIR_2790675116601" in result.text
+        # Ordre du document : les lignes ajoutées restent entre l'en-tête et
+        # la dernière ligne, et rien ne sort deux fois.
+        assert result.text.index("ENTETE_COL1") < result.text.index("LIGNE_SDT_Dupont_Jean")
+        assert result.text.index("LIGNE_SDT_Martin_Sophie") < result.text.index("DERNIERE_LIGNE")
+        assert result.text.count("LIGNE_SDT_Dupont_Jean") == 1
+
+    def test_merged_cells_output_unchanged_by_sdt_row_support(self, tmp_path: Path) -> None:
+        """D-107 : le support des lignes `w:sdt` ne doit pas toucher au rendu
+        des lignes ordinaires — les fusions (`gridSpan`, `vMerge`) restent
+        résolues par `Table.rows` de python-docx, qui répète la cellule
+        fusionnée sur chaque colonne/ligne couverte."""
+        from docx import Document
+
+        f = tmp_path / "merged.docx"
+        doc = Document()
+        doc.add_paragraph("Corps assez long pour ne pas declencher LOW_TEXT. " * 5)
+        table = doc.add_table(rows=2, cols=2)
+        for ligne in range(2):
+            for col in range(2):
+                table.cell(ligne, col).text = f"R{ligne}C{col}"
+        table.cell(0, 0).merge(table.cell(0, 1))
+        doc.save(str(f))
+
+        text = DocxExtractor.extract(f, "merged.docx").text
+        assert "R0C0\nR0C1 | R0C0\nR0C1" in text
+        assert "R1C0 | R1C1" in text
+
+    def test_footnote_is_extracted(self, tmp_path: Path) -> None:
+        """Verrou de couverture : supprimer l'appel à `_extract_notes` pour
+        `/word/footnotes.xml` ne faisait tomber aucun test (aucune API
+        python-docx pour les notes : la partie est injectée à la main)."""
+        from docx import Document
+
+        f = tmp_path / "footnote.docx"
+        doc = Document()
+        doc.add_paragraph("Corps assez long pour ne pas declencher LOW_TEXT. " * 5)
+        doc.save(str(f))
+
+        _inject_part(
+            f,
+            "word/footnotes.xml",
+            f"<w:footnotes {_W_NS}>"
+            '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:t>SEP</w:t></w:r></w:p>'
+            "</w:footnote>"
+            '<w:footnote w:id="2"><w:p><w:r><w:t>TEXTE_NOTE_BAS_DE_PAGE</w:t></w:r></w:p>'
+            "</w:footnote></w:footnotes>",
+            f"{_OOXML_TYPE}.footnotes+xml",
+            f"{_OOXML_REL}/footnotes",
+        )
+
+        result = DocxExtractor.extract(f, "footnote.docx")
+        assert result.status is FileStatus.READY
+        assert "[notes de bas de page]\nTEXTE_NOTE_BAS_DE_PAGE" in result.text
+        assert "SEP" not in result.text  # w:id -1/0 : blocs séparateurs système
+
+    def test_endnote_is_extracted(self, tmp_path: Path) -> None:
+        """Verrou de couverture : idem pour `/word/endnotes.xml`."""
+        from docx import Document
+
+        f = tmp_path / "endnote.docx"
+        doc = Document()
+        doc.add_paragraph("Corps assez long pour ne pas declencher LOW_TEXT. " * 5)
+        doc.save(str(f))
+
+        _inject_part(
+            f,
+            "word/endnotes.xml",
+            f"<w:endnotes {_W_NS}>"
+            '<w:endnote w:id="3"><w:p><w:r><w:t>TEXTE_NOTE_DE_FIN</w:t></w:r></w:p>'
+            "</w:endnote></w:endnotes>",
+            f"{_OOXML_TYPE}.endnotes+xml",
+            f"{_OOXML_REL}/endnotes",
+        )
+
+        result = DocxExtractor.extract(f, "endnote.docx")
+        assert result.status is FileStatus.READY
+        assert "[notes de fin]\nTEXTE_NOTE_DE_FIN" in result.text
 
     def test_embedded_image_export_creates_embedded_images(self, tmp_path: Path) -> None:
         """D-091 : export actif -> l'image est capturée avec un nom explicite

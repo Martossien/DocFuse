@@ -341,7 +341,7 @@ Ces métadonnées **comptent** dans le compteur (elles iront au LLM).
 |---|---|---|
 | PDF | Texte de chaque page, dans l’ordre des pages | Page vide → marqueur `[[PAGE 7: aucun texte extractible]]` |
 | DOCX | Body, tableaux, headers/footers, footnotes, endnotes | — |
-| PPTX | Texte des shapes, tableaux, **notes d’orateur** | Diapo sans texte → `[[DIAPO 3: aucun texte extractible]]` |
+| PPTX | Texte des shapes, tableaux, **notes d’orateur**, graphiques, SmartArt, masque et dispositions (section `## Gabarit`, une fois) | Diapo sans texte → `[[DIAPO 3: aucune forme porteuse de texte sur cette diapositive]]` ; source non lue → `[[DIAPO 3: aucun texte lu — non analysé par DocFuse : …]]` (D-107 : le marqueur décrit ce qui a été inspecté, il n’affirme plus l’absence de contenu) |
 | XLSX | Chaque feuille, cellules non vides, ordre A1… | Feuille vide signalée |
 | HTML | Titres, paragraphes, listes, tableaux, `alt` des images | `alt` vide + image → warning image |
 

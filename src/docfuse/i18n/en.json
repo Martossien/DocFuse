@@ -99,6 +99,7 @@
 
   "error.no_extractor": "No extractor for extension {ext}",
   "error.encrypted_pdf": "Password-protected PDF (encrypted)",
+  "error.pdf_page_count_mismatch": "Inconsistent page structure: pdfminer sees {pdfminer_pages} page(s), {library} sees {real_pages}. Text cannot be reliably attributed to each page — file needs manual review.",
   "error.encrypted_office": "File password-protected on open (encrypted)",
   "error.corrupt_file": "Corrupt file",
   "error.unknown": "Unknown error",
@@ -150,6 +151,7 @@
 
   "source_header.secrets_detected": "secret_alert",
   "source_header.duplicate_of": "duplicate_of",
+  "source_header.encoding_replacements": "encoding_characters_lost",
   "source_header.mojibake_repaired": "encoding_repaired",
   "source_header.markdown_base64_stripped": "base64_images_removed",
   "source_header.pdf_dedup": "notes",
@@ -159,6 +161,7 @@
   "source_header.epub_skipped_items": "missing_chapters",
   "epub.skipped_items_note": "{count} table-of-contents entry(ies) not found in the archive, not included: {items}",
 
+  "text.encoding_replacements_note": "{count} unreadable character(s) replaced by “�” while decoding — the detected encoding could not read those bytes",
   "text.mojibake_repaired_note": "Corrupted text (inconsistent encoding) automatically detected and repaired",
 
   "ocr.tesseract": "Tesseract",

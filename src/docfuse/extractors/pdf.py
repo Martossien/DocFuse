@@ -24,7 +24,7 @@ import io
 import logging
 import math
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -47,7 +47,12 @@ from docfuse.constants import (
 from docfuse.core.ocr.base import OcrEngine
 from docfuse.core.ocr.registry import ocr_with_slot, resolve_ocr_engine
 from docfuse.core.registry import register
-from docfuse.extractors.base import Extractor, error_result, file_type_for
+from docfuse.extractors.base import (
+    Extractor,
+    error_result,
+    error_result_message,
+    file_type_for,
+)
 from docfuse.i18n import t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
@@ -60,6 +65,96 @@ logger = logging.getLogger(__name__)
 # c'est justement l'accès concurrent ENTRE fichiers différents qui corrompt
 # le tas natif de PDFium).
 _PDFIUM_LOCK = threading.Lock()
+
+
+class PdfPageCountMismatchError(Exception):
+    """Deux bibliothèques indépendantes ne comptent pas le même nombre de pages.
+
+    **Pourquoi c'est grave (D-107).** Dans cet extracteur, l'indice de page
+    est la *clé de jointure* entre deux bibliothèques : le texte et sa
+    numérotation viennent de pdfminer (`_extract_pages_pdfminer`, énumération
+    de `extract_pages()`), le rendu OCR vient de PDFium
+    (`_ocr_pages`, `page = pdf[idx]`). `_apply_ocr` réécrit ensuite
+    `new_pages[idx]`. Si les deux ne parcourent pas la même suite de pages,
+    la page N reçoit le texte d'une autre page — et pour une page classée
+    `OCR`, ce texte **écrase** le texte natif réel au lieu de s'y ajouter.
+    Le contenu de la page perdue disparaît du corpus, celui d'une autre y
+    figure deux fois, et le résultat sort en statut `ready` sans un mot.
+
+    **Cause prouvée.** pdfminer déduplique son parcours de l'arbre `/Pages`
+    avec un ensemble `visited` (`pdfminer/pdfpage.py`) : un objet page
+    référencé deux fois dans `/Kids` — cas courant d'un PDF fusionné qui
+    réutilise un objet — n'est vu qu'une fois par pdfminer, mais deux fois
+    par pypdf et par PDFium. Reproduit sur un PDF de 4 pages dont pdfminer
+    n'en voit que 3.
+
+    **Choix retenu : refuser, plutôt qu'aligner.** L'autre option était
+    d'aligner les deux sources sur une seule autorité : reconstruire la vraie
+    suite de pages en appariant les identifiants d'objet PDF
+    (`pypdf : page.indirect_reference.idnum` ↔ `pdfminer : PDFPage.pageid`),
+    puis dupliquer le texte pdfminer pour chaque référence répétée. Ce qu'elle
+    aurait coûté :
+
+    * abandonner `pdfminer.high_level.extract_pages()` pour recopier sa
+      boucle interne (`PDFPage.get_pages` + `PDFPageInterpreter` +
+      `PDFPageAggregator`) — seul moyen d'accéder à l'identifiant d'objet de
+      chaque page, `LTPage.pageid` n'étant qu'un compteur séquentiel ;
+    * parier que pypdf et pdfminer numérotent les objets à l'identique, pour
+      un gain limité au seul scénario « objet page dupliqué » ;
+    * et **ne rien régler** pour les autres causes possibles de désaccord
+      (arbre `/Pages` partiellement illisible, `/Count` menteur, page que
+      pdfminer abandonne) : l'appariement échouerait, et il faudrait de toute
+      façon ce refus en dernier recours.
+
+    Le refus coûte, lui, le retrait du fichier du corpus : un document
+    contenant des données personnelles pourrait ne pas être signalé du tout,
+    faute d'être résumé. C'est assumé — le fichier apparaît en statut
+    `ERROR` dans le rapport avec les deux comptes, donc à examiner à la main,
+    là où un résumé faux se lit comme un résumé vrai et sert à décider une
+    suppression.
+
+    Attributes:
+        expected_pages: Nombre de pages attendu (celui de pdfminer, qui
+            numérote le texte).
+        observed_pages: Nombre de pages vu par l'autre bibliothèque.
+        observed_by: Nom de cette autre bibliothèque (`pypdf`, `PDFium`).
+    """
+
+    def __init__(self, expected_pages: int, observed_pages: int, observed_by: str) -> None:
+        self.expected_pages = expected_pages
+        self.observed_pages = observed_pages
+        self.observed_by = observed_by
+        super().__init__(
+            f"pdfminer voit {expected_pages} page(s), {observed_by} en voit {observed_pages}"
+        )
+
+
+def _structural_page_count(path: Path) -> int | None:
+    """Nombre de pages du PDF réel, vu par pypdf (D-107).
+
+    pypdf sert ici d'**autorité structurelle** : il parcourt `/Kids` sans
+    déduplication, comme PDFium (le moteur de rendu OCR) et comme n'importe
+    quel lecteur PDF — c'est donc ce nombre-là que voit l'auditeur qui ouvre
+    le fichier, et c'est celui que le rapport doit annoncer.
+
+    Returns:
+        Le nombre de pages, ou `None` si pypdf ne peut pas lire le fichier —
+        auquel cas aucune vérification n'est possible à ce stade et c'est la
+        garde de `_ocr_pages` (PDFium) qui reste seule en ligne.
+    """
+    try:
+        from pypdf import PdfReader
+
+        # D-098 : objet fichier et non chemin — pypdf recopierait sinon tout
+        # le fichier en mémoire.
+        with path.open("rb") as fh:
+            reader = PdfReader(fh)
+            if reader.is_encrypted:
+                reader.decrypt("")
+            return len(reader.pages)
+    except Exception:
+        logger.warning("Nombre de pages pypdf illisible pour %s", path, exc_info=True)
+        return None
 
 
 class PageKind(StrEnum):
@@ -108,6 +203,16 @@ class PdfExtractor(Extractor):
                 path
             )
 
+            # 2a. D-107 : l'indice de page est la clé de jointure entre le
+            # texte (pdfminer) et le rendu OCR (PDFium). Si pypdf — qui compte
+            # les pages comme PDFium et comme n'importe quel lecteur — n'est
+            # pas d'accord avec pdfminer, cette clé est fausse : on refuse
+            # plutôt que de risquer d'attribuer le texte d'une page à une
+            # autre. Voir `PdfPageCountMismatchError` pour le raisonnement complet.
+            structural_page_count = _structural_page_count(path)
+            if structural_page_count is not None and structural_page_count != page_count:
+                raise PdfPageCountMismatchError(page_count, structural_page_count, "pypdf")
+
             # 2b. Déduplication des en-têtes/pieds de page répétés sur chaque page.
             # Recalcule chars_per_page à partir du texte dédupliqué : la densité de
             # texte utile pour la détection de pauvreté (image_detector.py) doit
@@ -152,6 +257,23 @@ class PdfExtractor(Extractor):
                 chars_per_page=chars_per_page,
                 extra_metadata=extra_metadata,
             )
+        except PdfPageCountMismatchError as exc:
+            # D-107 : refus explicite, jamais un résultat silencieusement faux.
+            logger.error("Structure de pages incohérente dans %s : %s", path, exc)
+            result = error_result_message(
+                path,
+                relative_path,
+                t(
+                    "error.pdf_page_count_mismatch",
+                    pdfminer_pages=exc.expected_pages,
+                    real_pages=exc.observed_pages,
+                    library=exc.observed_by,
+                ),
+            )
+            # Le rapport doit annoncer le nombre de pages du PDF réel, pas
+            # celui de la vue tronquée de pdfminer.
+            result.page_count = exc.observed_pages
+            return result
         except Exception as exc:
             logger.exception("Erreur extraction PDF %s", path)
             return error_result(path, relative_path, exc)
@@ -433,7 +555,10 @@ def _apply_ocr(
             "ocr.unavailable_note", pages=len(ocr_indices), variant=OCR_VARIANT_NAME
         )
 
-    ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine)
+    # D-107 : `page_count` est le nombre de pages que pdfminer a numérotées ;
+    # `_ocr_pages` refuse de rendre quoi que ce soit si PDFium n'en compte pas
+    # autant (`PdfPageCountMismatchError`, laissée remonter jusqu'à `extract`).
+    ocr_results = _ocr_pages(path, ocr_indices, OCR_LANG, engine, page_count)
 
     new_pages = list(pages_text)
     pages_ocr = pages_mixed = pages_failed = 0
@@ -533,31 +658,161 @@ def _ocr_render_scale(width_pt: float, height_pt: float) -> float | None:
     return reduced
 
 
+def _render_page_image(path: Path, idx: int, expected_page_count: int) -> Any:
+    """Rastérise UNE page et rend une image PIL détachée de PDFium (D-108).
+
+    Le verrou `_PDFIUM_LOCK` (D-078) est pris et relâché ici, autour du seul
+    code qui appelle réellement PDFium. À la sortie, **plus aucun objet
+    PDFium n'est vivant** : le document est rouvert et refermé à chaque page
+    plutôt que maintenu ouvert entre deux prises du verrou. Garder un
+    `PdfDocument` vivant pendant qu'un autre thread charge le sien est
+    précisément la situation que D-078 décrit comme corruptrice ;
+    l'invariant « aucun état PDFium ne survit au verrou » est donc conservé
+    à l'identique. Coût mesuré de la réouverture : **5,2 ms par page** (PDF
+    scanné de 200 pages A4, 200 dpi), contre ~77 ms de rendu, et à comparer
+    aux ~400 ms d'encodage PNG que ce découpage sort du verrou.
+
+    L'appelant encode ensuite le PNG hors du verrou. `to_pil()` peut partager
+    le tampon natif du bitmap (documenté par pypdfium2 : « for RGBA, RGBX and
+    L bitmaps, PIL is supposed to share memory with the original buffer ») :
+    `.copy()` détache l'image, sans quoi sortir du verrou reviendrait à lire
+    de la mémoire PDFium pendant qu'un autre thread s'en sert. Coût mesuré :
+    **5,0 ms par page** — le format rendu par défaut ici est `BGR`, que PIL
+    recopie déjà, mais l'appel ne dépend alors d'aucun réglage de rendu.
+
+    Args:
+        path: Chemin du PDF.
+        idx: Index 0-indexé de la page, dans la numérotation de l'appelant.
+        expected_page_count: Nombre de pages attendu — vérifié contre PDFium
+            (D-107) avant tout `pdf[idx]`.
+
+    Returns:
+        Une image `PIL.Image.Image` indépendante, ou `None` si la page n'a
+        pas pu être rendue (PDF illisible, page hors plafond mémoire,
+        rastérisation en échec). Ces cas sont journalisés, jamais silencieux.
+
+    Raises:
+        PdfPageCountMismatchError: PDFium ne compte pas `expected_page_count`
+            pages (D-107).
+    """
+    import pypdfium2 as pdfium
+
+    with _PDFIUM_LOCK:
+        pdf = None
+        bitmap = None
+        try:
+            pdf = pdfium.PdfDocument(str(path))
+            # D-107 : garde avant tout `pdf[idx]`.
+            pdfium_page_count = len(pdf)
+            if pdfium_page_count != expected_page_count:
+                raise PdfPageCountMismatchError(expected_page_count, pdfium_page_count, "PDFium")
+
+            page = pdf[idx]
+            # D-096 : le plafond de pixels est vérifié AVANT le rendu — sinon
+            # la bitmap complète est déjà allouée (une page A0 à 200 dpi
+            # ≈ 250 Mo RGBA, une page hostile plusieurs Go) : un OOM est un
+            # SIGKILL, pas une exception rattrapable, et tue tout le processus
+            # (même classe que D-078).
+            # D-105 : le calcul se fait toujours avant allocation, mais une
+            # page hors plafond n'est plus perdue — elle est rendue à
+            # l'échelle réduite qui la fait tenir.
+            width, height = page.get_size()
+            page_scale = _ocr_render_scale(width, height)
+            if page_scale is None:
+                logger.warning("Page %d de %s trop grande pour l'OCR, ignorée", idx + 1, path)
+                return None
+            if page_scale < OCR_DPI / 72:
+                logger.info(
+                    "Page %d de %s rendue en résolution réduite (%d dpi au lieu de %d)"
+                    " pour tenir sous le plafond mémoire OCR",
+                    idx + 1,
+                    path,
+                    round(page_scale * 72),
+                    OCR_DPI,
+                )
+            bitmap = page.render(scale=page_scale)
+            return bitmap.to_pil().copy()
+        except PdfPageCountMismatchError:
+            raise
+        except Exception:
+            logger.warning("Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True)
+            return None
+        finally:
+            # `bitmap.close()` et `pdf.close()` sont des appels PDFium : ils
+            # doivent rester à l'intérieur du verrou.
+            if bitmap is not None:
+                bitmap.close()
+            if pdf is not None:
+                pdf.close()
+
+
 def _ocr_pages(
     path: Path,
     page_indices: list[int],
     lang: str,
     engine: OcrEngine,
+    expected_page_count: int,
 ) -> dict[int, tuple[str, bool]]:
     """Rastérise puis reconnaît une sélection de pages (0-indexées).
 
-    Rastérisation séquentielle (un seul `PdfDocument`, un pixmap jeté après
-    chaque page — jamais tout le PDF en mémoire à la fois), et **protégée
-    par `_PDFIUM_LOCK`** (D-078) : PDFium n'est pas thread-safe entre
-    `PdfDocument` distincts chargés depuis des threads différents — vérifié
-    en conditions réelles, un dossier avec plusieurs PDF nécessitant l'OCR
-    traités en parallèle (`ThreadPoolExecutor` de l'orchestrateur) produit
-    une corruption de tas native (`malloc(): unsorted double linked list
-    corrupted`) puis un SIGSEGV qui tue tout le processus — pas seulement
-    le fichier en cours. Un verrou global sérialise l'accès à PDFium pour
-    tout le processus ; la reconnaissance Tesseract, elle, reste
-    parallélisée (chaque appel est déjà un process OS isolé via
-    `subprocess`, donc thread-safe côté appelant, hors du verrou).
+    D-107 — **les indices reçus viennent de pdfminer, le rendu vient de
+    PDFium** : `page_indices` numérote les pages telles que
+    `_extract_pages_pdfminer` les a énumérées, `pdf[idx]` les prend telles
+    que PDFium les voit. Ces deux suites ne coïncident pas toujours (pdfminer
+    déduplique l'arbre `/Pages`, PDFium non). `expected_page_count` est le
+    nombre de pages de l'appelant : s'il ne correspond pas à celui de PDFium,
+    aucune page n'est rendue et `PdfPageCountMismatchError` est levée — laisser
+    passer reviendrait à coller le texte reconnu d'une page sur une autre,
+    en écrasant son vrai texte. C'est la deuxième garde, au point exact où
+    les deux bibliothèques se croisent ; la première (pypdf) est dans
+    `PdfExtractor.extract`.
+
+    Tout accès à PDFium est **protégé par `_PDFIUM_LOCK`** (D-078) : PDFium
+    n'est pas thread-safe entre `PdfDocument` distincts chargés depuis des
+    threads différents — vérifié en conditions réelles, un dossier avec
+    plusieurs PDF nécessitant l'OCR traités en parallèle
+    (`ThreadPoolExecutor` de l'orchestrateur) produit une corruption de tas
+    native (`malloc(): unsorted double linked list corrupted`) puis un
+    SIGSEGV qui tue tout le processus — pas seulement le fichier en cours.
+    Un verrou global sérialise l'accès à PDFium pour tout le processus ; la
+    reconnaissance Tesseract, elle, reste parallélisée (chaque appel est déjà
+    un process OS isolé via `subprocess`, donc thread-safe côté appelant,
+    hors du verrou).
+
+    D-108 — **étendue du verrou et pic mémoire.** Auparavant une seule prise
+    du verrou couvrait tout le document, et l'encodage PNG — qui n'appelle
+    jamais PDFium — se faisait dedans ; les PNG de toutes les pages étaient
+    de plus accumulés jusqu'à la fin du rendu, contrairement à ce que cette
+    docstring affirmait (« jamais tout le PDF en mémoire à la fois »). Mesuré
+    sur un PDF scanné de 200 pages A4 à 200 dpi : **RSS 16 Mo → 2 023 Mo**,
+    verrou détenu **95,7 s sur 96,2 s (99 %)**, dont ~83 % en encodage PNG.
+    Avec `MAX_WORKERS` fichiers en parallèle, le débit OCR de tout le
+    processus était plafonné par ce verrou.
+
+    Désormais : une page à la fois (`_render_page_image`, verrou pris et
+    relâché par page), encodage PNG **hors** du verrou, et soumission à
+    l'OCR au fil de l'eau — bornée par `in_flight`, pour que la file des PNG
+    ne remplace pas le dictionnaire qu'elle a supprimé.
+
+    Args:
+        path: Chemin du PDF.
+        page_indices: Indices 0-indexés des pages à OCRiser, dans la
+            numérotation de `_extract_pages_pdfminer`.
+        lang: Langues Tesseract.
+        engine: Moteur OCR résolu.
+        expected_page_count: Nombre total de pages dans cette même
+            numérotation, pour vérifier que PDFium parcourt bien le même
+            document (D-107).
 
     Returns:
-        Dict {index page: (texte reconnu, succès)}. Jamais d'exception :
-        une page en échec (raster impossible, page trop grande, timeout)
-        a `succès=False` et un texte vide.
+        Dict {index page: (texte reconnu, succès)}. Une page en échec (raster
+        impossible, page trop grande, timeout) a `succès=False` et un texte
+        vide.
+
+    Raises:
+        PdfPageCountMismatchError: PDFium ne compte pas `expected_page_count`
+            pages — les indices ne désignent pas les mêmes pages des deux
+            côtés. Seule exception que cette fonction laisse remonter.
     """
     results: dict[int, tuple[str, bool]] = {}
     capped = page_indices[:OCR_MAX_PAGES_PER_FILE]
@@ -566,70 +821,43 @@ def _ocr_pages(
     if not capped:
         return results
 
-    import pypdfium2 as pdfium
-
-    pngs: dict[int, bytes] = {}
-    with _PDFIUM_LOCK:
-        try:
-            pdf = pdfium.PdfDocument(str(path))
-            try:
-                scale = OCR_DPI / 72
-                for idx in capped:
-                    try:
-                        page = pdf[idx]
-                        # D-096 : le plafond de pixels est vérifié AVANT le
-                        # rendu — sinon la bitmap complète est déjà allouée
-                        # (une page A0 à 200 dpi ≈ 250 Mo RGBA, une page
-                        # hostile plusieurs Go) : un OOM est un SIGKILL, pas
-                        # une exception rattrapable, et tue tout le processus
-                        # (même classe que D-078).
-                        # D-105 : le calcul se fait toujours avant allocation,
-                        # mais une page hors plafond n'est plus perdue — elle
-                        # est rendue à l'échelle réduite qui la fait tenir.
-                        width, height = page.get_size()
-                        page_scale = _ocr_render_scale(width, height)
-                        if page_scale is None:
-                            logger.warning(
-                                "Page %d de %s trop grande pour l'OCR, ignorée", idx + 1, path
-                            )
-                            continue
-                        if page_scale < scale:
-                            logger.info(
-                                "Page %d de %s rendue en résolution réduite (%d dpi au lieu de %d)"
-                                " pour tenir sous le plafond mémoire OCR",
-                                idx + 1,
-                                path,
-                                round(page_scale * 72),
-                                OCR_DPI,
-                            )
-                        bitmap = page.render(scale=page_scale)
-                        pil_image = bitmap.to_pil()
-                        buf = io.BytesIO()
-                        pil_image.save(buf, format="PNG")
-                        pngs[idx] = buf.getvalue()
-                    except Exception:
-                        logger.warning(
-                            "Rastérisation échouée page %d de %s", idx + 1, path, exc_info=True
-                        )
-            finally:
-                pdf.close()
-        except Exception:
-            logger.warning("Ouverture PDFium impossible pour l'OCR : %s", path, exc_info=True)
-
+    # Défaut : échec. Une page rendue puis reconnue écrase son entrée.
     for idx in capped:
-        if idx not in pngs:
-            results[idx] = ("", False)
+        results[idx] = ("", False)
 
-    if pngs:
-        # D-098 : borné par le sémaphore global `OCR_SLOTS` (partagé avec
-        # les images intégrées), plus de MAX_WORKERS² processus Tesseract.
-        with ThreadPoolExecutor(max_workers=min(OCR_MAX_CONCURRENCY, len(pngs))) as executor:
-            futures = {
-                executor.submit(ocr_with_slot, engine, png, lang): idx for idx, png in pngs.items()
-            }
-            for future in as_completed(futures):
-                idx = futures[future]
-                text = future.result()
-                results[idx] = (text, bool(text.strip()))
+    # D-098 : borné par le sémaphore global `OCR_SLOTS` (partagé avec les
+    # images intégrées), plus de MAX_WORKERS² processus Tesseract.
+    workers = min(OCR_MAX_CONCURRENCY, len(capped))
+    # D-108 : les PNG ne sont plus tous gardés jusqu'à la fin du rendu, mais
+    # la file du pool pourrait reproduire exactement le même pic si le rendu
+    # (~85 ms/page) distance l'OCR (~1 s/page). `in_flight` borne le nombre
+    # de PNG vivants à la fois : les travailleurs occupés, plus deux en
+    # attente pour ne jamais les laisser sans travail.
+    in_flight = threading.Semaphore(workers + 2)
+
+    def _recognize(png: bytes) -> str:
+        try:
+            return ocr_with_slot(engine, png, lang)
+        finally:
+            in_flight.release()
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures: dict[Future[str], int] = {}
+        for idx in capped:
+            image = _render_page_image(path, idx, expected_page_count)
+            if image is None:
+                continue
+            # D-108 : hors `_PDFIUM_LOCK` — l'encodage PNG n'appelle jamais
+            # PDFium et représentait ~83 % du temps passé sous le verrou.
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            del image
+            in_flight.acquire()
+            futures[executor.submit(_recognize, buf.getvalue())] = idx
+
+        for future in as_completed(futures):
+            idx = futures[future]
+            text = future.result()
+            results[idx] = (text, bool(text.strip()))
 
     return results

@@ -12,6 +12,9 @@ from docfuse.models.extraction_result import ExtractedFile
 _EXTRA_METADATA_LABELS: list[tuple[str, str]] = [
     ("secrets_detected", "source_header.secrets_detected"),
     ("duplicate_of", "source_header.duplicate_of"),
+    # D-107 : une perte de caractères passe avant une réparation réussie —
+    # c'est la seule note qui signale du contenu manquant pour de bon.
+    ("encoding_replacements", "source_header.encoding_replacements"),
     ("mojibake_repaired", "source_header.mojibake_repaired"),
     ("markdown_base64_stripped", "source_header.markdown_base64_stripped"),
     ("pdf_dedup", "source_header.pdf_dedup"),

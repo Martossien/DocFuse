@@ -1,6 +1,7 @@
 """Extracteur DOCX : .docx.
 
-CdC §8.3 — Body, tableaux, headers/footers, footnotes, endnotes.
+CdC §8.3 — Body, tableaux, headers/footers (tableaux compris, D-107),
+footnotes, endnotes, commentaires (D-107).
 Utilise python-docx (MIT).
 Détecte les images via word/media/* dans le ZIP.
 """
@@ -69,20 +70,30 @@ class DocxExtractor(Extractor):
             # previous`, le défaut de chaque nouvelle section Word) renvoie
             # la définition de la section précédente — un rapport à une
             # section par chapitre répétait le même en-tête N fois.
+            # D-107 : `_Header.paragraphs` / `_Footer.paragraphs` ne rendent que
+            # les `w:p` enfants directs — un TABLEAU en en-tête ou en pied était
+            # perdu en entier. Or le papier à en-tête d'entreprise est presque
+            # toujours un tableau (logo | raison sociale | mention de diffusion)
+            # et les gabarits RH mettent référence, niveau de diffusion et durée
+            # de conservation dans un tableau de pied de page. On parcourt donc
+            # la racine `w:hdr`/`w:ftr` avec `_iter_body_parts`, qui sait lire
+            # paragraphes, tableaux et `w:sdt`, en préfixant chaque partie pour
+            # que l'en-tête reste identifiable comme tel dans le corpus.
+            # `collector` reste None : les images des en-têtes/pieds vivent dans
+            # les rels de leur propre partie, pas dans `doc.part.rels` — les
+            # collecter ici donnerait des relations irrésolubles (inchangé).
             for section in doc.sections:
                 for header in [section.header, section.first_page_header, section.even_page_header]:
                     if header.is_linked_to_previous:
                         continue
-                    for para in header.paragraphs:
-                        text = _flatten_paragraph_text(para._p)
-                        if text.strip():
+                    for text in _iter_body_parts(header._element, doc, Table):
+                        if _has_content(text):
                             parts.append(f"[en-tête] {text}")
                 for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
                     if footer.is_linked_to_previous:
                         continue
-                    for para in footer.paragraphs:
-                        text = _flatten_paragraph_text(para._p)
-                        if text.strip():
+                    for text in _iter_body_parts(footer._element, doc, Table):
+                        if _has_content(text):
                             parts.append(f"[pied de page] {text}")
 
             # Footnotes et endnotes — parties déjà chargées par python-docx
@@ -94,6 +105,14 @@ class DocxExtractor(Extractor):
             endnote_text = _extract_notes(doc, "/word/endnotes.xml", "}endnote")
             if endnote_text:
                 parts.append(f"[notes de fin]\n{endnote_text}")
+
+            # D-107 : commentaires Word (`/word/comments.xml`), jamais lus
+            # jusqu'ici — incohérent avec `odf.py` qui récupère bien les
+            # `office:annotation`. C'est le lieu privilégié des appréciations
+            # sur les personnes (RGPD art. 9, données sensibles).
+            comment_text = _extract_comments(doc)
+            if comment_text:
+                parts.append(f"[commentaires]\n{comment_text}")
 
             # I-19: zones de texte (w:txbxContent) du corps et des en-têtes/pieds
             textbox_text = _extract_textboxes(doc)
@@ -120,6 +139,18 @@ class DocxExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction DOCX %s", path)
             return error_result(path, relative_path, exc)
+
+
+def _has_content(text: str) -> bool:
+    """Vrai si `text` porte autre chose que des séparateurs de cellules vides
+    (D-107).
+
+    Un en-tête est très souvent construit sur un tableau de mise en page dont
+    plusieurs lignes/cellules sont vides : sans ce filtre, chacune sortirait
+    en `[en-tête]  | ` — du bruit pur dans le corpus, là où l'ancien code
+    (paragraphes seuls) n'émettait rien.
+    """
+    return bool(text.strip(" \t\n|"))
 
 
 def _flatten_paragraph_text(p_element: object) -> str:
@@ -278,17 +309,28 @@ def _iter_body_parts(
                 parts.extend(_scan_paragraph_images(child, collector))
         elif child.tag.endswith("}tbl"):
             table = table_cls(child, doc)
-            for row in table.rows:
+            # D-107 : `Table.rows` ne rend que les `w:tr` enfants directs du
+            # `w:tbl` ; une ligne enveloppée dans un `w:sdt` (`CT_SdtContentRow`
+            # — l'encodage standard du contrôle « section répétitive » de Word,
+            # le mécanisme même des formulaires à lignes ajoutables) était
+            # perdue. On parcourt donc les lignes dans l'ordre du document,
+            # `w:sdt` compris, en gardant `Table.rows` pour les lignes directes
+            # afin de ne rien changer aux fusions de cellules (`gridSpan`,
+            # `vMerge`) que python-docx résout pour nous.
+            direct_rows = iter(table.rows)
+            for row_element in _iter_table_rows(child):
+                if row_element.getparent() is child:
+                    cell_elements = [cell._tc for cell in next(direct_rows).cells]
+                else:
+                    cell_elements = [tc for tc in row_element if tc.tag.endswith("}tc")]
                 # D-098 : une cellule est jointe tout de suite ; ses images
                 # sont résolues ici (OCR de la cellule seule) pour garder les
                 # marqueurs à l'intérieur de la ligne `a | b`, comme avant.
                 cells = [
                     "\n".join(
-                        _resolve_cell(
-                            collector, _iter_body_parts(cell._tc, doc, table_cls, collector)
-                        )
+                        _resolve_cell(collector, _iter_body_parts(tc, doc, table_cls, collector))
                     ).strip()
-                    for cell in row.cells
+                    for tc in cell_elements
                 ]
                 parts.append(" | ".join(cells))
         elif child.tag.endswith("}sdt"):
@@ -296,6 +338,28 @@ def _iter_body_parts(
             if sdt_content is not None:
                 parts.extend(_iter_body_parts(sdt_content, doc, table_cls, collector))
     return parts
+
+
+def _iter_table_rows(tbl: object) -> list[Any]:
+    """Les `w:tr` d'un `w:tbl` dans l'ordre du document, en descendant dans
+    les `w:sdt` de niveau ligne (D-107).
+
+    Un `w:tr` direct garde `tbl` pour parent : l'appelant s'en sert pour
+    distinguer les lignes que python-docx sait déjà rendre (`Table.rows`,
+    fusions comprises) de celles qu'il faut lire cellule par cellule.
+    """
+    rows: list[Any] = []
+    stack = list(reversed(list(tbl)))  # type: ignore[call-overload]
+    while stack:
+        el = stack.pop()
+        tag = el.tag
+        if not isinstance(tag, str):  # commentaires/PI lxml
+            continue
+        if tag.endswith("}tr"):
+            rows.append(el)
+        elif tag.endswith(("}sdt", "}sdtContent")):
+            stack.extend(reversed(list(el)))
+    return rows
 
 
 def _count_media_images(path: Path) -> int:
@@ -360,6 +424,36 @@ def _extract_notes(doc: Any, partname: str, note_tag_suffix: str) -> str:
         text = _paragraphs_text(note)
         if text:
             texts.append(text)
+    return "\n".join(texts)
+
+
+def _extract_comments(doc: Any) -> str:
+    """Commentaires Word (`/word/comments.xml`), un par ligne, préfixés de
+    leur auteur quand il est renseigné (D-107).
+
+    Contrairement aux notes (`_extract_notes`), aucun `w:id` n'est ignoré :
+    `comments.xml` n'a pas de blocs séparateurs système, et `w:id="0"` est
+    le premier commentaire réel du document.
+
+    Le texte du commentaire vit dans une partie séparée : il n'apparaît
+    jamais dans `document.xml` (qui ne porte que les ancres
+    `w:commentRangeStart`/`w:commentReference`, sans `w:t`) — aucun risque
+    de double émission.
+    """
+    root = _part_element(doc, "/word/comments.xml")
+    if root is None:
+        return ""
+    texts: list[str] = []
+    for comment in root:
+        tag = comment.tag
+        if not isinstance(tag, str) or not tag.endswith("}comment"):
+            continue
+        text = _paragraphs_text(comment)
+        if not text:
+            continue
+        author = next((v for k, v in comment.attrib.items() if k.endswith("}author")), "")
+        author = author.strip()
+        texts.append(f"{author} : {text}" if author else text)
     return "\n".join(texts)
 
 

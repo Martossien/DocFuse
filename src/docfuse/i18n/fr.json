@@ -99,6 +99,7 @@
 
   "error.no_extractor": "Aucun extracteur pour l'extension {ext}",
   "error.encrypted_pdf": "PDF protégé par mot de passe (chiffré)",
+  "error.pdf_page_count_mismatch": "Structure de pages incohérente : pdfminer voit {pdfminer_pages} page(s), {library} en voit {real_pages}. Le texte ne peut pas être attribué de façon fiable à chaque page — fichier à examiner manuellement.",
   "error.encrypted_office": "Fichier protégé par mot de passe à l'ouverture (chiffré)",
   "error.corrupt_file": "Fichier corrompu",
   "error.unknown": "Erreur inconnue",
@@ -150,6 +151,7 @@
 
   "source_header.secrets_detected": "alerte_secret",
   "source_header.duplicate_of": "doublon_de",
+  "source_header.encoding_replacements": "encodage_caracteres_perdus",
   "source_header.mojibake_repaired": "encodage_repare",
   "source_header.markdown_base64_stripped": "images_base64_retirees",
   "source_header.pdf_dedup": "notes",
@@ -159,6 +161,7 @@
   "source_header.epub_skipped_items": "chapitres_manquants",
   "epub.skipped_items_note": "{count} entrée(s) du sommaire introuvable(s) dans l'archive, non incluse(s) : {items}",
 
+  "text.encoding_replacements_note": "{count} caractère(s) illisible(s) remplacé(s) par « � » au décodage — l'encodage détecté n'a pas su lire ces octets",
   "text.mojibake_repaired_note": "Texte corrompu (encodage incohérent) détecté et corrigé automatiquement",
 
   "ocr.tesseract": "Tesseract",

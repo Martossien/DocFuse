@@ -8,6 +8,7 @@ CdC §9.4 — Détection images via LTImage/LTFigure.
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,71 @@ def _make_image_only_pdf(tmp_path: Path, lines: list[str]) -> Path:
     c.drawImage(str(png_path), 0, 0, width=w, height=h)
     c.showPage()
     c.save()
+    return pdf_path
+
+
+def _raw_pdf(objects: list[tuple[int, bytes]], root: int = 1) -> bytes:
+    """Assemble un PDF minimal (table xref classique) à partir d'objets bruts.
+
+    Nécessaire pour D-107 : aucune bibliothèque de génération (reportlab…) ne
+    produit un arbre `/Pages` qui référence deux fois le même objet page —
+    c'est justement la structure à reproduire.
+    """
+    import io
+
+    out = io.BytesIO()
+    out.write(b"%PDF-1.7\n")
+    offsets: dict[int, int] = {}
+    for num, body in objects:
+        offsets[num] = out.tell()
+        out.write(f"{num} 0 obj\n".encode())
+        out.write(body)
+        out.write(b"\nendobj\n")
+    xref_offset = out.tell()
+    size = max(offsets) + 1
+    out.write(f"xref\n0 {size}\n".encode())
+    out.write(b"0000000000 65535 f \n")
+    for i in range(1, size):
+        out.write(f"{offsets.get(i, 0):010d} 00000 n \n".encode())
+    out.write(
+        f"trailer\n<< /Size {size} /Root {root} 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
+    )
+    return out.getvalue()
+
+
+def _make_duplicate_kids_pdf(tmp_path: Path) -> Path:
+    """PDF de 4 pages dont l'arbre `/Pages` référence DEUX FOIS l'objet de la
+    page A — cas courant d'un PDF fusionné qui réutilise un objet page.
+
+    pdfminer déduplique son parcours de l'arbre (`visited`, `pdfpage.py`) et
+    n'en voit donc que 3 ; pypdf et PDFium en voient 4. Les trois pages vues
+    par pdfminer portent volontairement des contenus très différents (dont un
+    « dossier médical » et des « salaires ») : si les indices de page se
+    décalent, le décalage est visible dans le texte produit.
+    """
+
+    def _page(num: int, text: str) -> list[tuple[int, bytes]]:
+        content = f"BT /F1 24 Tf 50 700 Td ({text}) Tj ET".encode()
+        return [
+            (
+                num,
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
+                b"<< /Font << /F1 99 0 R >> >> /Contents %d 0 R >>" % (num + 50),
+            ),
+            (num + 50, b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream"),
+        ]
+
+    objects: list[tuple[int, bytes]] = [
+        (1, b"<< /Type /Catalog /Pages 2 0 R >>"),
+        (2, b"<< /Type /Pages /Kids [3 0 R 4 0 R 3 0 R 5 0 R] /Count 4 >>"),
+        (99, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+    ]
+    objects += _page(3, "PAGE A - dossier medical patient DUPONT")
+    objects += _page(4, "PAGE B - note de service anodine")
+    objects += _page(5, "PAGE C - salaires nominatifs")
+
+    pdf_path = tmp_path / "dup_kids.pdf"
+    pdf_path.write_bytes(_raw_pdf(objects))
     return pdf_path
 
 
@@ -291,13 +357,20 @@ class TestPdfOcr:
             def close(self) -> None:
                 pass
 
+            # D-107 : `_ocr_pages` vérifie désormais que PDFium compte le même
+            # nombre de pages que l'appelant avant de rendre quoi que ce soit ;
+            # le faux document doit donc répondre à `len()`, sinon le test ne
+            # traverse plus le code qu'il prétend vérifier.
+            def __len__(self) -> int:
+                return 1
+
             def __getitem__(self, idx: int) -> None:
                 raise AssertionError("pas besoin d'aller plus loin pour ce test")
 
         fake_pdfium = type("FakeModule", (), {"PdfDocument": _FakePdfDocument})
         monkeypatch.setitem(__import__("sys").modules, "pypdfium2", fake_pdfium)
 
-        pdf_module._ocr_pages(tmp_path / "x.pdf", [0], "fra", TesseractEngine())
+        pdf_module._ocr_pages(tmp_path / "x.pdf", [0], "fra", TesseractEngine(), 1)
 
         assert lock_was_held == [True]
         assert not pdf_module._PDFIUM_LOCK.locked()  # relâché après l'appel
@@ -325,6 +398,261 @@ class TestPdfOcr:
         result = PdfExtractor.extract(f, "native.pdf")
         assert "ocr" not in result.extra_metadata
         assert "texte OCR" not in result.text
+
+
+class TestOcrLockScopeAndMemory:
+    """D-108 — étendue du verrou PDFium et pic mémoire de la rastérisation.
+
+    Mesures sur un PDF scanné de 200 pages A4 à 200 dpi, moteur OCR factice
+    instantané (la question porte sur la rastérisation, pas sur Tesseract) :
+
+    * avant : RSS 16 Mo → **2 023 Mo**, verrou détenu **95,7 s / 96,2 s (99 %)** ;
+    * après : RSS 16 Mo → **96 Mo**, verrou détenu **21,0 s / 101,8 s (21 %)**.
+
+    Et sur 4 fichiers de 20 pages OCRisés en parallèle (Tesseract réel) :
+    55,9 s / 1,43 page/s / pic RSS 1 411 Mo → 48,1 s / 1,66 page/s / 627 Mo.
+    """
+
+    @staticmethod
+    def _fake_pdfium(lock_state_at: dict[str, list[bool]], pages: int) -> object:
+        """Faux module `pypdfium2` qui note si `_PDFIUM_LOCK` est tenu à
+        chaque étape (rendu / encodage PNG)."""
+        import docfuse.extractors.pdf as pdf_module
+
+        class _FakeImage:
+            def copy(self) -> _FakeImage:
+                return self
+
+            def save(self, buf: object, format: str) -> None:  # noqa: A002, ARG002
+                lock_state_at["png"].append(pdf_module._PDFIUM_LOCK.locked())
+                buf.write(b"\x89PNG-factice")  # type: ignore[attr-defined]
+
+        class _FakeBitmap:
+            def to_pil(self) -> _FakeImage:
+                return _FakeImage()
+
+            def close(self) -> None:
+                pass
+
+        class _FakePage:
+            def get_size(self) -> tuple[float, float]:
+                return (595.0, 842.0)
+
+            def render(self, scale: float) -> _FakeBitmap:  # noqa: ARG002
+                lock_state_at["render"].append(pdf_module._PDFIUM_LOCK.locked())
+                return _FakeBitmap()
+
+        class _FakePdfDocument:
+            def __init__(self, path: str) -> None:  # noqa: ARG002
+                lock_state_at["open"].append(pdf_module._PDFIUM_LOCK.locked())
+
+            def __len__(self) -> int:
+                return pages
+
+            def __getitem__(self, idx: int) -> _FakePage:  # noqa: ARG002
+                return _FakePage()
+
+            def close(self) -> None:
+                pass
+
+        return type("FakeModule", (), {"PdfDocument": _FakePdfDocument})
+
+    def test_png_encoding_runs_outside_the_pdfium_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """L'encodage PNG n'appelle jamais PDFium ; le garder sous le verrou
+        plafonnait le débit OCR de tout le processus (~83 % du temps tenu
+        pour rien). Le rendu, lui, doit rester protégé (D-078)."""
+        import docfuse.extractors.pdf as pdf_module
+
+        states: dict[str, list[bool]] = {"open": [], "render": [], "png": []}
+        monkeypatch.setitem(__import__("sys").modules, "pypdfium2", self._fake_pdfium(states, 3))
+
+        def _instant_ocr(engine: object, png: bytes, lang: str) -> str:  # noqa: ARG001
+            return "texte"
+
+        monkeypatch.setattr(pdf_module, "ocr_with_slot", _instant_ocr)
+
+        results = pdf_module._ocr_pages(tmp_path / "x.pdf", [0, 1, 2], "fra", TesseractEngine(), 3)
+
+        assert states["open"] == [True, True, True], "ouverture PDFium hors verrou (D-078)"
+        assert states["render"] == [True, True, True], "rendu PDFium hors verrou (D-078)"
+        assert states["png"] == [False, False, False], "encodage PNG encore sous verrou (D-108)"
+        assert not pdf_module._PDFIUM_LOCK.locked()
+        assert all(ok for _, ok in results.values())
+
+    def test_rendered_pngs_are_not_all_kept_in_memory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Avant : `pngs: dict[int, bytes]` gardait le PDF entier rendu en
+        mémoire jusqu'à la fin de l'OCR (2 Go pour 200 pages). Le rendu doit
+        maintenant se bloquer dès que les PNG déjà produits saturent la file
+        de l'OCR, quelle que soit la lenteur de celui-ci.
+
+        Borne seulement majorée : le test ne dépend pas de la vitesse relative
+        des threads, seulement du sémaphore `in_flight`.
+        """
+        import threading
+
+        import docfuse.extractors.pdf as pdf_module
+        from docfuse.constants import OCR_MAX_CONCURRENCY
+
+        total_pages = 60
+        rendered = []
+        rendered_lock = threading.Lock()
+        release = threading.Event()
+
+        def _fake_render(path: Path, idx: int, expected: int) -> object:  # noqa: ARG001
+            with rendered_lock:
+                rendered.append(idx)
+
+            class _Img:
+                def save(self, buf: object, format: str) -> None:  # noqa: A002, ARG002
+                    buf.write(b"png")  # type: ignore[attr-defined]
+
+            return _Img()
+
+        def _blocking_ocr(engine: object, png: bytes, lang: str) -> str:  # noqa: ARG001
+            release.wait(timeout=30)
+            return "texte"
+
+        monkeypatch.setattr(pdf_module, "_render_page_image", _fake_render)
+        monkeypatch.setattr(pdf_module, "ocr_with_slot", _blocking_ocr)
+
+        done = threading.Event()
+
+        def _run() -> None:
+            pdf_module._ocr_pages(
+                tmp_path / "x.pdf",
+                list(range(total_pages)),
+                "fra",
+                TesseractEngine(),
+                total_pages,
+            )
+            done.set()
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        # Laisse largement le temps au rendu de s'emballer s'il le peut.
+        time.sleep(1.0)
+        with rendered_lock:
+            rendered_while_blocked = len(rendered)
+        release.set()
+        assert done.wait(timeout=30), "_ocr_pages ne se termine pas"
+        worker.join(timeout=5)
+
+        workers = min(OCR_MAX_CONCURRENCY, total_pages)
+        # workers + 2 PNG autorisés en vol, + 1 page rendue et bloquée sur
+        # `in_flight.acquire()`.
+        assert rendered_while_blocked <= workers + 3
+        assert rendered_while_blocked < total_pages
+        assert len(rendered) == total_pages, "toutes les pages doivent finir par être rendues"
+
+
+class TestPdfPageDesync:
+    """D-107 — CRITIQUE : le texte OCR d'une page attribué à une AUTRE page.
+
+    Les indices de page viennent de pdfminer (qui déduplique son parcours de
+    l'arbre `/Pages`), le rendu OCR de PDFium (qui ne déduplique pas). Quand
+    les deux ne comptent pas le même nombre de pages, `new_pages[idx] = ...`
+    écrit le texte reconnu sur une page qui n'est pas la bonne — et comme le
+    genre est `OCR`, le texte natif réel est écrasé, pas concaténé.
+    """
+
+    def test_pdfminer_and_pypdf_disagree_on_duplicate_kids(self, tmp_path: Path) -> None:
+        """Le désaccord existe bel et bien : c'est le socle du test suivant.
+
+        Si un jour pdfminer cesse de dédupliquer, ce test tombe et signale que le
+        scénario a changé.
+
+        Le désaccord prend **deux formes** selon la version de pypdf, et les deux
+        content ce test : pypdf 6.16.2 compte 4 pages là où pdfminer en voit 3 ;
+        pypdf 6.16.1 refuse carrément l'arbre (« Detected cyclic page references »).
+        Exiger la première forme faisait échouer la suite sur l'autre version — et
+        le refus est, si l'on y tient, un désaccord plus franc encore. Ce qui doit
+        rester vrai, c'est que les deux bibliothèques ne voient pas la même chose ;
+        c'est le test suivant qui vérifie ce que DocFuse en fait.
+        """
+        from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
+
+        from docfuse.extractors.pdf import _extract_pages_pdfminer
+
+        pdf_path = _make_duplicate_kids_pdf(tmp_path)
+        _, _, pdfminer_pages, _ = _extract_pages_pdfminer(pdf_path)
+        try:
+            with pdf_path.open("rb") as fh:
+                pypdf_pages: int | None = len(PdfReader(fh).pages)
+        except PdfReadError:
+            pypdf_pages = None  # l'arbre de pages est refusé : désaccord, en plus net
+
+        assert pdfminer_pages == 3
+        assert pypdf_pages != 3, "sans désaccord, le scénario du test suivant n'existe plus"
+
+    def test_page_desync_is_refused_instead_of_misattributing_text(self, tmp_path: Path) -> None:
+        """Avant D-107 : statut `ready`, `page_count = 3` pour un PDF de
+        4 pages, la page 3 portant le texte OCR de la page 1 (« dossier
+        medical ») tandis que « salaires nominatifs » disparaissait du corpus.
+        Aucun avertissement.
+
+        Après : refus explicite, et le nombre de pages annoncé est celui du
+        vrai PDF.
+        """
+        pdf_path = _make_duplicate_kids_pdf(tmp_path)
+        result = PdfExtractor.safe_extract(pdf_path, "dup_kids.pdf")
+
+        assert result.status is FileStatus.ERROR
+        assert result.page_count == 4, "page_count doit décrire le PDF réel, pas la vue pdfminer"
+        assert result.error_message is not None
+        assert "3" in result.error_message
+        assert "4" in result.error_message
+        # Aucun contenu ne peut être attribué à la mauvaise page : il n'y a
+        # pas de contenu du tout, et le fichier est signalé pour examen.
+        assert "dossier medical" not in result.text
+        assert result.text == ""
+
+    def test_ocr_pages_refuses_when_pdfium_disagrees(self, tmp_path: Path) -> None:
+        """Deuxième garde, au point exact où les deux bibliothèques se
+        croisent : même si pypdf était illisible (ou d'accord à tort),
+        `_ocr_pages` ne rend aucune page tant que PDFium ne compte pas comme
+        l'appelant. Pas besoin de Tesseract : le refus précède le rendu.
+        """
+        from docfuse.extractors.pdf import PdfPageCountMismatchError, _ocr_pages
+
+        pdf_path = _make_duplicate_kids_pdf(tmp_path)
+        with pytest.raises(PdfPageCountMismatchError) as excinfo:
+            _ocr_pages(pdf_path, [0, 1, 2], "fra+eng", TesseractEngine(), 3)
+
+        assert excinfo.value.expected_pages == 3
+        assert excinfo.value.observed_pages == 4
+
+    def test_agreeing_pdf_is_not_refused(self, tmp_path: Path) -> None:
+        """Non-régression : un PDF normal (les deux bibliothèques d'accord)
+        passe exactement comme avant."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate
+
+        f = tmp_path / "normal.pdf"
+        doc = SimpleDocTemplate(str(f), pagesize=A4)
+        styles = getSampleStyleSheet()
+        doc.build(
+            [
+                Paragraph(
+                    "Premiere page avec un texte suffisamment long pour le seuil requis.",
+                    styles["Normal"],
+                ),
+                PageBreak(),
+                Paragraph(
+                    "Deuxieme page avec un texte suffisamment long pour le seuil requis.",
+                    styles["Normal"],
+                ),
+            ]
+        )
+
+        result = PdfExtractor.extract(f, "normal.pdf")
+        assert result.status is FileStatus.READY
+        assert result.page_count == 2
 
 
 class TestOcrRenderScale:
@@ -441,7 +769,8 @@ class TestOcrRenderScaleBounds:
         c.showPage()
         c.save()
 
-        results = _ocr_pages(pdf_path, [0], "fra+eng", TesseractEngine())
+        # D-107 : dernier argument = nombre de pages attendu (le PDF en a 1).
+        results = _ocr_pages(pdf_path, [0], "fra+eng", TesseractEngine(), 1)
         text, ok = results[0]
         assert ok is True, f"page géante toujours ignorée : {results}"
         assert "4711" in text

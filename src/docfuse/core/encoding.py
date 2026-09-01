@@ -15,23 +15,29 @@ seule copie.
 
 from __future__ import annotations
 
+import codecs
 import logging
 import unicodedata
 
 from docfuse.constants import (
     ENCODING_MAX_CONTROL_RATIO,
-    ENCODING_MAX_UTF8_REPLACEMENT_RATIO,
     ENCODING_PLAUSIBILITY_SAMPLE_CHARS,
 )
 from docfuse.i18n import t
 
 logger = logging.getLogger(__name__)
 
+#: Caractère de remplacement Unicode, produit par tout décodage
+#: `errors="replace"` : un octet que l'encodage retenu n'a pas su lire.
+REPLACEMENT_CHAR = "�"
+
 __all__ = [
+    "REPLACEMENT_CHAR",
     "decode_text",
     "decode_text_with_note",
     "detect_encoding",
     "mojibake_metadata",
+    "replacement_metadata",
     "repair_mojibake",
 ]
 
@@ -57,16 +63,53 @@ def _looks_plausible(text: str) -> bool:
     return (control_count / len(sample)) <= ENCODING_MAX_CONTROL_RATIO
 
 
-def _is_nearly_utf8(data: bytes) -> bool:
-    """Vrai si `data` est de l'UTF-8 à une fraction négligeable d'octets
-    invalides près (`ENCODING_MAX_UTF8_REPLACEMENT_RATIO`), D-097."""
-    decoded = data.decode("utf-8", errors="replace")
-    if not decoded:
+def _is_utf8_truncated_at_end(data: bytes) -> bool:
+    """Vrai si `data` est de l'UTF-8 valide, à une unique séquence
+    multi-octets **incomplète en toute fin de flux** près (D-097, corrigé
+    D-107).
+
+    Pourquoi pas un ratio (la faute corrigée). D-097 justifiait la
+    tolérance par « une seule séquence multi-octets tronquée (fin de
+    fichier coupée) », mais l'implémentait comme un ratio d'octets
+    invalides (`ENCODING_MAX_UTF8_REPLACEMENT_RATIO`, 0,1 %) : le budget
+    d'octets illisibles croissait avec la taille du fichier. Un export ERP
+    français de 3 Mo majoritairement ASCII, en cp1252, avec un millier
+    d'octets accentués (0,035 %) était donc déclaré `utf-8`, décodé avec
+    `errors="replace"`, et sortait en `Mme <?>lodie Lef<?>vre` — l'en-tête
+    du corpus affirmant `encodage: utf-8`, une affirmation fausse. Mesuré :
+    dès 10 000 caractères ASCII, 5 accents suffisaient à basculer.
+
+    Le critère correspond maintenant à l'intention : on décode en flux et
+    on autorise le décodeur à garder en attente ce qui traîne à la fin. Si
+    tout le reste est de l'UTF-8 strictement valide, la seule anomalie est
+    bien une séquence coupée au bout du fichier (fichier tronqué, log
+    tourné au milieu d'un caractère) — et le fichier reste lisible en
+    UTF-8 plutôt que d'être entièrement transformé en `cafÃ©` par cp1252.
+    Le nombre d'octets tolérés ne dépend plus de la taille : il est borné
+    par la longueur maximale d'une séquence UTF-8 incomplète (3 octets).
+
+    Ce que ce critère refuse désormais, et qui passait avant :
+
+    - tout octet invalide **ailleurs** qu'à la toute fin, en quelque
+      quantité que ce soit — c'est exactement le cas de l'export cp1252 ;
+    - un fichier UTF-8 tronqué au **début** (log tourné juste après un
+      octet de continuation) : il repart en cp1252. Cas non observé en
+      production ; le traiter demanderait de rogner la tête du flux, ce qui
+      rouvrirait une porte sur les fichiers cp1252 commençant par un octet
+      0x80-0xBF (« ¿ », « « »…). Refus assumé.
+
+    Un flux entièrement fait d'une séquence incomplète (`b"\\xc3"` seul) ne
+    produit aucun caractère : il n'est pas reconnu comme UTF-8, comme
+    avant.
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        # final=False : une séquence incomplète en fin de flux est mise en
+        # attente au lieu de lever ; toute autre anomalie lève toujours.
+        decoded = decoder.decode(data, False)
+    except UnicodeDecodeError:
         return False
-    replacements = decoded.count("�")
-    if replacements == 0:
-        return True
-    return replacements / len(decoded) <= ENCODING_MAX_UTF8_REPLACEMENT_RATIO
+    return bool(decoded)
 
 
 def detect_encoding(data: bytes) -> tuple[str, bytes]:
@@ -98,14 +141,13 @@ def detect_encoding(data: bytes) -> tuple[str, bytes]:
     except UnicodeDecodeError:
         pass
 
-    # 2b. UTF-8 « presque » valide (D-097) : une seule séquence multi-octets
-    # tronquée (fin de fichier coupée, log tourné au milieu d'un caractère)
-    # faisait échouer le test strict, puis cp1252 « réussissait » et TOUT le
-    # fichier sortait en `Ã©` — ensuite « réparé » par ftfy et signalé comme
-    # mojibake : doublement trompeur (mauvais encodage rapporté, caractère
-    # tronqué survivant en `Ã`). Si le décodage tolérant ne produit qu'une
-    # part négligeable de U+FFFD, c'est de l'UTF-8.
-    if _is_nearly_utf8(data):
+    # 2b. UTF-8 tronqué en fin de flux (D-097, resserré D-107) : une seule
+    # séquence multi-octets coupée (fin de fichier tronquée, log tourné au
+    # milieu d'un caractère) faisait échouer le test strict, puis cp1252
+    # « réussissait » et TOUT le fichier sortait en `Ã©` — ensuite
+    # « réparé » par ftfy et signalé comme mojibake : doublement trompeur
+    # (mauvais encodage rapporté, caractère tronqué survivant en `Ã`).
+    if _is_utf8_truncated_at_end(data):
         return "utf-8", data
 
     # 3. cp1252 (Windows Latin-1 étendu — très fréquent sous Windows)
@@ -216,12 +258,44 @@ def mojibake_metadata(repaired: bool) -> dict[str, str]:
     return {"mojibake_repaired": t("text.mojibake_repaired_note")} if repaired else {}
 
 
+def replacement_metadata(text: str) -> dict[str, str]:
+    """Note de transparence quand des caractères restent illisibles (D-107).
+
+    `decode_text()` décode avec `errors="replace"` : tout octet que
+    l'encodage retenu n'a pas su lire devient U+FFFD, sans exception ni
+    trace. Le corpus affichait alors un `encodage:` péremptoire sur un
+    texte silencieusement amputé — pour un rapport qui sert à décider de
+    suppressions de fichiers, c'est la perte la plus dangereuse : invisible.
+    Le resserrement de `_is_utf8_truncated_at_end` supprime la cause
+    massive ; il reste des cas légitimes et bornés (fichier réellement
+    tronqué, octet isolé indécodable), et ceux-là doivent se voir dans les
+    métadonnées du document, pas seulement dans un journal.
+
+    Limite assumée : le comptage porte sur le texte final, donc un document
+    contenant *authentiquement* des U+FFFD dans sa source serait signalé
+    lui aussi. La note reste vraie sur le fond (ces caractères sont bien
+    illisibles) et le texte n'est jamais modifié.
+
+    Args:
+        text: Texte décodé final.
+
+    Returns:
+        Métadonnées à fusionner dans `ExtractedFile.extra_metadata`, vides
+        si aucun caractère de remplacement ne subsiste.
+    """
+    count = text.count(REPLACEMENT_CHAR)
+    if not count:
+        return {}
+    return {"encoding_replacements": t("text.encoding_replacements_note", count=count)}
+
+
 def decode_text_with_note(raw: bytes) -> tuple[str, str, dict[str, str]]:
-    """`decode_text()` + note de transparence prête pour `extra_metadata`.
+    """`decode_text()` + notes de transparence prêtes pour `extra_metadata`.
 
     Returns:
         Tuple (encodage détecté, texte final, métadonnées à fusionner dans
-        `ExtractedFile.extra_metadata` — vide si rien n'a été réparé).
+        `ExtractedFile.extra_metadata` — vide si rien n'a été réparé et si
+        aucun caractère n'est resté illisible).
     """
     encoding, text, repaired = decode_text(raw)
-    return encoding, text, mojibake_metadata(repaired)
+    return encoding, text, {**mojibake_metadata(repaired), **replacement_metadata(text)}
