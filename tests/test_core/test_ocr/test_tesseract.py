@@ -300,3 +300,99 @@ class TestFailureCacheBounds:
         assert messages, "l'échec du listage doit être journalisé"
         assert "langue : --list-langs" not in messages[0]
         assert "commande : --list-langs" in messages[0]
+
+
+# ------------------------------------------- repli quand `stdin` est inutilisable
+
+
+def _resultat(
+    code: int, sortie: bytes = b"", erreur: bytes = b""
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(
+        args=["tesseract"], returncode=code, stdout=sortie, stderr=erreur
+    )
+
+
+_STDERR_WINDOWS = (
+    b"Error in fopenReadStream: failed to open locally with tail  for filename \n"
+    b"Leptonica Error in pixRead: image file not found: \n"
+    b"Image file  cannot be read!\nError during processing.\n"
+)
+"""stderr réellement observé sur un poste Windows : le nom de fichier est **vide**."""
+
+
+@pytest.fixture(autouse=True)
+def _stdin_reputee_utilisable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """L'état « stdin inutilisable » est global : il ne doit pas fuir d'un test à l'autre."""
+    monkeypatch.setattr(tess, "_STDIN_UNUSABLE", False)
+
+
+def test_une_image_vide_naccuse_pas_tesseract(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Zéro octet en entrée produisait « Image file cannot be read! » à chaque page.
+
+    La trace accusait alors tesseract d'un défaut qui n'est pas le sien : c'est le
+    rendu de la page qui n'a rien donné. On ne lance plus le processus du tout.
+    """
+    monkeypatch.setattr(tess, "_resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(tess, "effective_lang", lambda _lang: "fra")
+    appels: list[object] = []
+    monkeypatch.setattr(tess, "_run_tesseract", lambda *args, **_kw: appels.append(args))
+
+    with caplog.at_level(logging.WARNING):
+        assert tess.TesseractEngine().ocr_image(b"", "fra+eng") == ""
+
+    assert appels == [], "aucun processus ne doit être lancé pour une image vide"
+    assert "image vide" in caplog.text
+    assert "tesseract n'est pas en cause" in caplog.text
+
+
+def test_stdin_illisible_bascule_sur_un_fichier_temporaire(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Sous Windows, Leptonica ne sait pas lire une image sur un tube.
+
+    Constaté en production : 150 pages perdues sur une seule campagne, avec pour
+    seule trace un « nom de fichier vide » qui ne désignait pas la cause. Le repli
+    par fichier temporaire fonctionne partout, et n'est payé qu'une fois : la
+    session entière l'emprunte ensuite directement.
+    """
+    monkeypatch.setattr(tess, "_resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(tess, "effective_lang", lambda _lang: "fra")
+    vus: list[list[str]] = []
+
+    def faux_tesseract(_binary: str, args: list[str], _entree: bytes | None = None):  # type: ignore[no-untyped-def]
+        vus.append(args)
+        if args[0] == "stdin":
+            return _resultat(1, erreur=_STDERR_WINDOWS)
+        return _resultat(0, sortie=b"FACTURE 4711")
+
+    monkeypatch.setattr(tess, "_run_tesseract", faux_tesseract)
+
+    with caplog.at_level(logging.WARNING):
+        premier = tess.TesseractEngine().ocr_image(b"\x89PNG-faux", "fra+eng")
+        second = tess.TesseractEngine().ocr_image(b"\x89PNG-faux", "fra+eng")
+
+    assert premier == "FACTURE 4711", "le texte est bien lu par le repli"
+    assert second == "FACTURE 4711"
+    assert [a[0] for a in vus].count("stdin") == 1, "stdin n'est tenté qu'une seule fois"
+    assert vus[-1][0].endswith("page.png")
+    assert "entrée standard" in caplog.text
+
+
+def test_un_echec_qui_nest_pas_celui_de_stdin_reste_signale(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Contre-épreuve : on ne bascule pas sur un fichier pour n'importe quel échec."""
+    monkeypatch.setattr(tess, "_resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(tess, "effective_lang", lambda _lang: "fra")
+    monkeypatch.setattr(
+        tess, "_run_tesseract", lambda *_a, **_k: _resultat(1, erreur=b"Error opening data file")
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert tess.TesseractEngine().ocr_image(b"\x89PNG-faux", "fra+eng") == ""
+
+    assert tess._STDIN_UNUSABLE is False
+    assert "Error opening data file" in caplog.text

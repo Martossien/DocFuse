@@ -41,6 +41,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -151,6 +152,59 @@ def reset_language_cache() -> None:
     _list_langs.cache_clear()
 
 
+_STDIN_UNUSABLE = False
+"""Vrai dès qu'on a constaté que ce tesseract ne sait pas lire une image sur `stdin`.
+
+Sous Windows, Leptonica échoue à lire un flux d'image sur un tube et se plaint d'un
+**nom de fichier vide** — « Error in fopenReadStream: failed to open locally with tail
+for filename » suivi de « Image file cannot be read! ». Constaté en production : 150
+pages perdues sur une seule campagne, avec un message qui accusait tesseract.
+
+Le repli par fichier temporaire fonctionne partout. On ne le paie qu'une fois : dès le
+premier échec de ce type, tout le reste de la session passe directement par le fichier.
+"""
+
+_STDIN_FAILURE_SIGNS = ("fopenReadStream", "pixRead", "cannot be read")
+"""Signes, dans stderr, d'une image que Leptonica n'a pas su lire depuis `stdin`."""
+
+
+def _looks_like_stdin_failure(stderr: bytes) -> bool:
+    """Cet échec vient-il de la lecture sur `stdin` plutôt que du contenu de l'image ?"""
+    texte = stderr.decode("utf-8", errors="replace")
+    return any(signe in texte for signe in _STDIN_FAILURE_SIGNS)
+
+
+def _bascule_sur_fichier_temporaire(
+    binary: str, result: subprocess.CompletedProcess[bytes], lang: str
+) -> None:
+    """Note une fois pour toutes que `stdin` est inutilisable sur ce poste."""
+    global _STDIN_UNUSABLE  # noqa: PLW0603 - état du poste, constaté une seule fois
+    _STDIN_UNUSABLE = True
+    _log_failure_once(
+        "OCR : ce tesseract ne sait pas lire une image sur son entrée standard "
+        f"(langue : {lang}) — bascule sur un fichier temporaire pour toute la session. "
+        f"Message d'origine : {_failure_message(binary, result, context=f'langue : {lang}')}"
+    )
+
+
+def _ocr_via_temp_file(binary: str, image_bytes: bytes, lang: str) -> str:
+    """OCR en écrivant l'image dans un fichier temporaire — repli universel."""
+    with tempfile.TemporaryDirectory(prefix="docfuse_ocr_") as dossier:
+        image = Path(dossier) / "page.png"
+        image.write_bytes(image_bytes)
+        result = _run_tesseract(binary, [str(image), "stdout", "-l", lang])
+    if result is None:
+        return ""
+    if result.returncode != 0:
+        _log_failure_once(
+            _failure_message(
+                binary, result, context=f"langue : {lang}, fichier temporaire, {len(image_bytes)} o"
+            )
+        )
+        return ""
+    return result.stdout.decode("utf-8", errors="replace")
+
+
 class TesseractEngine(OcrEngine):
     """OCR via le binaire CLI `tesseract`."""
 
@@ -168,13 +222,33 @@ class TesseractEngine(OcrEngine):
         lang = effective_lang(lang)
         if not lang:
             return ""
-        result = _run_tesseract(binary, ["stdin", "stdout", "-l", lang], image_bytes)
-        if result is None:
+        if not image_bytes:
+            # Appeler tesseract avec zéro octet produit « Image file cannot be read! »
+            # sur chaque page, et la trace accuse tesseract d'un défaut qui n'est pas
+            # le sien : le rendu de la page n'a rien donné.
+            _log_failure_once(
+                f"OCR ignoré : image vide reçue par le moteur (langue : {lang}) — "
+                "le rendu de la page n'a produit aucun octet, tesseract n'est pas en cause"
+            )
             return ""
-        if result.returncode != 0:
-            _log_failure_once(_failure_message(binary, result, context=f"langue : {lang}"))
-            return ""
-        return result.stdout.decode("utf-8", errors="replace")
+
+        if not _STDIN_UNUSABLE:
+            result = _run_tesseract(binary, ["stdin", "stdout", "-l", lang], image_bytes)
+            if result is not None and result.returncode == 0:
+                return result.stdout.decode("utf-8", errors="replace")
+            if result is not None and _looks_like_stdin_failure(result.stderr):
+                _bascule_sur_fichier_temporaire(binary, result, lang)
+            elif result is not None:
+                _log_failure_once(
+                    _failure_message(
+                        binary, result, context=f"langue : {lang}, {len(image_bytes)} octets"
+                    )
+                )
+                return ""
+            else:
+                return ""
+
+        return _ocr_via_temp_file(binary, image_bytes, lang)
 
 
 def _failure_message(
