@@ -2695,6 +2695,11 @@ liste qui ne connaissait que « MIT ») sans que personne ne le voie.
    (`tests/test_gui_app.py`, doublure de `customtkinter`) — 11 tests qui exercent les
    handlers réels sur une vraie analyse : `gui/app.py` passe de 22 % à 79 % de couverture.
 
+6. Suite (même nuit) : les deux `except Exception` muets restants consignent leur cause en
+   `debug` ; les vocabulaires de comptage passent en `.gz` (22,9 Mo → 4,3 Mo dans le paquet
+   et l'exe, chargement ~0,35 s, parité vérifiée par décompression dans les tests) ; quatre
+   dernières fonctions de complexité 19-23 découpées — plus rien au-dessus de 20.
+
 **Vérification** : `ruff`, `ruff format`, `mypy --strict` (64 fichiers) propres ;
 **672 réussis, 39 ignorés**, couverture 90 % ; fenêtre ouverte et fermée en mode smoke sur
 `DISPLAY=:1`.

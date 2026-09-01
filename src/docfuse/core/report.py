@@ -168,6 +168,132 @@ def generate_json_report(
     )
 
 
+def _report_header(
+    files: list[ExtractedFile],
+    ignored_files: list[tuple[Path, str]],
+    context_limit: int,
+    margin: float,
+    total_tokens_estimated: int,
+    total_tokens_with_margin: int,
+    *,
+    engine_id: str,
+    parts: list[CorpusPart] | None,
+    split_context: bool,
+) -> list[str]:
+    lines = [
+        f"# {t('report.title', app=APP_NAME)}",
+        "",
+        f"- **{t('report.version')}** : {__version__}",
+        f"- **{t('report.date')}** : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- **{t('report.context_limit')}** : {format_number(context_limit)}",
+        f"- **{t('report.margin')}** : +{margin * 100:.0f} %",
+        f"- **{t('report.tokenizer_engine')}** : {t(f'tokenizer.{engine_id}')}",
+        f"- **{t('report.total_estimated')}** : {format_number(total_tokens_estimated)}",
+        f"- **{t('report.total_with_margin')}** : {format_number(total_tokens_with_margin)}",
+        f"- **{t('report.files_analyzed')}** : {len(files)}",
+        f"- **{t('report.files_ignored')}** : {len(ignored_files)}",
+    ]
+    if split_context:
+        lines.append(f"- **{t('report.split_context')}** : {len(parts or [])}")
+    lines.append("")
+    return lines
+
+
+def _parts_section(parts: list[CorpusPart] | None, corpus_path: Path | None) -> list[str]:
+    """Parties du corpus (mode découpage, D-101)."""
+    if not parts:
+        return []
+    lines = [
+        f"## {t('report.parts')}",
+        "",
+        f"| {t('table.part')} | {t('table.file')} | {t('corpus.files')} | "
+        f"{t('table.text_estimated')} | {t('table.context_margin')} | {t('table.status')} |",
+        "|---|---|---|---|---|---|",
+    ]
+    for part in parts:
+        name = (
+            f"{corpus_path.stem}_{part.index:03d}" if corpus_path is not None else str(part.index)
+        )
+        status = t("report.part_oversized") if part.oversized else t("status.ready")
+        lines.append(
+            f"| {part.index} | {name} | {len(part.file_indices)} | "
+            f"{format_number(part.tokens_estimated)} | "
+            f"{format_number(part.tokens_with_margin)} | {status} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _files_section(
+    files: list[ExtractedFile], estimates: list[TokenEstimate] | None, margin: float
+) -> list[str]:
+    """Tableau des fichiers extraits, avec le moteur réellement utilisé si `estimates`."""
+    if not files:
+        return []
+    lines = [
+        f"## {t('report.files_analyzed')}",
+        "",
+        f"| {t('table.file')} | {t('table.type')} | {t('table.text_estimated')} | "
+        f"{t('table.context_margin')} | {t('table.status')} |",
+        "|---|---|---|---|---|",
+    ]
+    _check_aligned(files, estimates)
+    for i, f in enumerate(files):
+        if estimates is not None:
+            tokens = estimates[i].tokens_estimated
+            tokens_margin = estimates[i].tokens_with_margin
+        else:
+            # I-02: Formule correcte : ceil(octets/4), ceil(tokens*(1+margin))
+            tokens = math.ceil(f.text_bytes_utf8 / BYTES_PER_TOKEN) if f.text else 0
+            tokens_margin = math.ceil(tokens * (1 + margin))
+        lines.append(
+            f"| {f.relative_path} | {f.file_type} | {format_number(tokens)} | "
+            f"{format_number(tokens_margin)} | {f.status.label()} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _ignored_section(ignored_files: list[tuple[Path, str]]) -> list[str]:
+    if not ignored_files:
+        return []
+    lines = [
+        f"## {t('report.files_ignored')}",
+        "",
+        f"| {t('table.file')} | {t('report.files_ignored')} |",
+        "|---|---|",
+    ]
+    lines += [f"| {path.name} | {reason} |" for path, reason in ignored_files]
+    lines.append("")
+    return lines
+
+
+def _notes_section(files: list[ExtractedFile]) -> list[str]:
+    """Notes de transparence (secrets potentiels, doublons, dédup PDF, images
+    base64 retirées) — CdC §8, sans perte silencieuse."""
+    notes_by_file = [(f, ordered_notes(f)) for f in files]
+    notes_by_file = [(f, notes) for f, notes in notes_by_file if notes]
+    if not notes_by_file:
+        return []
+    lines = [f"## {t('report.notes')}", ""]
+    for f, notes in notes_by_file:
+        lines += [f"- **{f.relative_path}** : {note}" for note in notes]
+    lines.append("")
+    return lines
+
+
+def _errors_section(files: list[ExtractedFile]) -> list[str]:
+    error_files = [f for f in files if f.status is FileStatus.ERROR]
+    if not error_files:
+        return []
+    lines = [f"## {t('report.errors')}", ""]
+    lines += [
+        f"- **{f.relative_path}** : {f.error_message or t('error.unknown')}" for f in error_files
+    ]
+    lines.append("")
+    return lines
+
+
 def generate_markdown_report(
     files: list[ExtractedFile],
     ignored_files: list[tuple[Path, str]],
@@ -203,101 +329,20 @@ def generate_markdown_report(
         corpus_path: Chemin de base du corpus, pour nommer les parties
             (`<stem>_001.<ext>`) ; sans lui, seul le numéro est affiché.
     """
-    lines: list[str] = []
-    lines.append(f"# {t('report.title', app=APP_NAME)}")
-    lines.append("")
-    lines.append(f"- **{t('report.version')}** : {__version__}")
-    lines.append(f"- **{t('report.date')}** : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"- **{t('report.context_limit')}** : {format_number(context_limit)}")
-    lines.append(f"- **{t('report.margin')}** : +{margin * 100:.0f} %")
-    lines.append(f"- **{t('report.tokenizer_engine')}** : {t(f'tokenizer.{engine_id}')}")
-    lines.append(f"- **{t('report.total_estimated')}** : {format_number(total_tokens_estimated)}")
-    lines.append(
-        f"- **{t('report.total_with_margin')}** : {format_number(total_tokens_with_margin)}"
+    lines = _report_header(
+        files,
+        ignored_files,
+        context_limit,
+        margin,
+        total_tokens_estimated,
+        total_tokens_with_margin,
+        engine_id=engine_id,
+        parts=parts,
+        split_context=split_context,
     )
-    lines.append(f"- **{t('report.files_analyzed')}** : {len(files)}")
-    lines.append(f"- **{t('report.files_ignored')}** : {len(ignored_files)}")
-    if split_context:
-        lines.append(f"- **{t('report.split_context')}** : {len(parts or [])}")
-    lines.append("")
-
-    # Parties du corpus (mode découpage, D-101)
-    if parts:
-        lines.append(f"## {t('report.parts')}")
-        lines.append("")
-        lines.append(
-            f"| {t('table.part')} | {t('table.file')} | {t('corpus.files')} | "
-            f"{t('table.text_estimated')} | {t('table.context_margin')} | {t('table.status')} |"
-        )
-        lines.append("|---|---|---|---|---|---|")
-        for part in parts:
-            name = (
-                f"{corpus_path.stem}_{part.index:03d}"
-                if corpus_path is not None
-                else str(part.index)
-            )
-            status = t("report.part_oversized") if part.oversized else t("status.ready")
-            lines.append(
-                f"| {part.index} | {name} | {len(part.file_indices)} | "
-                f"{format_number(part.tokens_estimated)} | "
-                f"{format_number(part.tokens_with_margin)} | {status} |"
-            )
-        lines.append("")
-
-    # Tableau des fichiers extraits
-    if files:
-        lines.append(f"## {t('report.files_analyzed')}")
-        lines.append("")
-        lines.append(
-            f"| {t('table.file')} | {t('table.type')} | {t('table.text_estimated')} | "
-            f"{t('table.context_margin')} | {t('table.status')} |"
-        )
-        lines.append("|---|---|---|---|---|")
-        _check_aligned(files, estimates)
-        for i, f in enumerate(files):
-            if estimates is not None:
-                tokens = estimates[i].tokens_estimated
-                tokens_margin = estimates[i].tokens_with_margin
-            else:
-                # I-02: Formule correcte : ceil(octets/4), ceil(tokens*(1+margin))
-                tokens = math.ceil(f.text_bytes_utf8 / BYTES_PER_TOKEN) if f.text else 0
-                tokens_margin = math.ceil(tokens * (1 + margin))
-            status_label = f.status.label()
-            lines.append(
-                f"| {f.relative_path} | {f.file_type} | {format_number(tokens)} | "
-                f"{format_number(tokens_margin)} | {status_label} |"
-            )
-        lines.append("")
-
-    # Fichiers ignorés
-    if ignored_files:
-        lines.append(f"## {t('report.files_ignored')}")
-        lines.append("")
-        lines.append(f"| {t('table.file')} | {t('report.files_ignored')} |")
-        lines.append("|---|---|")
-        for path, reason in ignored_files:
-            lines.append(f"| {path.name} | {reason} |")
-        lines.append("")
-
-    # Notes de transparence (secrets potentiels, doublons, dédup PDF, images
-    # base64 retirées) — CdC §8, sans perte silencieuse.
-    notes_by_file = [(f, ordered_notes(f)) for f in files]
-    notes_by_file = [(f, notes) for f, notes in notes_by_file if notes]
-    if notes_by_file:
-        lines.append(f"## {t('report.notes')}")
-        lines.append("")
-        for f, notes in notes_by_file:
-            for note in notes:
-                lines.append(f"- **{f.relative_path}** : {note}")
-        lines.append("")
-
-    # Erreurs
-    error_files = [f for f in files if f.status is FileStatus.ERROR]
-    if error_files:
-        lines.append(f"## {t('report.errors')}")
-        lines.append("")
-        for f in error_files:
-            lines.append(f"- **{f.relative_path}** : {f.error_message or t('error.unknown')}")
-        lines.append("")
-
+    lines += _parts_section(parts, corpus_path)
+    lines += _files_section(files, estimates, margin)
+    lines += _ignored_section(ignored_files)
+    lines += _notes_section(files)
+    lines += _errors_section(files)
     output_path.write_text("\n".join(lines), encoding="utf-8")

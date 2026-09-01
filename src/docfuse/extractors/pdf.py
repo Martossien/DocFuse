@@ -303,7 +303,9 @@ def _check_encrypted(path: Path) -> bool:
                 return False
             return reader.decrypt("") == PasswordType.NOT_DECRYPTED
     except Exception:
-        # Si pypdf échoue, on continue avec pdfminer
+        # pypdf n'a pas su lire la structure : pdfminer tranchera — mais la cause
+        # doit rester lisible dans le journal (un PDF corrompu se diagnostique ici).
+        logger.debug("Contrôle de chiffrement pypdf impossible pour %s", path, exc_info=True)
         return False
 
 
@@ -393,10 +395,26 @@ def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | No
     page_count = len(pages_text)
     if page_count < PDF_BOILERPLATE_MIN_PAGES:
         return pages_text, None
-
     pages_lines = [p.split("\n") for p in pages_text]
+    occurrences = _edge_line_occurrences(pages_lines)
+    min_occurrences = max(
+        PDF_BOILERPLATE_MIN_OCCURRENCES, round(PDF_BOILERPLATE_MIN_RATIO * page_count)
+    )
+    boilerplate = {line for line, count in occurrences.items() if count >= min_occurrences}
+    if not boilerplate:
+        return pages_text, None
+    new_pages, chars_saved = _strip_repeated_edges(pages_lines, boilerplate)
+    note = t(
+        "pdf.dedup_note",
+        count=len(boilerplate),
+        occurrences=sum(occurrences[line] for line in boilerplate),
+        chars=chars_saved,
+    )
+    return new_pages, note
 
-    # Compter les occurrences des lignes candidates (première/dernière de chaque page).
+
+def _edge_line_occurrences(pages_lines: list[list[str]]) -> dict[str, int]:
+    """Nombre de pages où chaque première/dernière ligne (courte) apparaît."""
     occurrences: dict[str, int] = {}
     for lines in pages_lines:
         candidates = set()
@@ -407,14 +425,17 @@ def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | No
         for candidate in candidates:
             if len(candidate) <= PDF_BOILERPLATE_MAX_LINE_LEN:
                 occurrences[candidate] = occurrences.get(candidate, 0) + 1
+    return occurrences
 
-    min_occurrences = max(
-        PDF_BOILERPLATE_MIN_OCCURRENCES, round(PDF_BOILERPLATE_MIN_RATIO * page_count)
-    )
-    boilerplate = {line for line, count in occurrences.items() if count >= min_occurrences}
-    if not boilerplate:
-        return pages_text, None
 
+def _strip_repeated_edges(
+    pages_lines: list[list[str]], boilerplate: set[str]
+) -> tuple[list[str], int]:
+    """Retire les occurrences suivantes de chaque ligne répétée (la première reste).
+
+    Returns:
+        (pages de texte, caractères retirés).
+    """
     seen_once: set[str] = set()
     chars_saved = 0
     new_pages: list[str] = []
@@ -430,15 +451,7 @@ def _dedupe_page_boilerplate(pages_text: list[str]) -> tuple[list[str], str | No
                 seen_once.add(stripped)
             kept_lines.append(line)
         new_pages.append("\n".join(kept_lines))
-
-    total_occurrences = sum(occurrences[line] for line in boilerplate)
-    note = t(
-        "pdf.dedup_note",
-        count=len(boilerplate),
-        occurrences=total_occurrences,
-        chars=chars_saved,
-    )
-    return new_pages, note
+    return new_pages, chars_saved
 
 
 def _walk_figure(figure: Any) -> tuple[int, list[str]]:

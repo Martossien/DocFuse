@@ -11,6 +11,9 @@ rafraîchissent le fichier de vocabulaire vendoré, pas à la CI standard.
 
 from __future__ import annotations
 
+import gzip
+from pathlib import Path
+
 import pytest
 
 mistral_common = pytest.importorskip("mistral_common")
@@ -29,12 +32,14 @@ SAMPLES = [
 
 
 @pytest.mark.parametrize("text", SAMPLES)
-def test_token_count_matches_reference_tekkenizer(text: str) -> None:
+def test_token_count_matches_reference_tekkenizer(text: str, tmp_path: Path) -> None:
     from mistral_common.tokens.tokenizers.tekken import Tekkenizer
 
     from docfuse.core.tokenizers.mistral import _VOCAB_PATH
 
-    reference = Tekkenizer.from_file(_VOCAB_PATH)
+    raw = tmp_path / "tekken_240911.json"
+    raw.write_bytes(gzip.decompress(_VOCAB_PATH.read_bytes()))
+    reference = Tekkenizer.from_file(raw)
     ref_count = len(reference.encode(text, bos=False, eos=False))
     our_count = len(_load_encoding().encode(text))
 

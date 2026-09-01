@@ -1,7 +1,7 @@
 """Moteur de comptage précis basé sur l'encodage o200k_base d'OpenAI.
 
 Couvre GPT-4o, GPT-4.1 et les modèles o-série. Le fichier de vocabulaire
-(`assets/o200k_base.tiktoken`) est le fichier officiel distribué par OpenAI
+(`assets/o200k_base.tiktoken.gz`, gzip du fichier officiel) est le fichier officiel distribué par OpenAI
 avec `tiktoken` (MIT) — même contenu, hash SHA-256 vérifié à l'identique de
 celui que `tiktoken_ext.openai_public.o200k_base()` attend
 (`_EXPECTED_HASH` ci-dessous). Le pattern de découpage (`_PAT_STR`) est
@@ -21,6 +21,7 @@ tiktoken pour les tokens spéciaux non autorisés).
 from __future__ import annotations
 
 import base64
+import gzip
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -31,7 +32,8 @@ from docfuse.core.tokenizers.base import TokenizerEngine, TokenizerEngineInfo
 
 logger = logging.getLogger(__name__)
 
-_VOCAB_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "o200k_base.tiktoken"
+_VOCAB_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "o200k_base.tiktoken.gz"
+"""Fichier officiel `o200k_base.tiktoken`, **compressé** (3,5 Mo → 1,7 Mo)."""
 
 # Pattern officiel de l'encodage o200k_base (tiktoken_ext.openai_public.o200k_base).
 _PAT_STR = "|".join(
@@ -71,7 +73,7 @@ class OpenAIEngine(TokenizerEngine):
 def _load_encoding() -> tiktoken.Encoding:
     """Charge l'Encoding tiktoken depuis le fichier de vocabulaire vendoré."""
     mergeable_ranks: dict[bytes, int] = {}
-    with _VOCAB_PATH.open("r", encoding="utf-8") as fh:
+    with gzip.open(_VOCAB_PATH, "rt", encoding="utf-8") as fh:
         for line in fh:
             if not line.strip():
                 continue

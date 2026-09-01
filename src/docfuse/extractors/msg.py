@@ -185,6 +185,11 @@ def _raw_string_property(obj: Any, *pids: int) -> str:
             try:
                 raw = bytes(reader(pid, ptyp))
             except Exception:
+                # Type de propriété absent pour ce pid : cas normal de la cascade,
+                # dit au niveau `debug` pour rester diagnosticable (D-104).
+                logger.debug(
+                    "Propriété MSG %#06x/%#06x illisible en brut", pid, ptyp, exc_info=True
+                )
                 continue
             if not raw:
                 continue

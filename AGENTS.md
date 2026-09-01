@@ -56,7 +56,7 @@ src/docfuse/
 ├── branding.py             # APP_NAME (DOCFUSE_APP_NAME) → sortie, config, log, exe (D-102)
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf/-Bold (police PDF), tekken_240911.json (vocab Mistral), o200k_base.tiktoken (vocab OpenAI)
+├── assets/                 # DejaVuSans.ttf/-Bold (police PDF), tekken_240911.json.gz (vocab Mistral), o200k_base.tiktoken.gz (vocab OpenAI)
 ├── core/
 │   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
 │   ├── splitter.py         # split_by_budget() → CorpusPart, jamais de coupe (D-101)

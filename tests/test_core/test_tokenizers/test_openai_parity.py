@@ -11,8 +11,8 @@ que le hash attendu correspond).
 
 from __future__ import annotations
 
+import gzip
 import hashlib
-import shutil
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,7 @@ def primed_tiktoken_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     cache_dir = tmp_path / "tiktoken_cache"
     cache_dir.mkdir()
     cache_key = hashlib.sha1(_O200K_URL.encode()).hexdigest()
-    shutil.copy(_VOCAB_PATH, cache_dir / cache_key)
+    (cache_dir / cache_key).write_bytes(gzip.decompress(_VOCAB_PATH.read_bytes()))
     monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(cache_dir))
     return cache_dir
 

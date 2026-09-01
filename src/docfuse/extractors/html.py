@@ -189,58 +189,46 @@ def _extract_elements(parent: Any, parts: list[str], counter: dict[str, int]) ->
         if not isinstance(element, Tag):
             continue
 
-        tag_name = element.name or ""
-
-        # Titres → Markdown # (h1-h6 uniquement, pas <hr>, <head>, <html>, etc.)
-        if tag_name and tag_name.startswith("h") and len(tag_name) == 2 and tag_name[1].isdigit():
-            level = int(tag_name[1])
-            text = tag_text(element)
-            if text:
-                parts.append(f"{'#' * level} {text}")
-            continue
-
-        # Images : compter + extraire le alt
-        if tag_name == "img":
-            counter["count"] += 1
-            parts.append(_image_placeholder(element))
-            continue
-
-        # Tableaux → Markdown
-        if tag_name == "table":
-            table_md = _table_to_markdown(element)
-            if table_md:
-                parts.append(table_md)
-            continue
-
-        # Listes → Markdown
-        if tag_name in ("ul", "ol"):
-            list_md = _list_to_markdown(element)
-            if list_md:
-                parts.append(list_md)
-            continue
-
-        # Bloc préformaté : retours à la ligne et indentation conservés
-        if tag_name == "pre":
-            text = preformatted_text(element)
-            if text:
-                parts.append(text)
-            continue
-
-        # D-096 : tout autre élément (p, div, section, main, nav, aside,
-        # blockquote, figure, td…) est un conteneur. S'il contient un
-        # descendant structuré (titre, tableau, liste, image, pre), on
-        # RÉCURSE pour garder cette structure — l'ancien code aplatissait
-        # tout en `get_text`, et comme quasi toute page réelle enveloppe son
-        # corps dans un `<div>`/`<main>`, titres, tableaux et listes
-        # disparaissaient dans la quasi-totalité des cas. Sans descendant
-        # structuré, le texte est extrait d'un bloc (sans coller les mots).
-        if element.find(_STRUCTURED_DESCENDANTS) is not None:
+        rendered = _render_tag(element, counter)
+        if rendered is _RECURSE:
             _extract_elements(element, parts, counter)
-            continue
+        elif rendered:
+            parts.append(str(rendered))
 
+
+_RECURSE = object()
+"""Sentinelle de `_render_tag` : conteneur à parcourir enfant par enfant."""
+
+
+def _render_tag(element: Any, counter: dict[str, int]) -> object:
+    """Texte Markdown d'un élément, `_RECURSE` pour un conteneur structuré, `""` sinon.
+
+    Titres → `#`, images → marqueur (compteur incrémenté), tableaux et listes →
+    Markdown, `<pre>` → texte préformaté. D-096 : tout autre élément (p, div,
+    section, main, nav, aside, blockquote, figure, td…) est un conteneur. S'il
+    contient un descendant structuré (titre, tableau, liste, image, pre), on
+    RÉCURSE pour garder cette structure — l'ancien code aplatissait tout en
+    `get_text`, et comme quasi toute page réelle enveloppe son corps dans un
+    `<div>`/`<main>`, titres, tableaux et listes disparaissaient dans la
+    quasi-totalité des cas. Sans descendant structuré, le texte est extrait d'un
+    bloc (sans coller les mots).
+    """
+    tag_name = element.name or ""
+    if tag_name and tag_name.startswith("h") and len(tag_name) == 2 and tag_name[1].isdigit():
         text = tag_text(element)
-        if text:
-            parts.append(text)
+        return f"{'#' * int(tag_name[1])} {text}" if text else ""
+    if tag_name == "img":
+        counter["count"] += 1
+        return _image_placeholder(element)
+    if tag_name == "table":
+        return _table_to_markdown(element)
+    if tag_name in ("ul", "ol"):
+        return _list_to_markdown(element)
+    if tag_name == "pre":
+        return preformatted_text(element)
+    if element.find(_STRUCTURED_DESCENDANTS) is not None:
+        return _RECURSE
+    return tag_text(element)
 
 
 def _image_placeholder(img: Any) -> str:

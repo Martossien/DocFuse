@@ -171,7 +171,6 @@ def _texte_diapo(
     # shape.has_table renvoient False pour le conteneur groupe lui-même.
     for shape in _iter_shapes(slide.shapes):
         type_forme = _shape_type(shape)
-
         if type_forme == MSO_SHAPE_TYPE.PICTURE:
             if batch.active:
                 index_image += 1
@@ -184,48 +183,10 @@ def _texte_diapo(
                 # mentait le plus souvent (D-107).
                 images_non_lues = True
             continue
-
         if type_forme == MSO_SHAPE_TYPE.MEDIA:
             _ajouter(non_lus, "média audio/vidéo")
             continue
-
-        if shape.has_text_frame:
-            for para in shape.text_frame.paragraphs:
-                text = _clean_text(para.text)
-                if text:
-                    textes.append(text)
-
-        if shape.has_table:
-            table = shape.table
-            for row in table.rows:
-                cells = [_clean_text(cell.text) for cell in row.cells]
-                textes.append(" | ".join(cells))
-            continue
-
-        uri = _uri_graphic_data(shape)
-        if uri is None or uri == _URI_TABLE:
-            continue
-
-        # D-107 : un <p:graphicFrame> n'a ni has_text_frame ni has_table.
-        # Graphiques et SmartArt tombaient donc dans le vide, et la diapo
-        # était déclarée « sans texte extractible » alors qu'elle porte des
-        # catégories, des noms de séries, un organigramme nominatif.
-        if uri == _URI_CHART:
-            recupere = _texte_graphique(shape, numero)
-            if recupere is None:
-                _ajouter(non_lus, "graphique illisible")
-            else:
-                textes.extend(recupere)
-        elif uri == _URI_DIAGRAM:
-            recupere = _texte_smartart(shape, slide, numero, diagrammes_lus)
-            if recupere is None:
-                _ajouter(non_lus, "diagramme SmartArt illisible")
-            else:
-                textes.extend(recupere)
-        elif uri == _URI_OLE:
-            _ajouter(non_lus, "objet incorporé (OLE)")
-        else:
-            _ajouter(non_lus, f"objet graphique de type « {_fin_uri(uri)} »")
+        _lire_forme(shape, slide, numero, diagrammes_lus, textes, non_lus)
 
     recuperes, ignores = _elements_ignores_par_pptx(slide.shapes._spTree)
     textes.extend(recuperes)
@@ -239,6 +200,51 @@ def _texte_diapo(
             textes.append(f"[Notes] {_clean_text(notes.text)}")
 
     return textes, non_lus, images_non_lues
+
+
+def _lire_forme(
+    shape: Any,
+    slide: Any,
+    numero: int,
+    diagrammes_lus: set[str],
+    textes: list[str],
+    non_lus: list[str],
+) -> None:
+    """Texte d'une forme non-image : cadre de texte, tableau, graphique, SmartArt, OLE.
+
+    D-107 : un <p:graphicFrame> n'a ni has_text_frame ni has_table. Graphiques et
+    SmartArt tombaient donc dans le vide, et la diapo était déclarée « sans texte
+    extractible » alors qu'elle porte des catégories, des noms de séries, un
+    organigramme nominatif.
+    """
+    if shape.has_text_frame:
+        for para in shape.text_frame.paragraphs:
+            text = _clean_text(para.text)
+            if text:
+                textes.append(text)
+    if shape.has_table:
+        for row in shape.table.rows:
+            textes.append(" | ".join(_clean_text(cell.text) for cell in row.cells))
+        return
+    uri = _uri_graphic_data(shape)
+    if uri is None or uri == _URI_TABLE:
+        return
+    if uri == _URI_CHART:
+        recupere = _texte_graphique(shape, numero)
+        if recupere is None:
+            _ajouter(non_lus, "graphique illisible")
+        else:
+            textes.extend(recupere)
+    elif uri == _URI_DIAGRAM:
+        recupere = _texte_smartart(shape, slide, numero, diagrammes_lus)
+        if recupere is None:
+            _ajouter(non_lus, "diagramme SmartArt illisible")
+        else:
+            textes.extend(recupere)
+    elif uri == _URI_OLE:
+        _ajouter(non_lus, "objet incorporé (OLE)")
+    else:
+        _ajouter(non_lus, f"objet graphique de type « {_fin_uri(uri)} »")
 
 
 def _marqueur_diapo(numero: int, vide: bool, non_lus: list[str], images_non_lues: bool) -> str:

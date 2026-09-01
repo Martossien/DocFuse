@@ -340,7 +340,7 @@ src/docfuse/
 ├── branding.py             # nom d'application (DOCFUSE_APP_NAME) + noms dérivés
 ├── i18n.py                 # catalogue FR/EN + format_number()
 ├── constants.py            # extensions, seuils, couleurs, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf (police PDF Unicode), tekken_240911.json (vocab Mistral), o200k_base.tiktoken (vocab OpenAI)
+├── assets/                 # DejaVuSans.ttf (police PDF Unicode), tekken_240911.json.gz (vocab Mistral), o200k_base.tiktoken.gz (vocab OpenAI)
 ├── core/
 │   ├── orchestrator.py     # pipeline multi-sources + scan_config + sort + max_depth
 │   ├── splitter.py         # découpage par budget de tokens (split_by_budget)
@@ -728,7 +728,7 @@ src/docfuse/
 ├── branding.py             # application name (DOCFUSE_APP_NAME) + derived names
 ├── i18n.py                 # FR/EN catalog + format_number()
 ├── constants.py            # extensions, thresholds, colours, IMAGE_EXTENSIONS
-├── assets/                 # DejaVuSans.ttf (Unicode PDF font), tekken_240911.json (Mistral vocab), o200k_base.tiktoken (OpenAI vocab)
+├── assets/                 # DejaVuSans.ttf (Unicode PDF font), tekken_240911.json.gz (Mistral vocab), o200k_base.tiktoken.gz (OpenAI vocab)
 ├── core/
 │   ├── orchestrator.py     # multi-source pipeline + scan_config + sort + max_depth
 │   ├── splitter.py         # token-budget splitting (split_by_budget)
