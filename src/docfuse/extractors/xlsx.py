@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 from docfuse.core.embedded_images import ImageBatch, build_image_tag
 from docfuse.core.ocr.registry import resolve_ocr_engine
@@ -133,68 +134,7 @@ class XlsxExtractor(Extractor):
                     if ws_formulas is not None and not hasattr(ws_formulas, "iter_rows"):
                         ws_formulas = None
 
-                    # D-084 : en mode read_only, openpyxl fait confiance à
-                    # l'élément XML <dimension> déclaré par le fichier
-                    # plutôt que de scanner le contenu réel. Certains
-                    # générateurs tiers écrivent une dimension incorrecte
-                    # (trop petite) — iter_rows() tronque alors
-                    # silencieusement les lignes/colonnes en fin de
-                    # feuille, sans erreur. On force un vrai recalcul avant
-                    # de lire. `calculate_dimension(force=True)` lève
-                    # `UnboundLocalError` sur une feuille réellement vide
-                    # (bug openpyxl : `cell` jamais assignée dans sa
-                    # boucle) — sans conséquence, `has_data` reste `False`.
-                    for candidate in (ws, ws_formulas):
-                        if candidate is None:
-                            continue
-                        try:
-                            candidate.reset_dimensions()
-                            candidate.calculate_dimension(force=True)
-                        except UnboundLocalError:
-                            pass
-
-                    rows_text: list[str] = []
-                    has_data = False
-
-                    formula_rows = (
-                        ws_formulas.iter_rows(values_only=True)
-                        if ws_formulas is not None
-                        else iter(())
-                    )
-                    grid: list[list[str]] = []
-                    for row in ws.iter_rows(values_only=True):
-                        formula_row = next(formula_rows, ())
-                        cells: list[str] = []
-                        for idx, c in enumerate(row):
-                            if c is not None:
-                                cells.append(str(c))
-                                continue
-                            formula = formula_row[idx] if idx < len(formula_row) else None
-                            if isinstance(formula, str) and formula.startswith("="):
-                                cells.append(f"[formule non calculée: {formula}]")
-                            else:
-                                # BUG FIX: data_only=True retourne aussi None pour une
-                                # cellule réellement vide. On la marque comme vide.
-                                cells.append("")
-                        grid.append(cells)
-
-                    # D-085 : seule la cellule en haut à gauche d'une plage
-                    # fusionnée porte une valeur — les autres sont vides
-                    # (comportement Excel normal, pas un bug openpyxl).
-                    # Sans propager cette valeur, une ligne dont le titre
-                    # fusionné s'étale sur plusieurs colonnes/lignes perd
-                    # tout contexte pour les cellules "creuses" qui suivent
-                    # — très fréquent dans les tableaux "présentables"
-                    # (rapports, tableaux de bord).
-                    if sheet_xml:
-                        _apply_merged_cells(grid, _merge_ranges(sheet_xml))
-
-                    for cells in grid:
-                        if any(c.strip() for c in cells):
-                            has_data = True
-                            rows_text.append(" | ".join(cells))
-
-                    sheet_text = "\n".join(rows_text) if has_data else "[Feuille vide]"
+                    sheet_text = _sheet_text(ws, ws_formulas, sheet_xml)
 
                     # D-093 : images intégrées ancrées sur cette feuille —
                     # regroupées en fin de feuille plutôt qu'à la cellule
@@ -230,6 +170,60 @@ class XlsxExtractor(Extractor):
         except Exception as exc:
             logger.exception("Erreur extraction XLSX %s", path)
             return error_result(path, relative_path, exc)
+
+
+def _sheet_text(ws: Any, ws_formulas: Any, sheet_xml: bytes) -> str:
+    """Texte d'une feuille : cellules calculées, formules non calculées, plages fusionnées.
+
+    D-084 : en mode read_only, openpyxl fait confiance à l'élément XML
+    `<dimension>` déclaré par le fichier plutôt que de scanner le contenu réel.
+    Certains générateurs tiers écrivent une dimension incorrecte (trop petite) —
+    `iter_rows()` tronque alors silencieusement les lignes/colonnes en fin de
+    feuille, sans erreur. On force un vrai recalcul avant de lire.
+    `calculate_dimension(force=True)` lève `UnboundLocalError` sur une feuille
+    réellement vide (bug openpyxl : `cell` jamais assignée dans sa boucle) — sans
+    conséquence, la feuille est alors rendue « vide ».
+
+    D-076 : `data_only=True` renvoie None pour une formule jamais calculée ; le
+    second classeur (`ws_formulas`, texte des formules) permet de le dire au lieu
+    de perdre en silence des colonnes de totaux entières.
+
+    D-085 : seule la cellule en haut à gauche d'une plage fusionnée porte une
+    valeur — les autres sont vides (comportement Excel normal). Sans propager
+    cette valeur, une ligne dont le titre fusionné s'étale sur plusieurs
+    colonnes/lignes perd tout contexte pour les cellules « creuses » qui suivent.
+    """
+    for candidate in (ws, ws_formulas):
+        if candidate is None:
+            continue
+        try:
+            candidate.reset_dimensions()
+            candidate.calculate_dimension(force=True)
+        except UnboundLocalError:
+            pass
+
+    formula_rows = ws_formulas.iter_rows(values_only=True) if ws_formulas is not None else iter(())
+    grid: list[list[str]] = []
+    for row in ws.iter_rows(values_only=True):
+        formula_row = next(formula_rows, ())
+        cells: list[str] = []
+        for idx, c in enumerate(row):
+            if c is not None:
+                cells.append(str(c))
+                continue
+            formula = formula_row[idx] if idx < len(formula_row) else None
+            if isinstance(formula, str) and formula.startswith("="):
+                cells.append(f"[formule non calculée: {formula}]")
+            else:
+                # `data_only=True` rend aussi None pour une cellule réellement vide.
+                cells.append("")
+        grid.append(cells)
+
+    if sheet_xml:
+        _apply_merged_cells(grid, _merge_ranges(sheet_xml))
+
+    rows_text = [" | ".join(cells) for cells in grid if any(c.strip() for c in cells)]
+    return "\n".join(rows_text) if rows_text else "[Feuille vide]"
 
 
 def _merge_ranges(sheet_xml: bytes) -> list[tuple[int, int, int, int]]:

@@ -12,6 +12,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Ajouté
 
+- **Fenêtre testée sans écran** (D-110) — `tests/test_gui_app.py` construit
+  `DocFuseGUI` sur une doublure de `customtkinter` : phases des boutons,
+  analyse → table, retrait d'un fichier, tri, plafond saisi, découpage,
+  génération du corpus, échec et annulation, dépôt de chemins. Couverture de
+  `gui/app.py` 22 % → 79 %, projet 82 % → 90 %.
+- **Images autonomes dans le corpus** (D-109) — `.tif`, `.tiff`, `.jpg`, `.jpeg`,
+  `.png`, `.bmp`, `.gif`, `.webp` passent par l'OCR comme les images intégrées
+  aux documents (`extractors/image.py`, même moteur, même créneau de
+  concurrence). Un copieur ou un serveur de fax rend du `.tif`, pas du PDF :
+  bulletins de paie, arrêts de travail et pièces d'identité numérisés étaient
+  purement absents de l'audit. Aucun vide muet : image vide, sans texte, trop
+  grande ou sans moteur OCR produit un marqueur qui le dit. `.svg` et `.ico`
+  restent hors périmètre.
 - **Test de fumée de l'exécutable** (D-110) — `DOCFUSE_GUI_SMOKE=1` construit
   la fenêtre complète puis la ferme seule ; la CI l'exécute sur `DocFuse.exe`
   et `DocFuse-OCR.exe` après chaque build (Tk, CustomTkinter et tkdnd prouvés
@@ -24,12 +37,32 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   d'une zone chacune), `gui/helpers.py` (fonctions pures, testées sans fenêtre)
   et `gui/dnd.py` (glisser-déposer `tkinterdnd2`). `from docfuse.gui import
   launch, gauge_color, …` fonctionne comme avant.
+- **`run_analysis` et `xlsx.extract` découpés** (D-110) — seuils de scan
+  (`_scan_thresholds`), extraction parallèle (`_extract_all`), qualification et
+  comptage (`_qualify_and_count`) ; lecture d'une feuille Excel (`_sheet_text`).
+  Sorties identiques (tests d'orchestrateur et XLSX inchangés).
 - **`cli.main` découpé** (D-110) — 231 lignes et 43 chemins devenaient six
   fonctions : réglages effectifs (`_Settings`), entrées, sortie, journal,
   livraison. Codes de retour et messages inchangés.
 
 ### Corrigé
 
+- **Le corpus n'affirme plus ce qu'il ne sait pas** (D-107) — trois documents
+  scannés différents sans OCR étaient déclarés « contenu identique » (mêmes
+  72 caractères de marqueurs) : le seuil de doublon porte sur le contenu propre,
+  marqueurs `[[…]]` exclus. Accents perdus sur les gros fichiers, en-têtes,
+  pieds de page et commentaires Word non lus, texte OCR d'une page PDF collé
+  sur une autre (refus explicite `PdfPageCountMismatchError`) : corrigés.
+- **OCR : verrou PDFium détenu 99 % du temps et tous les PNG gardés en
+  mémoire** (D-108) — 200 pages A4 : pic RSS 2 023 Mo → 96 Mo, verrou 95,7 s →
+  21,0 s.
+- **OCR sous Windows : « Image file cannot be read! » sur 150 pages d'une
+  campagne** — d'abord attribué à `stdin` (repli par fichier temporaire, image
+  de zéro octet plus envoyée), puis vraie cause démontrée en local : Leptonica
+  recopie les premiers octets du contenu à la place du nom de fichier quand le
+  **format** lui est inconnu — métafichiers Windows EMF/WMF (graphiques Excel,
+  dessins Word). Reconnus à leur en-tête et écartés avant tout appel au
+  moteur, avec un message qui nomme le format.
 - **Porte de licences de la CI inopérante** — `pip-licenses --allow-only`
   échouait à chaque exécution (« MIT License » absent d'une liste qui ne
   connaissait que « MIT ») et un `|| true` masquait l'échec depuis la 0.1.x.

@@ -2614,6 +2614,53 @@ d'encodage ne remontent pas encore pour `.html`, `.eml`, `.msg`, qui appellent
 
 ---
 
+### D-109 : les images autonomes entrent dans l'audit ; la vraie cause des échecs Tesseract
+
+*Rédigé le 1er septembre à partir des commits `080e264`, `dc0a7bc` et `6af877c` (31 août),
+qui portaient la décision sans que le journal l'ait consignée.*
+
+**Angle mort signalé par l'utilisateur** : « maintenant que nous avons un OCR inclus, ne
+faudrait-il pas inclure les images ? ». Un copieur de bureau et un serveur de fax rendent du
+`.tif` ou du `.jpg`, pas du PDF. Ces fichiers étaient **ignorés** (`IMAGE_EXTENSIONS`,
+CdC §7.4) : ni classés, ni signalés comme non lus — purement absents. Sur un partage
+d'entreprise, ce sont des bulletins de paie, des arrêts de travail et des pièces d'identité
+numérisées qui échappaient à un audit RGPD.
+
+**Décision.** `extractors/image.py` branche la chaîne OCR existante — `ocr_with_slot`, donc
+le même moteur et le même créneau de concurrence que les cinq extracteurs qui océrisent déjà
+les images *intégrées* (PDF, DOCX, XLSX, PPTX, ODF) — sur un fichier image autonome. Rien
+n'est réécrit. Vérifié de bout en bout sur un bulletin fabriqué : nom, numéro de sécurité
+sociale et montant sortent du `.tif` comme du `.jpg`.
+
+**Règle du module : aucun vide muet.** Fichier vide, image sans texte, image au-delà de la
+limite OCR, absence de moteur — chacun produit un marqueur qui le dit. Rendre une chaîne
+vide ferait classer le fichier « sans contenu » par l'aval, donc candidat à la suppression :
+l'inverse de ce qu'il faut dire d'un document qu'on n'a pas su lire. Hors périmètre,
+délibérément : `.svg` (vectoriel, Leptonica ne le lit pas) et `.ico` (icône d'interface).
+
+**Dans la foulée, deux corrections d'OCR lues dans les journaux d'un déploiement réel**
+(150 pages perdues sur une campagne, même message : `Image file  cannot be read!` avec un
+nom de fichier **vide**) :
+
+1. Premier diagnostic (`dc0a7bc`) : « tesseract ne sait pas lire sur `stdin` sous Windows ».
+   Repli par fichier temporaire, payé une seule fois par session (`_STDIN_UNUSABLE`) ; une
+   image de zéro octet ne lance plus de processus ; le compte d'octets figure dans le message.
+2. Démenti par les journaux suivants (`6af877c`) : le repli échouait exactement pareil.
+   Reproduit en local — `tesseract faux.emf` rend un nom vide, `faux.wmf` du mojibake,
+   `ok.png` le texte. Leptonica recopie les **premiers octets du contenu** là où on attend un
+   nom de fichier : le « nom vide » était la signature d'un **format qu'il ne décode pas**.
+   Ce sont des métafichiers Windows (EMF/WMF : graphiques Excel, dessins Word, schémas
+   collés), ce qui explique les tailles observées (3 à 20 Ko). Reconnus à leur en-tête et
+   écartés **avant** tout appel au moteur, avec un message qui nomme le format au lieu
+   d'accuser tesseract. Le repli `stdin` de l'étape 1 reste, il ne coûte rien.
+
+Leçon consignée : un diagnostic posé sur un seul symptôme doit être contredit par les
+journaux suivants avant d'être cru ; ici le second correctif a été écrit le jour même.
+
+**Vérification** : 653 → 659 → 661 tests ; six tests neufs pour l'extracteur image (absence
+de moteur et image géante compris), contre-épreuve « une langue absente reste signalée
+pour ce qu'elle est » pour le repli.
+
 ## Session 18 — 1er septembre 2026 — Maintenabilité : GUI en paquet, CI qui dit vrai
 
 ### D-110 : `gui.py` devient le paquet `docfuse.gui` ; la CI prouve l'exe et les licences
@@ -2643,8 +2690,14 @@ liste qui ne connaissait que « MIT ») sans que personne ne le voie.
    fonction `_deliver`. Aucun code de retour ni message ne change (les tests de la CLI le
    vérifient).
 
+5. Même soir : `run_analysis` (232 lignes, CC 28) et `xlsx.extract` (154 lignes, CC 32)
+   découpés en helpers nommés, sorties identiques ; et la fenêtre testée **sans écran**
+   (`tests/test_gui_app.py`, doublure de `customtkinter`) — 11 tests qui exercent les
+   handlers réels sur une vraie analyse : `gui/app.py` passe de 22 % à 79 % de couverture.
+
 **Vérification** : `ruff`, `ruff format`, `mypy --strict` (64 fichiers) propres ;
-**661 réussis, 39 ignorés** ; fenêtre ouverte et fermée en mode smoke sur `DISPLAY=:1`.
+**672 réussis, 39 ignorés**, couverture 90 % ; fenêtre ouverte et fermée en mode smoke sur
+`DISPLAY=:1`.
 Les deux specs PyInstaller collectent `docfuse.gui` explicitement (`collect_submodules`).
 
 ---

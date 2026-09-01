@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 from docfuse.config import ScanConfig
@@ -41,7 +42,7 @@ from docfuse.core.context_counter import (
 from docfuse.core.duplicate_detector import detect_duplicates
 from docfuse.core.embedded_images import dedupe_image_filenames
 from docfuse.core.image_detector import determine_status
-from docfuse.core.inventory import collect_inputs
+from docfuse.core.inventory import InventoryEntry, collect_inputs
 from docfuse.core.progress import ProgressEmitter, ProgressEvent
 from docfuse.core.registry import get_extractor_for
 from docfuse.core.report import write_report_pair
@@ -291,6 +292,156 @@ class OrchestratorResult:
         return True
 
 
+@dataclass(frozen=True)
+class _ScanThresholds:
+    """Seuils de pauvreté de texte (C-08), depuis `ScanConfig` ou les constantes."""
+
+    min_chars_file: int
+    min_chars_per_page: int
+    sparse_page_chars: int
+    sparse_page_ratio: float
+
+
+def _scan_thresholds(scan_config: ScanConfig | None) -> _ScanThresholds:
+    if scan_config is not None:
+        return _ScanThresholds(
+            scan_config.min_chars_file,
+            scan_config.min_chars_per_page,
+            scan_config.sparse_page_chars,
+            scan_config.sparse_page_ratio,
+        )
+    return _ScanThresholds(
+        SCAN_MIN_CHARS_FILE,
+        SCAN_MIN_CHARS_PER_PAGE,
+        SCAN_SPARSE_PAGE_CHARS,
+        SCAN_SPARSE_PAGE_RATIO,
+    )
+
+
+def _extract_one(
+    idx: int, path: Path, relative_path: str, extract_embedded_images: bool
+) -> tuple[int, ExtractedFile]:
+    """Extraction d'un fichier (dans un thread du pool) ; ne lève jamais."""
+    # I-15: Avertissement pour fichier volumineux
+    try:
+        file_size = path.stat().st_size
+        if file_size > LARGE_FILE_THRESHOLD:
+            logger.warning(
+                "Fichier volumineux (%d Mo): %s — patience",
+                file_size // (1024 * 1024),
+                relative_path,
+            )
+    except OSError:
+        pass
+
+    extractor_cls = get_extractor_for(path)
+    if extractor_cls is None:
+        result = ExtractedFile(
+            path=path,
+            relative_path=relative_path,
+            extension=file_type_for(path),
+            file_type=file_type_for(path),
+            size_bytes=path.stat().st_size if path.exists() else 0,
+            status=FileStatus.IGNORED,
+            error_message=t("error.no_extractor", ext=path.suffix),
+        )
+    else:
+        result = extractor_cls.safe_extract(
+            path, relative_path, extract_images=extract_embedded_images
+        )
+    return idx, result
+
+
+def _extract_all(
+    inventory_entries: Sequence[InventoryEntry],
+    emitter: ProgressEmitter | None,
+    extract_embedded_images: bool,
+) -> dict[int, ExtractedFile] | None:
+    """Extraction parallèle bornée (`MAX_WORKERS`), progression émise à chaque
+    fichier terminé. Rend `None` si l'émetteur a été annulé en cours de route."""
+    total_files = len(inventory_entries)
+    results_map: dict[int, ExtractedFile] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(
+                _extract_one, i, entry.path, entry.relative_path, extract_embedded_images
+            ): i
+            for i, entry in enumerate(inventory_entries)
+        }
+        for future in as_completed(futures):
+            if emitter and emitter.is_cancelled:
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+            idx, result = future.result()
+            results_map[idx] = result
+            if emitter:
+                # D-099 : `current` = nombre de fichiers terminés (monotone),
+                # pas l'index d'inventaire — les extractions finissent dans
+                # le désordre et la barre reculait.
+                emitter.emit(
+                    ProgressEvent(
+                        file_path=result.relative_path,
+                        current=len(results_map),
+                        total=total_files,
+                        status=result.status.value,
+                        message=result.error_message,
+                    )
+                )
+    if emitter and emitter.is_cancelled:
+        logger.info("Analyse annulée après %d fichier(s)", len(results_map))
+        return None
+    return results_map
+
+
+def _qualify_and_count(
+    files: list[ExtractedFile],
+    thresholds: _ScanThresholds,
+    margin: float,
+    engine: TokenizerEngine,
+) -> list[TokenEstimate]:
+    """Statut images/texte pauvre (C-08), secrets, doublons, noms d'images, puis
+    compteur par fichier (en-têtes SOURCE comprises, CdC §8.2 §10.1)."""
+    from docfuse.output.source_header import estimate_source_context
+
+    for f in files:
+        if f.status.is_extracted():  # M-03: simplifié, is_extracted suffit
+            f.status = determine_status(
+                text=f.text,
+                image_count=f.image_count,
+                chars_per_page=f.chars_per_page or None,
+                min_chars_file=thresholds.min_chars_file,
+                min_chars_per_page=thresholds.min_chars_per_page,
+                sparse_page_chars=thresholds.sparse_page_chars,
+                sparse_page_ratio=thresholds.sparse_page_ratio,
+            )
+
+    # Alerte secrets potentiels (non bloquant, ne modifie jamais le texte).
+    for f in files:
+        if not f.status.is_extracted():
+            continue
+        findings = scan_for_secrets(f.text)
+        if findings:
+            f.extra_metadata["secrets_detected"] = _secrets_note(findings)
+
+    # Doublons de contenu entre fichiers (avant comptage : le texte d'un doublon
+    # est remplacé par une note, donc compté correctement).
+    detect_duplicates(files)
+
+    # Deux documents homonymes (`rapport.docx` dans deux sous-dossiers)
+    # produisent les mêmes noms d'images exportées : renommage avant comptage,
+    # tag et fichier restent cohérents (D-099).
+    renamed = dedupe_image_filenames(files)
+    if renamed:
+        logger.warning("%d image(s) intégrée(s) renommée(s) pour éviter une collision", renamed)
+
+    return [
+        estimate_source_context(f, margin, engine)
+        if f.status.is_extracted()
+        else TokenEstimate(0, 0, 0)
+        for f in files
+    ]
+
+
 def run_analysis(
     input_path: Path | Sequence[Path] | InputSelection,
     context_limit: int = DEFAULT_CONTEXT_LIMIT,
@@ -334,17 +485,7 @@ def run_analysis(
     selection = InputSelection.from_value(input_path)
     engine = resolve_engine(tokenizer_engine)
 
-    # Extraction des seuils de scan depuis scan_config (C-08)
-    if scan_config is not None:
-        min_chars_file = scan_config.min_chars_file
-        min_chars_per_page = scan_config.min_chars_per_page
-        sparse_page_chars = scan_config.sparse_page_chars
-        sparse_page_ratio = scan_config.sparse_page_ratio
-    else:
-        min_chars_file = SCAN_MIN_CHARS_FILE
-        min_chars_per_page = SCAN_MIN_CHARS_PER_PAGE
-        sparse_page_chars = SCAN_SPARSE_PAGE_CHARS
-        sparse_page_ratio = SCAN_SPARSE_PAGE_RATIO
+    thresholds = _scan_thresholds(scan_config)
 
     # 1. Inventaire : les fichiers explicites restent une liste figée.
     inventory_entries, ignored = collect_inputs(
@@ -379,68 +520,10 @@ def run_analysis(
             files, ignored, [], total, context_limit, margin, engine, split_context=split_context
         )
 
-    def _extract_one(idx: int, path: Path, relative_path: str) -> tuple[int, ExtractedFile]:
-        # I-15: Avertissement pour fichier volumineux
-        try:
-            file_size = path.stat().st_size
-            if file_size > LARGE_FILE_THRESHOLD:
-                logger.warning(
-                    "Fichier volumineux (%d Mo): %s — patience",
-                    file_size // (1024 * 1024),
-                    relative_path,
-                )
-        except OSError:
-            pass
-
-        extractor_cls = get_extractor_for(path)
-
-        if extractor_cls is None:
-            result = ExtractedFile(
-                path=path,
-                relative_path=relative_path,
-                extension=file_type_for(path),
-                file_type=file_type_for(path),
-                size_bytes=path.stat().st_size if path.exists() else 0,
-                status=FileStatus.IGNORED,
-                error_message=t("error.no_extractor", ext=path.suffix),
-            )
-        else:
-            result = extractor_cls.safe_extract(
-                path, relative_path, extract_images=extract_embedded_images
-            )
-
-        return idx, result
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(_extract_one, i, entry.path, entry.relative_path): i
-            for i, entry in enumerate(inventory_entries)
-        }
-        results_map: dict[int, ExtractedFile] = {}
-        for future in as_completed(futures):
-            if emitter and emitter.is_cancelled:
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            idx, result = future.result()
-            results_map[idx] = result
-            if emitter:
-                # D-099 : `current` = nombre de fichiers terminés (monotone),
-                # pas l'index d'inventaire — les extractions finissent dans
-                # le désordre et la barre reculait.
-                emitter.emit(
-                    ProgressEvent(
-                        file_path=result.relative_path,
-                        current=len(results_map),
-                        total=total_files,
-                        status=result.status.value,
-                        message=result.error_message,
-                    )
-                )
-
-    if emitter and emitter.is_cancelled:
+    results_map = _extract_all(inventory_entries, emitter, extract_embedded_images)
+    if results_map is None:
         # D-099 : résultat jeté par l'appelant de toute façon — inutile de
         # scanner, dédupliquer et compter ce qui a été extrait avant l'arrêt.
-        logger.info("Analyse annulée après %d fichier(s)", len(results_map))
         return OrchestratorResult(
             [],
             ignored,
@@ -456,48 +539,7 @@ def run_analysis(
     # Remettre dans l'ordre original (tri par inventaire)
     files = [results_map[i] for i in range(total_files)]
 
-    # 3. Détermination du statut (images / low_text) avec seuils de config (C-08)
-    for f in files:
-        if f.status.is_extracted():  # M-03: simplifié, is_extracted suffit
-            f.status = determine_status(
-                text=f.text,
-                image_count=f.image_count,
-                chars_per_page=f.chars_per_page or None,
-                min_chars_file=min_chars_file,
-                min_chars_per_page=min_chars_per_page,
-                sparse_page_chars=sparse_page_chars,
-                sparse_page_ratio=sparse_page_ratio,
-            )
-
-    # 3b. Alerte secrets potentiels (non bloquant, ne modifie jamais le texte).
-    for f in files:
-        if not f.status.is_extracted():
-            continue
-        findings = scan_for_secrets(f.text)
-        if findings:
-            f.extra_metadata["secrets_detected"] = _secrets_note(findings)
-
-    # 3c. Détection de doublons de contenu entre fichiers (avant comptage :
-    # le texte d'un doublon est remplacé par une note, donc compté correctement).
-    detect_duplicates(files)
-
-    # 3d. Deux documents homonymes (`rapport.docx` dans deux sous-dossiers)
-    # produisent les mêmes noms d'images exportées : renommage avant comptage,
-    # tag et fichier restent cohérents (D-099).
-    renamed = dedupe_image_filenames(files)
-    if renamed:
-        logger.warning("%d image(s) intégrée(s) renommée(s) pour éviter une collision", renamed)
-
-    # 4. Compteur par fichier (en-têtes SOURCE comprises, CdC §8.2 §10.1)
-    from docfuse.output.source_header import estimate_source_context
-
-    estimates: list[TokenEstimate] = []
-    for f in files:
-        if f.status.is_extracted():
-            # I-01: Le compteur inclut exactement l'en-tête SOURCE + le texte.
-            estimates.append(estimate_source_context(f, margin, engine))
-        else:
-            estimates.append(TokenEstimate(0, 0, 0))
+    estimates = _qualify_and_count(files, thresholds, margin, engine)
 
     # 5. Agrégation
     total = aggregate_tokens(estimates, margin, engine)
