@@ -138,7 +138,8 @@ def test_phases_des_boutons(gui: Any) -> None:
 def test_analyse_remplit_la_table_et_arme_la_generation(gui: Any, tmp_path: Path) -> None:
     source = _corpus_dir(tmp_path, files=3)
     _analyse(gui, source)
-    assert gui.result is not None and len(gui.result.files) == 3
+    assert gui.result is not None
+    assert len(gui.result.files) == 3
     assert len(gui.file_rows_frame.winfo_children()) == 3
     assert gui.generate_button.options["state"] == "normal"
     assert gui.analysis_status_label.options["text"] == t("gui.analysis_done")
@@ -163,7 +164,8 @@ def test_retrait_d_un_fichier_actualise_table_et_selection(gui: Any, tmp_path: P
 def test_tri_par_colonne_et_indicateur(gui: Any, tmp_path: Path) -> None:
     _analyse(gui, _corpus_dir(tmp_path, files=2))
     gui._sort_by("file")
-    assert gui._sort_column == "file" and gui._sort_reverse is False
+    assert gui._sort_column == "file"
+    assert gui._sort_reverse is False
     gui._sort_by("file")
     assert gui._sort_reverse is True
     label, base = gui._header_labels["file"]
@@ -175,7 +177,8 @@ def test_plafond_saisi_bloque_sans_reextraire(gui: Any, tmp_path: Path) -> None:
     gui.context_var.set("1")  # trace → `after(250, _apply_context_limit)`
     assert gui.root.scheduled[-1][1] == gui._apply_context_limit
     gui._apply_context_limit()
-    assert gui.result is not None and gui.result.is_blocked
+    assert gui.result is not None
+    assert gui.result.is_blocked
     assert gui.generate_button.options["state"] == "disabled"
     assert gui.result.block_reason in gui.summary_label.options["text"]
     gui.split_context_var.set(True)  # D-101 : le découpage lève le blocage
@@ -225,7 +228,8 @@ def test_annulation_remet_l_ecran_au_repos(gui: Any, tmp_path: Path) -> None:
 def test_effacer_la_selection_remet_tout_a_zero(gui: Any, tmp_path: Path) -> None:
     _analyse(gui, _corpus_dir(tmp_path))
     gui._clear_selection()
-    assert gui.result is None and gui.input_selection is None
+    assert gui.result is None
+    assert gui.input_selection is None
     assert gui.file_rows_frame.winfo_children() == []
     assert gui.path_label.options["text"] == t("gui.drop_zone")
     assert gui.clear_button.options["state"] == "disabled"
@@ -238,4 +242,5 @@ def test_depot_de_chemins_lance_l_analyse(gui: Any, tmp_path: Path) -> None:
     assert gui._analysis_thread is not None
     gui._analysis_thread.join(timeout=60)
     gui._poll_progress()
-    assert gui.result is not None and len(gui.result.files) == 2
+    assert gui.result is not None
+    assert len(gui.result.files) == 2
