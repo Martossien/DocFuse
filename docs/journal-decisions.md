@@ -2637,6 +2637,11 @@ liste qui ne connaissait que « MIT ») sans que personne ne le voie.
 3. Porte de licences : `pip-licenses --from=mixed --format=csv` puis refus de toute
    mention `gpl`/`proprietary` — le critère de `test_acceptance.py`, appliqué aux licences
    réellement déclarées par les paquets installés.
+4. `cli.main` (231 lignes, complexité cyclomatique 43 — la pire du projet) : les réglages
+   effectifs deviennent un `_Settings` figé, les sorties anticipées une exception
+   `_UsageError(code)`, et la fin de course (`blocage`, `dry-run`, découpage, corpus) une
+   fonction `_deliver`. Aucun code de retour ni message ne change (les tests de la CLI le
+   vérifient).
 
 **Vérification** : `ruff`, `ruff format`, `mypy --strict` (64 fichiers) propres ;
 **661 réussis, 39 ignorés** ; fenêtre ouverte et fermée en mode smoke sur `DISPLAY=:1`.

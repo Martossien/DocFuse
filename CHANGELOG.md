@@ -24,6 +24,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   d'une zone chacune), `gui/helpers.py` (fonctions pures, testées sans fenêtre)
   et `gui/dnd.py` (glisser-déposer `tkinterdnd2`). `from docfuse.gui import
   launch, gauge_color, …` fonctionne comme avant.
+- **`cli.main` découpé** (D-110) — 231 lignes et 43 chemins devenaient six
+  fonctions : réglages effectifs (`_Settings`), entrées, sortie, journal,
+  livraison. Codes de retour et messages inchangés.
 
 ### Corrigé
 
