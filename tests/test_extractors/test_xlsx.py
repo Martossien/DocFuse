@@ -378,7 +378,7 @@ class TestOpenpyxlWarningsAreNotAGlobalSideEffect:
         from pathlib import Path
 
         root = Path(__file__).resolve().parent.parent.parent / "src" / "docfuse"
-        for name in ("cli.py", "gui.py"):
+        for name in ("cli.py", "gui/app.py"):
             source = (root / name).read_text("utf-8")
             assert "silence_openpyxl_warnings()" in source, (
                 f"{name} ne pose plus la politique d'avertissements openpyxl"

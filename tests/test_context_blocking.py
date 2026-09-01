@@ -446,9 +446,9 @@ class TestWindowsBehavior:
         cli = (Path(__file__).resolve().parent.parent / "src" / "docfuse" / "cli.py").read_text(
             "utf-8"
         )
-        gui = (Path(__file__).resolve().parent.parent / "src" / "docfuse" / "gui.py").read_text(
-            "utf-8"
-        )
+        gui = (
+            Path(__file__).resolve().parent.parent / "src" / "docfuse" / "gui" / "app.py"
+        ).read_text("utf-8")
         assert "default_corpus_path" in cli
         assert "default_corpus_path" in gui
         assert f"{APP_NAME}_output" == OUTPUT_DIR_NAME

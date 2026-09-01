@@ -73,6 +73,7 @@ a = Analysis(
     # l'exe même une fois `TkinterDnD.require()` appelé.
     + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("docfuse.extractors")
+    + collect_submodules("docfuse.gui")
     + collect_submodules("tiktoken_ext")
     + [
         "tkinter",

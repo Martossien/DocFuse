@@ -51,7 +51,7 @@ Points non négociables (résumé) :
 src/docfuse/
 ├── __main__.py             # sans args → GUI, avec args → CLI
 ├── cli.py                  # CLI argparse + i18n + codes retour 0-4
-├── gui.py                  # GUI CustomTkinter (sélection multiple, retrait, jauge dynamique)
+├── gui/                    # GUI CustomTkinter : app.py (fenêtre), helpers.py (fonctions pures testées), dnd.py (tkinterdnd2)
 ├── config.py               # config JSON (3 niveaux) + validate() min/max
 ├── branding.py             # APP_NAME (DOCFUSE_APP_NAME) → sortie, config, log, exe (D-102)
 ├── i18n.py                 # catalogue FR/EN + format_number()
@@ -157,7 +157,7 @@ Clonés pour étude. **Ne pas modifier.** S'en inspirer, pas tout copier.
 ```bash
 # Installation (mode dev, hors-ligne possible après premier pip install)
 # La GUI est un extra (D-103) : sans `gui`, seuls la CLI et la bibliothèque
-# sont installées. `pip install -e ".[dev]"` suffit pour tout sauf gui.py.
+# sont installées. `pip install -e ".[dev]"` suffit pour tout sauf gui/.
 pip install -e ".[dev,gui]"
 
 # Lint

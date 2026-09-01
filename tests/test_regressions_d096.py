@@ -439,7 +439,7 @@ class TestGuiDragAndDrop:
     def test_tkdnd_package_is_loaded_into_the_interpreter(self) -> None:
         """Le paquet Tcl doit être chargé (`TkinterDnD.require`) — sans ça
         `drop_target_register` échoue toujours (D-096)."""
-        source = (Path(__file__).resolve().parent.parent / "src/docfuse/gui.py").read_text(
+        source = (Path(__file__).resolve().parent.parent / "src/docfuse/gui/dnd.py").read_text(
             encoding="utf-8"
         )
         assert "TkinterDnD.require(" in source

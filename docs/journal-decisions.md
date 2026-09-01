@@ -2614,4 +2614,34 @@ d'encodage ne remontent pas encore pour `.html`, `.eml`, `.msg`, qui appellent
 
 ---
 
-*Fin du journal des décisions — Session 17.*
+## Session 18 — 1er septembre 2026 — Maintenabilité : GUI en paquet, CI qui dit vrai
+
+### D-110 : `gui.py` devient le paquet `docfuse.gui` ; la CI prouve l'exe et les licences
+
+**Constat** (revue de code du 01/09, note 15/20) : `gui.py` était le plus gros fichier du
+projet (1 136 lignes), le moins couvert (22 %), avec un `_build_ui` de 248 lignes ; la CI
+publiait un exe sans jamais l'ouvrir, et l'étape « licences » se terminait par `|| true`
+— elle échouait à chaque exécution depuis la 0.1.x (« MIT License » n'était pas dans une
+liste qui ne connaissait que « MIT ») sans que personne ne le voie.
+
+**Décisions.**
+
+1. `docfuse/gui/` : `app.py` (fenêtre, `_build_ui` découpé en six méthodes — une par zone),
+   `helpers.py` (tout ce qui n'a pas de widget : jauge, tri, résumé, chemins déposés — les
+   fonctions déjà testées, désormais sans import Tk possible), `dnd.py` (tkinterdnd2).
+   `docfuse.gui.__init__` réexporte les noms publics : aucun appelant ne change.
+2. `DOCFUSE_GUI_SMOKE=1` : `launch()` ferme la fenêtre après 1,5 s. La CI Windows lance
+   `DocFuse.exe` et `DocFuse-OCR.exe` ainsi (`Start-Process -Wait` : un exe fenêtré n'est
+   pas attendu par PowerShell sinon), `timeout-minutes: 5`. Même patron que `Docia.exe
+   gui --smoke` chez docia.
+3. Porte de licences : `pip-licenses --from=mixed --format=csv` puis refus de toute
+   mention `gpl`/`proprietary` — le critère de `test_acceptance.py`, appliqué aux licences
+   réellement déclarées par les paquets installés.
+
+**Vérification** : `ruff`, `ruff format`, `mypy --strict` (64 fichiers) propres ;
+**661 réussis, 39 ignorés** ; fenêtre ouverte et fermée en mode smoke sur `DISPLAY=:1`.
+Les deux specs PyInstaller collectent `docfuse.gui` explicitement (`collect_submodules`).
+
+---
+
+*Fin du journal des décisions — Session 18.*

@@ -64,13 +64,19 @@ jobs:
           pip install pip-licenses
 
       - name: Verify no GPL/AGPL dependencies
+        # Porte réelle : la commande échouait toujours (« MIT License » n'était pas
+        # dans la liste `--allow-only`, qui ne connaissait que « MIT ») et un
+        # `|| true` la rendait inopérante. On liste les licences telles que les
+        # paquets les déclarent (classifier, sinon métadonnée) et on refuse toute
+        # mention GPL/AGPL/LGPL/propriétaire — même critère que
+        # tests/test_acceptance.py::test_dependencies_licenses_compatible.
         run: |
-          pip-licenses \
-            --from=classifier \
-            --allow-only="MIT;BSD;BSD-3-Clause;BSD-2-Clause;Apache Software License;Apache-2.0;ISC License;Mozilla Public License 2.0;Python Software Foundation License;Historical Permission Notice and Disclaimer (HPND)" \
+          pip-licenses --from=mixed --format=csv \
             --packages pdfminer.six pypdf python-docx python-pptx openpyxl beautifulsoup4 lxml striprtf charset-normalizer reportlab customtkinter tkinterdnd2 tiktoken regex requests pypdfium2 pillow ftfy wcwidth office_oxide python-oxmsg click \
-            || true
-          # Le test automatisé dans test_acceptance.py est la vérification principale
+            | tee licenses.csv
+          if grep -iE 'gpl|proprietary' licenses.csv; then
+            echo "::error::dépendance sous licence interdite (voir ci-dessus)"; exit 1
+          fi
 
   build-windows:
     needs: [lint-and-test, license-check]
@@ -95,6 +101,19 @@ jobs:
 
       - name: Build Windows portable
         run: pyinstaller --noconfirm DocFuse.spec
+
+      - name: Smoke test de l'exe (fenêtre construite puis fermée)
+        # `DOCFUSE_GUI_SMOKE=1` : l'exe construit toute la fenêtre puis se ferme
+        # seul — prouve que Tk, CustomTkinter et tkdnd sont embarqués. L'exe est
+        # fenêtré (pas de console) : PowerShell ne l'attendrait pas sans
+        # `Start-Process -Wait`.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          DOCFUSE_GUI_SMOKE: "1"
+        run: |
+          $p = Start-Process -FilePath "dist\DocFuse.exe" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "l'exe a rendu $($p.ExitCode)"; exit $p.ExitCode }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -160,6 +179,19 @@ jobs:
         env:
           TESSERACT_HOME: C:\Program Files\Tesseract-OCR
         run: pyinstaller --noconfirm DocFuse-OCR.spec
+
+      - name: Smoke test de l'exe (fenêtre construite puis fermée)
+        # `DOCFUSE_GUI_SMOKE=1` : l'exe construit toute la fenêtre puis se ferme
+        # seul — prouve que Tk, CustomTkinter et tkdnd sont embarqués. L'exe est
+        # fenêtré (pas de console) : PowerShell ne l'attendrait pas sans
+        # `Start-Process -Wait`.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          DOCFUSE_GUI_SMOKE: "1"
+        run: |
+          $p = Start-Process -FilePath "dist\DocFuse-OCR.exe" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "l'exe a rendu $($p.ExitCode)"; exit $p.ExitCode }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

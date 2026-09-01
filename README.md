@@ -335,7 +335,7 @@ jamais réécrite.
 src/docfuse/
 ├── __main__.py             # sans args → GUI, avec args → CLI
 ├── cli.py                  # CLI argparse + i18n + codes retour 0-3
-├── gui.py                  # GUI CustomTkinter (sélection multiple, jauge dynamique)
+├── gui/                    # GUI CustomTkinter : app.py (fenêtre), helpers.py (fonctions pures), dnd.py
 ├── config.py               # config JSON (3 niveaux) + validate()
 ├── branding.py             # nom d'application (DOCFUSE_APP_NAME) + noms dérivés
 ├── i18n.py                 # catalogue FR/EN + format_number()
@@ -723,7 +723,7 @@ but never written back.
 src/docfuse/
 ├── __main__.py             # no args → GUI, args → CLI
 ├── cli.py                  # CLI argparse + i18n + exit codes 0-3
-├── gui.py                  # CustomTkinter GUI (multi-select, dynamic gauge)
+├── gui/                    # CustomTkinter GUI: app.py (window), helpers.py (pure functions), dnd.py
 ├── config.py               # JSON config (3 layers) + validate()
 ├── branding.py             # application name (DOCFUSE_APP_NAME) + derived names
 ├── i18n.py                 # FR/EN catalog + format_number()

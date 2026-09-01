@@ -91,6 +91,7 @@ a = Analysis(
     # D-096 : bibliothèque Tcl `tkdnd` (voir DocFuse.spec).
     + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("docfuse.extractors")
+    + collect_submodules("docfuse.gui")
     + collect_submodules("tiktoken_ext")
     + [
         "tkinter",

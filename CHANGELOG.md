@@ -10,8 +10,29 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Ajouté
+
+- **Test de fumée de l'exécutable** (D-110) — `DOCFUSE_GUI_SMOKE=1` construit
+  la fenêtre complète puis la ferme seule ; la CI l'exécute sur `DocFuse.exe`
+  et `DocFuse-OCR.exe` après chaque build (Tk, CustomTkinter et tkdnd prouvés
+  embarqués, ce qu'aucun test ne vérifiait).
+
+### Modifié
+
+- **GUI découpée en paquet `docfuse.gui`** (D-110) — `gui.py` (1 136 lignes,
+  22 % couvert) devient `gui/app.py` (la fenêtre ; `_build_ui` en six méthodes
+  d'une zone chacune), `gui/helpers.py` (fonctions pures, testées sans fenêtre)
+  et `gui/dnd.py` (glisser-déposer `tkinterdnd2`). `from docfuse.gui import
+  launch, gauge_color, …` fonctionne comme avant.
+
 ### Corrigé
 
+- **Porte de licences de la CI inopérante** — `pip-licenses --allow-only`
+  échouait à chaque exécution (« MIT License » absent d'une liste qui ne
+  connaissait que « MIT ») et un `|| true` masquait l'échec depuis la 0.1.x.
+  Remplacée par un contrôle qui refuse toute mention GPL/AGPL/LGPL/propriétaire
+  dans les licences déclarées (même critère que `test_acceptance.py`).
+- URL du projet dans `pyproject.toml` (`docfuse/docfuse` → `Martossien/DocFuse`).
 - **Extraction MSG robuste** (D-104) — deux plantages en masse sur des
   `.msg` Outlook réels (serveur Windows de production) :
   - le nom des pièces jointes était lu via `Attachment.long_filename`,
