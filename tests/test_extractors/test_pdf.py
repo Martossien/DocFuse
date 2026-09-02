@@ -280,7 +280,7 @@ class TestPdfOcr:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Sans moteur OCR disponible, comportement identique à avant la fonctionnalité."""
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
 
         monkeypatch.setattr(pdf_module, "resolve_ocr_engine", lambda: None)
 
@@ -299,7 +299,7 @@ class TestPdfOcr:
         pas rester tel quel dans le corpus — ça pollue le texte de bruit
         inutilisable. Une page classée `ocr` pour texte simplement trop
         court (mais réel) doit, elle, rester inchangée."""
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
 
         monkeypatch.setattr(pdf_module, "resolve_ocr_engine", lambda: None)
 
@@ -345,7 +345,7 @@ class TestPdfOcr:
         tout accès à PDFium — vérifié ici en observant l'état du verrou
         depuis l'intérieur d'un `PdfDocument` factice, plutôt que de
         dépendre d'une vraie course native (non déterministe en test)."""
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
         from docfuse.core.ocr.tesseract import TesseractEngine
 
         lock_was_held: list[bool] = []
@@ -417,7 +417,7 @@ class TestOcrLockScopeAndMemory:
     def _fake_pdfium(lock_state_at: dict[str, list[bool]], pages: int) -> object:
         """Faux module `pypdfium2` qui note si `_PDFIUM_LOCK` est tenu à
         chaque étape (rendu / encodage PNG)."""
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
 
         class _FakeImage:
             def copy(self) -> _FakeImage:
@@ -463,7 +463,7 @@ class TestOcrLockScopeAndMemory:
         """L'encodage PNG n'appelle jamais PDFium ; le garder sous le verrou
         plafonnait le débit OCR de tout le processus (~83 % du temps tenu
         pour rien). Le rendu, lui, doit rester protégé (D-078)."""
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
 
         states: dict[str, list[bool]] = {"open": [], "render": [], "png": []}
         monkeypatch.setitem(__import__("sys").modules, "pypdfium2", self._fake_pdfium(states, 3))
@@ -494,7 +494,7 @@ class TestOcrLockScopeAndMemory:
         """
         import threading
 
-        import docfuse.extractors.pdf as pdf_module
+        import docfuse.extractors.pdf_ocr as pdf_module
         from docfuse.constants import OCR_MAX_CONCURRENCY
 
         total_pages = 60

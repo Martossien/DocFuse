@@ -41,6 +41,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   et `o200k_base.tiktoken` (3,6 Mo) deviennent des `.gz` (2,6 Mo et 1,7 Mo) : le
   paquet et l'exe perdent 18,6 Mo ; chargement au premier comptage ~0,35 s. Les
   tests de parité décompressent le fichier d'origine pour la référence.
+- **`pdf.py` (863 lignes) en trois modules** (D-110) — `pdf.py` (extracteur,
+  pdfminer, en-têtes répétés), `pdf_pages.py` (genre de page, texte « poubelle »,
+  erreur de comptage), `pdf_ocr.py` (verrou PDFium, rendu, Tesseract). Les noms
+  historiques restent importables depuis `docfuse.extractors.pdf`.
 - **Quatre fonctions denses découpées** (D-110) — `pptx._texte_diapo` (lecture
   d'une forme dans `_lire_forme`), `report.generate_markdown_report` (une
   fonction par section), `html._extract_elements` (`_render_tag`),
