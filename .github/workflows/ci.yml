@@ -127,9 +127,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path smoke | Out-Null
           $p = Start-Process -FilePath "dist\DocFuse.exe" -ArgumentList @("--input", "tests\fixtures", "--output", "smoke\corpus.md", "--no-recursive", "--yes") -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "l'extraction par l'exe a rendu $($p.ExitCode)"; exit $p.ExitCode }
-          $corpus = Get-Item "smoke\corpus.md"
-          if ($corpus.Length -lt 10000) { Write-Error "corpus trop court : $($corpus.Length) octets"; exit 1 }
-          Write-Host "corpus extrait par l'exe : $($corpus.Length) octets"
+          # Les fixtures sont 10 petits documents (~9 Ko de corpus) : on compte les
+          # sources extraites, pas les octets.
+          $sources = (Select-String -Path "smoke\corpus.md" -Pattern '^## SOURCE:' | Measure-Object).Count
+          if ($sources -lt 10) { Write-Error "corpus incomplet : $sources fichier(s) extrait(s)"; exit 1 }
+          Write-Host "corpus extrait par l'exe : $sources fichiers, $((Get-Item 'smoke\corpus.md').Length) octets"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
