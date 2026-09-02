@@ -209,7 +209,7 @@ Conventional Commits (sans scope obligatoire) :
 
 **Mettre à jour les journaux à chaque session.**
 
-## 11. État actuel (Session 16 — 0.2.0 beta + correctifs D-104..D-106)
+## 11. État actuel (Session 18 — 0.2.1 beta : D-107..D-110, GUI et PDF en paquets, vocabulaires compressés)
 
 | Métrique | Valeur |
 |---|---|

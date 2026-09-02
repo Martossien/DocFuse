@@ -1,7 +1,7 @@
 # Guide utilisateur DocFuse
 
 > Mini guide français — usage GUI et exemples CLI (CdC §21.5)
-> Version 0.2.0 beta — 30 août 2026
+> Version 0.2.1 beta — 2 septembre 2026
 
 ---
 
