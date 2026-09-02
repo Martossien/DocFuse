@@ -458,12 +458,14 @@ un rejet — un petit fichier avec un ratio élevé n'est jamais dangereux."""
 # ──────────────────────────────────────────────────────────────────────────────
 
 MAX_WORKERS: int = max(2, min(8, os.cpu_count() or 4))
-"""Nombre maximum de threads d'extraction parallèle (D-098). L'extraction est
-CPU-bound (pdfminer, parseurs XML) + sous-processus Tesseract — pas
-« IO-bound » comme l'ancienne docstring l'affirmait. Dérivé du nombre de
-cœurs, borné à [2, 8] : mesuré 29 s → 26 s sur 120 fichiers réels en
-passant de 4 à 8, aucun gain au-delà (le chemin critique est un seul
-fichier, voir OCR_MAX_CONCURRENCY)."""
+"""Nombre maximum de travailleurs d'extraction parallèle (D-098, D-111) —
+des **processus** depuis D-111 (`core/workers.py`), des threads en repli.
+L'extraction est CPU-bound (pdfminer, parseurs XML) + sous-processus
+Tesseract — pas « IO-bound » comme l'ancienne docstring l'affirmait, et
+sous le GIL huit threads ne valaient que 1,6 thread. Dérivé du nombre de
+cœurs, borné à [2, 8] : chaque processus pèse ~100 Mo une fois ses
+extracteurs chargés, et 8 suffisent (mesure D-111 : 181 fichiers, 101 s en
+threads → 48 s en processus ; aucun gain de 8 à 16)."""
 
 MAX_TRAVERSAL_DEPTH: int = 12
 """Profondeur maximale de parcours des dossiers (CdC §16)."""

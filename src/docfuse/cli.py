@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -373,12 +374,17 @@ def _deliver(
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée de la CLI.
 
+    `freeze_support()` en tout premier : dans l'exécutable PyInstaller, chaque
+    travailleur du pool d'extraction (D-111) est un relancement de l'exe, que
+    cet appel intercepte — sans lui, boucle infinie de relancements.
+
     Args:
         argv: Arguments (si None, utilise sys.argv).
 
     Returns:
         Code retour (0=OK, 1=erreur, 2=blocage, 3=aucun fichier, 4=non inscriptible).
     """
+    multiprocessing.freeze_support()
     # D-105/D-106 : politique d'avertissements posée au point d'entrée
     # applicatif, jamais à l'import d'un module de la bibliothèque — un
     # consommateur de `docfuse` garde ainsi le contrôle de ses propres

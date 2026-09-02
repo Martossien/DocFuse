@@ -7,6 +7,7 @@ d'autres sans changer l'appelant.
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 from docfuse.constants import OCR_MAX_CONCURRENCY
 from docfuse.core.ocr.base import OcrEngine, OcrEngineInfo
@@ -19,7 +20,16 @@ _ENGINES: list[OcrEngine] = [TesseractEngine()]
 # (`core/embedded_images.py`). Sans elle, MAX_WORKERS fichiers en parallèle
 # lançant chacun leurs propres appels donnaient jusqu'à MAX_WORKERS² processus
 # Tesseract (sur-souscription CPU + mémoire ×N).
-OCR_SLOTS = threading.BoundedSemaphore(OCR_MAX_CONCURRENCY)
+OCR_SLOTS: Any = threading.BoundedSemaphore(OCR_MAX_CONCURRENCY)
+"""Sémaphore de ce processus ; dans un travailleur du pool d'extraction, il est
+remplacé par un sémaphore **inter-processus** (`set_ocr_gate`, D-111) pour que
+la borne vaille pour tout le pool et non par processus."""
+
+
+def set_ocr_gate(gate: Any) -> None:
+    """Remplace le sémaphore OCR (objet à `__enter__`/`__exit__`)."""
+    global OCR_SLOTS
+    OCR_SLOTS = gate
 
 
 def ocr_with_slot(engine: OcrEngine, image_bytes: bytes, lang: str) -> str:

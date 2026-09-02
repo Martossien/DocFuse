@@ -51,6 +51,11 @@ def set_language(lang: str) -> None:
     _CURRENT_LANG = lang
 
 
+def get_language() -> str:
+    """Langue active (à transmettre aux processus d'extraction, D-111)."""
+    return _CURRENT_LANG
+
+
 def t(key: str, **kwargs: object) -> str:
     """Traduit une clé dans la langue active.
 

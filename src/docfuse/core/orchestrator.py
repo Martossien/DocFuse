@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +27,6 @@ from docfuse.constants import (
     DEFAULT_TOKENIZER_ENGINE,
     LARGE_FILE_THRESHOLD,
     MAX_TRAVERSAL_DEPTH,
-    MAX_WORKERS,
     SCAN_MIN_CHARS_FILE,
     SCAN_MIN_CHARS_PER_PAGE,
     SCAN_SPARSE_PAGE_CHARS,
@@ -50,8 +49,9 @@ from docfuse.core.secret_scanner import scan_for_secrets
 from docfuse.core.splitter import CorpusPart
 from docfuse.core.tokenizers.base import TokenizerEngine
 from docfuse.core.tokenizers.registry import resolve_engine
+from docfuse.core.workers import BrokenProcessPool, extraction_pool
 from docfuse.extractors.base import file_type_for
-from docfuse.i18n import format_number, t
+from docfuse.i18n import format_number, get_language, set_language, t
 from docfuse.models.extraction_result import ExtractedFile
 from docfuse.models.file_status import FileStatus
 from docfuse.models.input_selection import InputSelection, path_key
@@ -357,40 +357,61 @@ def _extract_all(
     emitter: ProgressEmitter | None,
     extract_embedded_images: bool,
 ) -> dict[int, ExtractedFile] | None:
-    """Extraction parallèle bornée (`MAX_WORKERS`), progression émise à chaque
-    fichier terminé. Rend `None` si l'émetteur a été annulé en cours de route."""
+    """Extraction parallèle bornée (`MAX_WORKERS`) dans le pool partagé
+    (`core/workers.py` : processus, threads en repli), progression émise à
+    chaque fichier terminé. Rend `None` si l'émetteur a été annulé en cours
+    de route. Un pool de processus cassé en plein lot (travailleur tué) ne
+    perd aucun fichier : ce qui n'était pas rendu est refait par threads."""
     total_files = len(inventory_entries)
     results_map: dict[int, ExtractedFile] = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(
-                _extract_one, i, entry.path, entry.relative_path, extract_embedded_images
+    pending = dict(enumerate(inventory_entries))
+    while pending:
+        pool = extraction_pool()
+        lang = get_language()
+        futures: dict[Future[tuple[int, ExtractedFile]], int] = {
+            pool.submit(
+                _extract_task, lang, i, entry.path, entry.relative_path, extract_embedded_images
             ): i
-            for i, entry in enumerate(inventory_entries)
+            for i, entry in pending.items()
         }
-        for future in as_completed(futures):
-            if emitter and emitter.is_cancelled:
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            idx, result = future.result()
-            results_map[idx] = result
-            if emitter:
-                # D-099 : `current` = nombre de fichiers terminés (monotone),
-                # pas l'index d'inventaire — les extractions finissent dans
-                # le désordre et la barre reculait.
-                emitter.emit(
-                    ProgressEvent(
-                        file_path=result.relative_path,
-                        current=len(results_map),
-                        total=total_files,
-                        status=result.status.value,
-                        message=result.error_message,
+        try:
+            for future in as_completed(futures):
+                if emitter and emitter.is_cancelled:
+                    pool.cancel_pending()
+                    break
+                idx, result = future.result()
+                results_map[idx] = result
+                del pending[idx]
+                if emitter:
+                    # D-099 : `current` = nombre de fichiers terminés (monotone),
+                    # pas l'index d'inventaire — les extractions finissent dans
+                    # le désordre et la barre reculait.
+                    emitter.emit(
+                        ProgressEvent(
+                            file_path=result.relative_path,
+                            current=len(results_map),
+                            total=total_files,
+                            status=result.status.value,
+                            message=result.error_message,
+                        )
                     )
-                )
+        except BrokenProcessPool as exc:
+            pool.broken(str(exc) or type(exc).__name__)
+            continue  # les fichiers encore dans `pending` repartent, par threads
+        break
     if emitter and emitter.is_cancelled:
         logger.info("Analyse annulée après %d fichier(s)", len(results_map))
         return None
     return results_map
+
+
+def _extract_task(
+    lang: str, idx: int, path: Path, relative_path: str, extract_embedded_images: bool
+) -> tuple[int, ExtractedFile]:
+    """`_extract_one` tel que le pool l'exécute : dans un processus, la langue
+    des messages n'est pas héritée du parent — elle voyage avec la tâche."""
+    set_language(lang)
+    return _extract_one(idx, path, relative_path, extract_embedded_images)
 
 
 def _qualify_and_count(

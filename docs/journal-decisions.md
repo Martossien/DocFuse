@@ -2705,6 +2705,50 @@ liste qui ne connaissait que « MIT ») sans que personne ne le voie.
 `DISPLAY=:1`.
 Les deux specs PyInstaller collectent `docfuse.gui` explicitement (`collect_submodules`).
 
+### D-111 : l'extraction tourne dans un pool de processus, les threads en repli
+
+**Constat** (banc du 02/09, 181 fichiers réels dont 41 PDF, 12 Mo de texte extrait,
+64 cœurs) : 163 s en un thread, 101 s en huit threads. L'extraction est du Python
+pur (pdfminer, parseurs XML, rendu de pages) : sous le GIL, huit threads ne valent
+que 1,6 thread, et passer à seize ne change rien (101 s). En remplaçant le
+`ThreadPoolExecutor` par un `ProcessPoolExecutor` à huit processus : **48 s**, sortie
+strictement identique (mêmes 11 949 374 caractères). Le chemin critique reste le plus
+gros PDF (44 s d'OCR légitime, 38 pages images), tout le reste se range derrière.
+
+**Décisions.**
+
+1. `core/workers.py` : un pool de processus **unique par processus hôte**, créé à la
+   première demande et réutilisé entre les appels de `run_analysis` — docia appelle
+   l'orchestrateur une fois par lot de 200 fichiers, et sous Windows chaque travailleur
+   est un interpréteur à relancer (1 à 2 s) : on paie une fois par campagne, pas par lot.
+2. Contexte `spawn` partout, même sous Linux où `fork` est le défaut : pypdfium2
+   déconseille `fork` (état du moteur dupliqué), et c'est le seul mode qui se comporte
+   pareil sous Windows et Linux. Prix : les travailleurs importent `docfuse` à leur
+   démarrage (~1 s), une fois.
+3. Ce que les threads donnaient gratuitement et qu'il faut refaire entre processus :
+   les **journaux** (`QueueHandler` dans le travailleur → `QueueListener` dans le parent,
+   rejoués sous leur nom d'origine : un avertissement d'extracteur finit dans le journal
+   de l'hôte, pas sur un stderr que personne ne lit) ; la **borne OCR** (`OCR_SLOTS`
+   devient un `multiprocessing.Semaphore` transmis à l'initialisation : sans lui, huit
+   travailleurs × huit pages = 64 Tesseract simultanés) ; la **langue** des messages
+   (`get_language()` dans le parent, `set_language` dans la tâche).
+4. Repli sur les threads, jamais d'échec : pool impossible à démarrer, ou cassé en plein
+   lot (`BrokenProcessPool` — travailleur tué par l'OOM killer) → avertissement une fois,
+   les fichiers non rendus repartent par threads ; exécutable gelé sur POSIX (PyInstaller
+   n'y supporte pas `spawn`) → threads d'office ; `DOCFUSE_EXTRACTION_POOL=thread` pour
+   forcer (tests qui remplacent des extracteurs en mémoire, diagnostic).
+5. Exécutable PyInstaller (onefile) : les travailleurs sont des relancements de l'exe
+   lui-même ; `multiprocessing.freeze_support()` est appelé en tête de `__main__.main`,
+   `cli.main` et `gui.launch` (PyInstaller l'exige sur toutes les plateformes ; sans lui,
+   boucle infinie de relancements). La CI Windows le **prouve** : l'exe extrait les
+   fixtures (`--input … --output …`) et le corpus doit dépasser 10 Ko.
+6. `MAX_WORKERS` reste borné à 8 : ~100 Mo par processus une fois les extracteurs chargés,
+   et aucun gain mesuré de 8 à 16.
+
+**Écarté.** Limiter les threads OpenMP de Tesseract (43,9 → 43,8 s : le binaire n'en
+use pas) ; monter le nombre de travailleurs (aucun gain) ; baisser la résolution OCR ou
+n'utiliser qu'une langue (plus vite, mais au prix de la qualité — hors sujet).
+
 ---
 
-*Fin du journal des décisions — Session 18.*
+*Fin du journal des décisions — Session 19.*

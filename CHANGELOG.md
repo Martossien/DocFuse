@@ -10,7 +10,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-_Rien pour l'instant._
+### Modifié
+
+- **Extraction dans un pool de processus** (D-111, `core/workers.py`) : pdfminer,
+  parseurs XML et rendu de pages sont du Python pur, et sous le GIL huit threads
+  ne valaient que 1,6 thread. Mesure sur 181 fichiers réels (41 PDF, 12 Mo de
+  texte) : 163 s en un thread, 101 s en huit threads, **48 s en huit processus**,
+  sortie strictement identique. Contexte `spawn` sur tous les systèmes (pypdfium2
+  déconseille `fork`), un seul pool réutilisé d'un appel à l'autre (sous Windows
+  un travailleur est un interpréteur à relancer : payé une fois par campagne),
+  journaux des travailleurs remontés au parent, sémaphore OCR **inter-processus**
+  (`OCR_MAX_CONCURRENCY` vaut pour tout le pool, comme avant pour les threads),
+  langue des messages transmise avec chaque tâche. Repli automatique sur les
+  threads si le pool ne démarre pas ou se casse (aucun fichier perdu : ce qui
+  n'était pas rendu est refait), d'office pour un exécutable gelé sur POSIX ;
+  `DOCFUSE_EXTRACTION_POOL=thread` force les threads. `freeze_support()` aux
+  points d'entrée (`__main__`, `cli.main`, `gui.launch`) pour l'exe PyInstaller.
+- **CI** : l'exe Windows extrait réellement les fixtures (`--input … --output …`)
+  en plus d'ouvrir sa fenêtre — la preuve que le pool tourne gelé.
 
 ## [0.2.1] — 2026-09-02
 

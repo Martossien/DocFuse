@@ -11,6 +11,7 @@ Historique des corrections (I-xx, M-xx, C-xx, D-xxx) : voir
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
 import sys
 import threading
@@ -924,6 +925,7 @@ def launch() -> None:
     d'elle-même après `SMOKE_CLOSE_MS` — c'est le test de fumée de l'exécutable
     empaqueté (CI), qui prouve que Tk, CustomTkinter et tkdnd sont embarqués.
     """
+    multiprocessing.freeze_support()  # D-111 : travailleurs du pool dans l'exe
     from docfuse.extractors.xlsx import silence_openpyxl_warnings
 
     silence_openpyxl_warnings()

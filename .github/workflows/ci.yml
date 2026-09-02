@@ -115,6 +115,22 @@ jobs:
           $p = Start-Process -FilePath "dist\DocFuse.exe" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "l'exe a rendu $($p.ExitCode)"; exit $p.ExitCode }
 
+      - name: Smoke test de l'exe (extraction réelle, pool de processus gelé)
+        # D-111 : l'extraction tourne dans un pool de processus ; dans l'exe
+        # onefile chaque travailleur est un relancement de DocFuse.exe que
+        # `freeze_support` doit intercepter. Une extraction des fixtures par
+        # l'exe prouve que ça marche gelé sous Windows — pas seulement en
+        # tests Python. Sortie attendue : un corpus non vide.
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          $p = Start-Process -FilePath "dist\DocFuse.exe" -ArgumentList @("--input", "tests\fixtures", "--output", "smoke\corpus.md", "--no-recursive", "--yes") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "l'extraction par l'exe a rendu $($p.ExitCode)"; exit $p.ExitCode }
+          $corpus = Get-Item "smoke\corpus.md"
+          if ($corpus.Length -lt 10000) { Write-Error "corpus trop court : $($corpus.Length) octets"; exit 1 }
+          Write-Host "corpus extrait par l'exe : $($corpus.Length) octets"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

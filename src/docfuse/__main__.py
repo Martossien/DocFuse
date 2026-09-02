@@ -3,10 +3,15 @@
 C-11: Sans arguments → lance la GUI. Avec arguments → lance la CLI.
 """
 
+import multiprocessing
 import sys
 
 
 def main() -> None:
+    # D-111 : dans l'exécutable gelé, chaque travailleur du pool d'extraction
+    # est un relancement de l'exe avec des arguments à lui ; `freeze_support`
+    # l'intercepte ici, avant tout aiguillage et tout import lourd.
+    multiprocessing.freeze_support()
     if len(sys.argv) <= 1:
         # Pas d'arguments → lancer la GUI (CdC §2.1, §2.3)
         try:
