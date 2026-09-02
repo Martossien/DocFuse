@@ -10,6 +10,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+_Rien pour l'instant._
+
+## [0.2.2] — 2026-09-02
+
 ### Modifié
 
 - **Extraction dans un pool de processus** (D-111, `core/workers.py`) : pdfminer,

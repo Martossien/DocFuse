@@ -8,7 +8,7 @@
 *Portable Windows tool that fuses documents into a single corpus for an LLM.*
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.1_beta-orange.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.2_beta-orange.svg)](./CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue.svg)](./pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#-compatibilité--compatibility)
 [![Tests](https://img.shields.io/badge/tests-555%20passed%20%7C%2039%20skipped-success.svg)](./tests)
